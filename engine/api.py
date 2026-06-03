@@ -17,6 +17,7 @@ import os
 import json
 import datetime
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -74,6 +75,64 @@ def place_coords(name):
         if p["name"].lower() == n:
             return p["lat"], p["lng"]
     return 9.2, 8.2  # Nigeria centroid fallback
+
+
+_geocache = {}
+
+
+def geocode(q):
+    """Resolve ANY Nigerian place to coordinates: local gazetteer first, then free
+    OpenStreetMap / Nominatim (no API key). Cached. Lets users type any town/village."""
+    q = (q or "").strip()
+    if not q:
+        return None
+    for p in PLACES:
+        if p["name"].lower() == q.lower():
+            return {"name": p["name"], "lat": p["lat"], "lng": p["lng"], "source": "gazetteer"}
+    key = q.lower()
+    if key in _geocache:
+        return _geocache[key]
+    res = None
+    try:
+        url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode(
+            {"q": q + ", Nigeria", "format": "json", "limit": "1", "countrycodes": "ng"})
+        req = urllib.request.Request(url, headers={"User-Agent": "DeySafe/0.1 (safety prototype)"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            arr = json.loads(r.read().decode("utf-8"))
+        if arr:
+            res = {"name": q.title(), "lat": float(arr[0]["lat"]), "lng": float(arr[0]["lon"]),
+                   "source": "osm", "display": arr[0].get("display_name", "")}
+    except Exception:
+        res = None
+    _geocache[key] = res
+    return res
+
+
+def coords_for(place):
+    """Best coordinates for a TYPED place: gazetteer -> free OSM -> Nigeria centroid.
+    Lets FindMe cases & sightings pin anywhere a user types, not just the 48 seed towns."""
+    g = geocode(place)
+    if g:
+        return g["lat"], g["lng"]
+    return place_coords(place)
+
+
+def _hav(a, b):
+    import math
+    (la1, lo1), (la2, lo2) = a, b
+    R = 6371.0
+    p1, p2 = math.radians(la1), math.radians(la2)
+    dp, dl = math.radians(la2 - la1), math.radians(lo2 - lo1)
+    x = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(x))
+
+
+def risk_at(incidents, lat, lng, radius_km=60):
+    rel = [i for i in incidents if _hav((lat, lng), (i["lat"], i["lng"])) <= radius_km]
+    top = max((RISK.get(i["status"], 1) for i in rel), default=0)
+    level = public_level(top)
+    return {"place": None, "lat": lat, "lng": lng, "level": level, "guidance": PUBLIC_GUIDANCE[level],
+            "count": len(rel), "incidents": sorted(rel, key=lambda i: -i["confidence"])[:6]}
 
 
 def public_level(top):
@@ -219,8 +278,16 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/ai-status":
             return self._json({"ai": ai.available(), "provider": ai.provider(), "keys": ai.key_count()})
         if u.path == "/api/risk":
-            place = urllib.parse.parse_qs(u.query).get("place", [""])[0]
-            return self._json(risk_for(public_incidents(db), place))
+            q = urllib.parse.parse_qs(u.query)
+            if q.get("lat") and q.get("lng"):
+                try:
+                    return self._json(risk_at(public_incidents(db), float(q["lat"][0]), float(q["lng"][0])))
+                except Exception:
+                    pass
+            return self._json(risk_for(public_incidents(db), q.get("place", [""])[0]))
+        if u.path == "/api/geocode":
+            g = geocode(urllib.parse.parse_qs(u.query).get("q", [""])[0])
+            return self._json({"ok": bool(g), "result": g})
         return self._static(u.path)
 
     def do_POST(self):
@@ -250,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
             name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()
             if not name or not place:
                 return self._json({"ok": False, "error": "name and place required"}, 400)
-            lat, lng = place_coords(place)
+            lat, lng = coords_for(place)
             try:
                 hrs = float(data.get("hours_ago") or 1)
             except Exception:
@@ -299,7 +366,7 @@ class Handler(BaseHTTPRequestHandler):
             place = (data.get("place") or "").strip()
             if not place:
                 return self._json({"ok": False, "error": "place required"}, 400)
-            lat, lng = place_coords(place)
+            lat, lng = coords_for(place)
             try:
                 hrs = float(data.get("hours_ago") or 0.5)
             except Exception:

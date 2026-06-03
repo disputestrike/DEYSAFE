@@ -95,11 +95,12 @@
     <div class="chip" id="chip">—</div>
   </header>
   <div id="alertBanner" class="abanner" style="display:none"></div>
+  <datalist id="placelist"></datalist>
   <main>
     <section class="view active" id="v-home">
       <div id="map"></div>
       <div class="panel">
-        <div class="srow"><select id="areaSelect" aria-label="Your area"></select><span class="pill" id="lvpill">—</span></div>
+        <div class="srow"><input id="areaSelect" list="placelist" autocomplete="off" placeholder="Type your town or area…" aria-label="Your area" /><span class="pill" id="lvpill">—</span></div>
         <div class="guide" id="guide"></div>
         <div class="chips">
           <button onclick="go('report')">⚠ Report danger</button>
@@ -114,8 +115,8 @@
 
     <section class="view pad" id="v-waka">
       <h2 class="t">WakaSafe — check your road</h2>
-      <label class="f">From</label><select id="wFrom"></select>
-      <label class="f">To</label><select id="wTo"></select>
+      <label class="f">From (type any place)</label><input id="wFrom" list="placelist" autocomplete="off" placeholder="Where you are…" />
+      <label class="f">To (type any place)</label><input id="wTo" list="placelist" autocomplete="off" placeholder="Where you're going…" />
       <button class="btn" onclick="checkRoute()">Check route</button>
       <div id="routeBox"></div>
       <p class="note">Route status is the worst risk level along your endpoints. Plan before you move.</p>
@@ -125,7 +126,7 @@
       <h2 class="t">Report danger</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Anonymous. We never ask who you are. <b>Tip:</b> tap the map to set the spot.</p>
       <div class="types" id="typeGrid"></div>
-      <label class="f">Nearest town / area</label><select id="rPlace"></select>
+      <label class="f">Nearest town / area</label><input id="rPlace" list="placelist" autocomplete="off" placeholder="Type the place…" />
       <label class="f">What's happening? (no names — what &amp; where)</label>
       <textarea id="rDesc" placeholder="e.g. Armed men on motorbikes stopping vehicles"></textarea>
       <button class="btn" id="reportBtn" onclick="sendReport()">Submit — anonymously</button>
@@ -145,7 +146,7 @@
       <label class="f">Name / group</label><input id="mName" placeholder="Full name, or e.g. '20 schoolgirls'" />
       <div style="display:flex;gap:10px"><div style="flex:1"><label class="f">How many people</label><input id="mCount" type="number" value="1" min="1" /></div>
         <div style="flex:1"><label class="f">Age(s)</label><input id="mAge" placeholder="16" /></div></div>
-      <label class="f">Last seen — area</label><select id="mPlace"></select>
+      <label class="f">Last seen — area</label><input id="mPlace" list="placelist" autocomplete="off" placeholder="Type the place…" />
       <label class="f">Exact place / school / landmark</label><input id="mExact" placeholder="e.g. Government Science School, Kankara" />
       <label class="f">Hours since last seen</label><input id="mHours" type="number" value="2" min="0" />
       <label class="f">Vehicle</label><input id="mVeh" placeholder="e.g. White Hilux, no plate" />
@@ -232,7 +233,7 @@ function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('f
     </div>
     <h2 class="t" style="margin-top:16px">Sighting trail</h2>${sights}
     <h2 class="t" style="margin-top:16px">Did you see them? Report a sighting</h2>
-    <label class="f">Where</label><select id="sPlace"></select>
+    <label class="f">Where (type any place)</label><input id="sPlace" list="placelist" autocomplete="off" placeholder="Where seen…" />
     <label class="f">How long ago (hours)</label><input id="sHours" type="number" value="0.5" min="0" step="0.5" />
     <label class="f">Note (vehicle, direction…)</label><input id="sNote" placeholder="e.g. White Hilux heading north" />
     <button class="btn" id="sawBtn" onclick="addSighting(${m.id})">📍 I saw them — tighten the search</button>
@@ -241,7 +242,6 @@ function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('f
       <button id="shareBtn" onclick="shareFlyer(${m.id})">📤 Share flyer</button>
       <button id="recoverBtn" onclick="setCaseStatus(${m.id},'recovered')">✓ Mark recovered</button>
     </div>`;
-  $('#sPlace').innerHTML=PLACES.map(x=>`<option>${x}</option>`).join('');
   $('#sPlace').value = (m.sightings&&m.sightings.length)?m.sightings[m.sightings.length-1].place:m.place;
   $('#caseDetail').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
@@ -261,8 +261,7 @@ function shareFlyer(id){const m=MISS.find(x=>x.id===id);if(!m)return;
   else{try{navigator.clipboard.writeText(txt);}catch(e){}alert('Flyer copied:\n\n'+txt);}}
 
 async function loadPlaces(){const m=await fetch('/api/places').then(r=>r.json());TYPES=m.types;PLACES=m.places;PLACE_COORDS=m.coords||{};
-  const o=m.places.map(p=>`<option>${p}</option>`).join('');
-  ['#areaSelect','#rPlace','#wFrom','#wTo','#mPlace'].forEach(s=>$(s).innerHTML=o);
+  $('#placelist').innerHTML=m.places.map(p=>`<option value="${p}">`).join('');
   $('#areaSelect').value='Kaduna';$('#wFrom').value='Abuja';$('#wTo').value='Kaduna';$('#mPlace').value='Kankara';
   $('#typeGrid').innerHTML=TYPES.map(t=>`<button onclick="pick(this,'RTYPE','${t}')">${t.replace(/_/g,' ')}</button>`).join('');
   $('#typeGrid').firstChild.classList.add('on');window.RTYPE=TYPES[0];
@@ -271,9 +270,13 @@ async function loadPlaces(){const m=await fetch('/api/places').then(r=>r.json())
   $('#sosGrid').firstChild.classList.add('on');}
 function pick(el,k,v){el.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));el.classList.add('on');
   if(k==='RTYPE')window.RTYPE=v;else SOS_TYPE=v;}
-async function loadLevel(){const p=$('#areaSelect').value;const r=await fetch('/api/risk?place='+encodeURIComponent(p)).then(r=>r.json());
+async function geocodeClient(q){try{const r=await fetch('/api/geocode?q='+encodeURIComponent(q)).then(x=>x.json());return r.result;}catch(e){return null;}}
+async function loadLevel(){const p=$('#areaSelect').value.trim();if(!p)return;
+  let r,g=await geocodeClient(p);
+  if(g){r=await fetch('/api/risk?lat='+g.lat+'&lng='+g.lng).then(x=>x.json());if(map){try{map.setView([g.lat,g.lng],9);}catch(e){}}}
+  else{r=await fetch('/api/risk?place='+encodeURIComponent(p)).then(x=>x.json());}
   chip(r.level);const pill=$('#lvpill');pill.textContent=r.level;pill.style.background=COL[r.level]+'22';pill.style.color=COL[r.level];
-  $('#guide').textContent=r.guidance;}
+  $('#guide').textContent=r.guidance+' ('+(r.count||0)+' nearby)';}
 async function loadData(){const[a,b,al]=await Promise.all([fetch('/api/incidents').then(r=>r.json()),fetch('/api/missing').then(r=>r.json()),fetch('/api/alerts').then(r=>r.json())]);
   INCS=a.incidents||[];MISS=b.missing||[];renderBanner(al.alerts||[]);drawMarkers();renderHome();renderMissList();}
 function renderBanner(alerts){const el=$('#alertBanner');const a=alerts[0];
@@ -285,10 +288,13 @@ function distToSeg(p,a,b){var s=Math.cos(Math.PI/180*((a[0]+b[0])/2));
   var ax=a[1]*s,ay=a[0],bx=b[1]*s,by=b[0],px=p[1]*s,py=p[0];
   var dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy;var t=L2?((px-ax)*dx+(py-ay)*dy)/L2:0;t=Math.max(0,Math.min(1,t));
   var cx=ax+t*dx,cy=ay+t*dy;return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy))*111;}
-async function checkRoute(){const a=$('#wFrom').value,b=$('#wTo').value;
-  const[ra,rb]=await Promise.all([fetch('/api/risk?place='+encodeURIComponent(a)).then(r=>r.json()),fetch('/api/risk?place='+encodeURIComponent(b)).then(r=>r.json())]);
-  const A=PLACE_COORDS[a],B=PLACE_COORDS[b];
-  let onRoute=(A&&B)?INCS.filter(function(i){return distToSeg([i.lat,i.lng],A,B)<55;}):[];
+async function checkRoute(){const a=$('#wFrom').value.trim(),b=$('#wTo').value.trim();
+  $('#routeBox').innerHTML='<p class="note">Finding your route…</p>';
+  const[ga,gb]=await Promise.all([geocodeClient(a),geocodeClient(b)]);
+  if(!ga||!gb){$('#routeBox').innerHTML='<p class="note">Couldn\'t find one of those places — try a nearby town name.</p>';return;}
+  const aName=ga.name,bName=gb.name,A=[ga.lat,ga.lng],B=[gb.lat,gb.lng];
+  const[ra,rb]=await Promise.all([fetch('/api/risk?lat='+ga.lat+'&lng='+ga.lng).then(r=>r.json()),fetch('/api/risk?lat='+gb.lat+'&lng='+gb.lng).then(r=>r.json())]);
+  let onRoute=INCS.filter(function(i){return distToSeg([i.lat,i.lng],A,B)<55;});
   onRoute.sort(function(x,y){return (ORD[LV[y.status]]||0)-(ORD[LV[x.status]]||0);});
   let worst=ORD[ra.level]>=ORD[rb.level]?ra.level:rb.level;
   onRoute.forEach(function(i){var l=LV[i.status];if((ORD[l]||0)>(ORD[worst]||0))worst=l;});

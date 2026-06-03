@@ -8,7 +8,7 @@ against this document.
 MEASURE (pass rate) → ADJUST. Nothing is "done" until it's in the matrix AND passes its gate.
 
 **Run the automated gate:** `python validate.py` (against the live server).
-**Last run: 2026-06-02 → 33 passed / 0 failed** (16 endpoint + 14 chaos + 3 functional).
+**Last run: 2026-06-03 → 38 passed / 0 failed** (19 endpoint + 16 chaos + 3 functional).
 
 Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your account/key · ⛔ excluded by a safety bright-line
 
@@ -30,10 +30,11 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Feature | Source | Where it lives | Status | Validation | Result |
 |---|---|---|---|---|---|
 | Map-first home (Leaflet + markers) | Doc P3.1 | `app/index.html` | ✅ | served HTML / browser | PASS |
-| Area risk GREEN/YELLOW/ORANGE/RED + guidance | Doc P4 / GDACS | `api.risk_for` + index | ✅ | `GET /api/risk` + chaos | PASS |
+| Area risk GREEN/YELLOW/ORANGE/RED + guidance (typed area, proximity) | Doc P4 / GDACS | `api.risk_for` + `api.risk_at` + index | ✅ | `GET /api/risk` (place + lat/lng) + chaos | PASS |
 | Anonymous incident reporting | Doc P3.2 | `api.report` + index | ✅ | `POST /api/report` + chaos | PASS |
 | Public alert banner (top of screen) | Doc P3.1 | `index.renderBanner` + `api.alerts` | ✅ | `/api/alerts` + verify fires | PASS |
-| WakaSafe route detail (level + summary + incidents-on-corridor + map) | DeySafe add (Tesla) | `index.checkRoute` + `distToSeg` | ✅ | Abuja→Kaduna detail | PASS |
+| WakaSafe route detail — type ANY from/to (level + summary + incidents-on-corridor + map) | DeySafe add (Tesla) | `index.checkRoute` (geocoded) + `distToSeg` | ✅ | Abuja→Kaduna detail | PASS |
+| **Free-text location** — type ANY town/village (not a 48-item dropdown) | user CAPA #1 | `api.geocode` gazetteer→OSM/Nominatim (no key) + index `geocodeClient` + shared `<datalist>` | ✅ | `/api/geocode` + `/api/risk?lat&lng` + off-centroid pin | PASS |
 | Tap-map-to-report | DeySafe add | `index.onMapTap` | ✅ | manual | PASS |
 | Action buttons 2×2 grid (no sideways scroll) | user feedback | `index .chips` | ✅ | manual | PASS |
 | Responsive desktop (no page-scroll) | user feedback | `index @media` (`#v-home.active`) | ✅ | manual | PASS |
@@ -50,6 +51,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Time-based search radius ("triangulation") | DeySafe add | `api.missing_with_radius` | ✅ | flow C | PASS |
 | Case states (active/located/recovered) | DeySafe add | `api.case-status` | ✅ | `POST /api/case-status` | PASS |
 | Shareable flyer · map trail | DeySafe add | `index.shareFlyer/drawMarkers` | ✅ | manual | PASS |
+| Type ANY last-seen / sighting place (real coords, not centroid) | user CAPA #1 | `api.coords_for` (gazetteer→OSM) + index inputs | ✅ | gate: off-centroid pin | PASS |
 
 ### D. SHIELD operator console
 | Feature | Source | Where it lives | Status | Validation | Result |
@@ -102,7 +104,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 ---
 
 ## 3. NOT built yet (honest scope — ~a third of the master doc done)
-Production stack (Next.js + Supabase/PostGIS + Vercel) · 774-LGA / street-level geo (currently ~48 towns, approximate pins; needs GPS + HDX/OSM) · user accounts & auth · reputation system · live push/WhatsApp/SMS · satellite SAR/VIIRS pipeline · 72-hour risk forecast · NRT integration · scheduled cron scrapers · Telegram/Facebook/YouTube monitors · predictive model · evidentiary chain-of-custody.
+Production stack (Next.js + Supabase/PostGIS + Vercel) · **house-level GPS precision** (✅ typed places now resolve ANYWHERE in Nigeria via OSM/Nominatim — the 48-town wall is gone — but pins are town-centroid accurate, not house-number) · **report→incident pipeline is still gazetteer-based** (`geoparse`): a typed *report* of an unrecognised town is logged + audited but may not yet create a map incident — NEXT CAPA · user accounts & auth · reputation system · live push/WhatsApp/SMS · satellite SAR/VIIRS pipeline · 72-hour risk forecast · NRT integration · scheduled cron scrapers · Telegram/Facebook/YouTube monitors · predictive model · evidentiary chain-of-custody.
 
 **Gated on YOU:** an AI key (turns on real AI) · production accounts (Supabase/Vercel) · channel keys (push/WhatsApp/SMS).
 
