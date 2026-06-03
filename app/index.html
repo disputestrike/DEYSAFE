@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="icon" href="/icon.svg" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<title>DeySafe — Know before you waka</title>
+<style>
+  :root{
+    --bg:#f4f6fa;--card:#fff;--line:#e6ebf2;--ink:#0f1b2d;--muted:#5d6b7e;--faint:#8a97a8;
+    --brand:#1d6fe0;--brand-d:#1559b8;--green:#1aa260;--yellow:#e0a106;--orange:#ef6c12;--red:#d92d20;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{background:#e9edf3;color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;justify-content:center;min-height:100vh}
+  .app{width:100%;max-width:460px;background:var(--bg);min-height:100vh;display:flex;flex-direction:column;position:relative}
+  .top{display:flex;align-items:center;gap:10px;padding:13px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:600}
+  .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand-d));display:grid;place-items:center}
+  .logo svg{width:18px;height:18px}
+  .brand b{font-size:16px;letter-spacing:-.01em}.brand span{display:block;font-size:10.5px;color:var(--muted);margin-top:-1px}
+  .chip{margin-left:auto;font-size:11px;font-weight:700;padding:5px 10px;border-radius:999px}
+  .abanner{display:flex;align-items:flex-start;gap:8px;padding:10px 14px;color:#fff;font-size:12.5px;line-height:1.4}
+  .abanner.L1{background:var(--green)}.abanner.L2{background:var(--yellow);color:#3a2c00}.abanner.L3{background:var(--orange)}.abanner.L4{background:var(--red)}
+  .abanner b{font-weight:800;white-space:nowrap}.abanner .x{margin-left:auto;cursor:pointer;opacity:.85;font-weight:700}
+  main{flex:1;overflow:auto;padding-bottom:74px}
+  .view{display:none}.view.active{display:block}
+  .pad{padding:14px 16px}
+  h2.t{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--faint);margin:4px 2px 10px;font-weight:700}
+  #map{height:300px;width:100%;z-index:0}
+  .panel{padding:12px 16px}
+  .srow{display:flex;gap:10px;align-items:center}
+  select,input,textarea{width:100%;background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:11px;padding:12px 13px;font:inherit;font-size:15px}
+  select:focus,input:focus,textarea:focus{outline:none;border-color:var(--brand)}
+  textarea{min-height:84px;resize:vertical}
+  label.f{display:block;font-size:12px;color:var(--muted);font-weight:600;margin:12px 2px 6px}
+  .pill{font-size:12px;font-weight:800;padding:7px 12px;border-radius:999px;white-space:nowrap}
+  .guide{color:var(--muted);font-size:13px;margin:9px 2px 0}
+  .chips{display:flex;gap:8px;overflow-x:auto;margin:14px 0 4px;padding-bottom:2px}
+  .chips button{flex:none;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 13px;font:inherit;font-weight:700;font-size:13px;cursor:pointer;color:var(--ink)}
+  .chips button:nth-child(1){color:#c2480e;background:#fdf1ea;border-color:#f6d2bf}
+  .chips button:nth-child(2){color:#fff;background:var(--red);border-color:var(--red)}
+  .segtabs{display:flex;gap:6px;margin:14px 0 10px}
+  .seg{flex:1;background:none;border:none;border-bottom:2px solid var(--line);padding:9px;font:inherit;font-weight:700;font-size:13px;color:var(--faint);cursor:pointer}
+  .seg.on{color:var(--brand);border-color:var(--brand)}
+  .item{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--faint);border-radius:11px;padding:11px 12px;margin-bottom:9px;cursor:pointer}
+  .item.RED{border-left-color:var(--red)}.item.ORANGE{border-left-color:var(--orange)}.item.YELLOW{border-left-color:var(--yellow)}.item.GREEN{border-left-color:var(--green)}
+  .item.miss{border-left-color:var(--brand)}
+  .item .r1{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .item .pl{font-weight:700;font-size:14.5px}
+  .badge{font-size:10px;font-weight:800;padding:3px 8px;border-radius:999px;color:#fff}
+  .badge.RED{background:var(--red)}.badge.ORANGE{background:var(--orange)}.badge.YELLOW{background:var(--yellow);color:#5a4300}.badge.GREEN{background:var(--green)}.badge.miss{background:var(--brand)}
+  .item .ds{color:var(--muted);font-size:13px;margin-top:4px}.item .mt{color:var(--faint);font-size:11.5px;margin-top:6px}
+  .btn{width:100%;border:none;border-radius:12px;padding:14px;font:inherit;font-weight:700;font-size:15px;background:var(--brand);color:#fff;cursor:pointer;margin-top:14px}
+  .btn.red{background:var(--red)}.btn.sec{background:var(--card);border:1px solid var(--line);color:var(--ink)}
+  .types{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:6px}
+  .types button{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:13px 10px;font:inherit;font-weight:700;font-size:14px;cursor:pointer;color:var(--ink);text-align:left}
+  .types button.on{border-color:var(--brand);background:#eef4fe;color:var(--brand-d)}
+  .ok{background:#eafaf0;border:1px solid #b7e6c8;color:#15703f;border-radius:11px;padding:12px;margin-top:14px;font-size:13.5px;display:none}
+  .lvl{border-radius:14px;padding:16px;margin-top:12px;border:1px solid var(--line)}
+  .lvl.GREEN{background:#f0faf4}.lvl.YELLOW{background:#fdf8ec}.lvl.ORANGE{background:#fdf1ea}.lvl.RED{background:#fcecea}
+  .lvl b{font-size:18px;font-weight:800}.lvl.GREEN b{color:var(--green)}.lvl.YELLOW b{color:var(--yellow)}.lvl.ORANGE b{color:var(--orange)}.lvl.RED b{color:var(--red)}
+  .case{background:#eef4fe;border:1px solid #cfe0fb;border-radius:14px;padding:16px;margin-top:12px}
+  .case b{font-size:17px;color:var(--ink)}
+  .kv{font-size:13px;color:var(--muted);margin-top:8px}.kv b{font-size:13px;color:var(--ink)}
+  .sight{font-size:13px;color:var(--ink);padding:8px 0;border-top:1px solid var(--line);display:flex;gap:8px}
+  .sight .dot{color:#0ea5e9}
+  .note{color:var(--faint);font-size:12px;text-align:center;margin:14px 8px 0;line-height:1.5}
+  .mm{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.3);border:2px solid #fff}
+  .mm span{transform:rotate(45deg);font-size:13px}
+  nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:600}
+  nav button{flex:1;background:none;border:none;color:var(--faint);padding:9px 0 11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;font:inherit;font-size:10.5px;font-weight:600}
+  nav button svg{width:21px;height:21px}nav button.active{color:var(--brand)}
+  @media(min-width:860px){
+    body{background:#d9e0ea}
+    .app{max-width:1160px}
+    nav{position:static;order:1;width:auto;max-width:none;transform:none;justify-content:flex-start;border-top:none;border-bottom:1px solid var(--line);padding:0 8px}
+    nav button{flex:none;flex-direction:row;gap:8px;padding:14px 18px;font-size:13.5px}
+    nav button svg{width:18px;height:18px}
+    main{order:2;padding-bottom:0;display:flex;flex-direction:column;flex:1}
+    #v-home{display:flex;flex-direction:row;flex:1}
+    #v-home .panel{order:0;width:384px;flex:none;height:calc(100vh - 108px);overflow:auto;border-right:1px solid var(--line)}
+    #v-home #map{order:1;flex:1;height:calc(100vh - 108px)}
+    .view.pad{max-width:600px;margin:0 auto;width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z" fill="#fff"/></svg></div>
+    <div class="brand"><b>DeySafe</b><span>Know before you waka</span></div>
+    <div class="chip" id="chip">—</div>
+  </header>
+  <div id="alertBanner" class="abanner" style="display:none"></div>
+  <main>
+    <section class="view active" id="v-home">
+      <div id="map"></div>
+      <div class="panel">
+        <div class="srow"><select id="areaSelect" aria-label="Your area"></select><span class="pill" id="lvpill">—</span></div>
+        <div class="guide" id="guide"></div>
+        <div class="chips">
+          <button onclick="go('report')">⚠ Report danger</button>
+          <button onclick="go('sos')">🆘 Help</button>
+          <button onclick="go('waka')">🛣 Check road</button>
+          <button onclick="go('findme')">🔎 Missing</button>
+        </div>
+        <div class="segtabs"><button class="seg on" data-seg="alerts">Nearby alerts</button><button class="seg" data-seg="missing">Missing persons</button></div>
+        <div id="homeList"></div>
+      </div>
+    </section>
+
+    <section class="view pad" id="v-waka">
+      <h2 class="t">WakaSafe — check your road</h2>
+      <label class="f">From</label><select id="wFrom"></select>
+      <label class="f">To</label><select id="wTo"></select>
+      <button class="btn" onclick="checkRoute()">Check route</button>
+      <div id="routeBox"></div>
+      <p class="note">Route status is the worst risk level along your endpoints. Plan before you move.</p>
+    </section>
+
+    <section class="view pad" id="v-report">
+      <h2 class="t">Report danger</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Anonymous. We never ask who you are.</p>
+      <div class="types" id="typeGrid"></div>
+      <label class="f">Nearest town / area</label><select id="rPlace"></select>
+      <label class="f">What's happening? (no names — what &amp; where)</label>
+      <textarea id="rDesc" placeholder="e.g. Armed men on motorbikes stopping vehicles"></textarea>
+      <button class="btn" id="reportBtn" onclick="sendReport()">Submit — anonymously</button>
+      <div class="ok" id="okBox"></div>
+    </section>
+
+    <section class="view pad" id="v-sos">
+      <h2 class="t">What is happening?</h2>
+      <div class="types" id="sosGrid"></div>
+      <button class="btn red" onclick="sendSOS()">Send alert to my circle</button>
+      <div class="ok" id="sosOk"></div>
+      <p class="note">Shared only with the trusted contacts you choose. DeySafe never auto-dispatches armed responders.</p>
+    </section>
+
+    <section class="view pad" id="v-findme">
+      <h2 class="t">FindMe — report a missing person</h2>
+      <label class="f">Name / group</label><input id="mName" placeholder="Full name, or e.g. '20 schoolgirls'" />
+      <div style="display:flex;gap:10px"><div style="flex:1"><label class="f">How many people</label><input id="mCount" type="number" value="1" min="1" /></div>
+        <div style="flex:1"><label class="f">Age(s)</label><input id="mAge" placeholder="16" /></div></div>
+      <label class="f">Last seen — area</label><select id="mPlace"></select>
+      <label class="f">Exact place / school / landmark</label><input id="mExact" placeholder="e.g. Government Science School, Kankara" />
+      <label class="f">Hours since last seen</label><input id="mHours" type="number" value="2" min="0" />
+      <label class="f">Vehicle</label><input id="mVeh" placeholder="e.g. White Hilux, no plate" />
+      <label class="f">Clothing</label><input id="mClo" placeholder="e.g. Blue school uniform" />
+      <label class="f">Direction last headed</label><input id="mDir" placeholder="e.g. North toward Jibia" />
+      <button class="btn" id="caseBtn" onclick="sendMissing()">Open search case</button>
+      <div class="ok" id="mOk"></div>
+      <h2 class="t" style="margin-top:20px">Active cases — tap to open</h2>
+      <div id="missList"></div>
+      <div id="caseDetail"></div>
+    </section>
+  </main>
+
+  <nav>
+    <button class="active" data-v="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 20l-5-2V6l5 2 6-2 5 2v12l-5-2-6 2zM9 8v12M15 6v12"/></svg>Map</button>
+    <button data-v="waka"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19l8-14 8 14M9 19l3-5 3 5"/></svg>WakaSafe</button>
+    <button data-v="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Report</button>
+    <button data-v="sos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg>SOS</button>
+    <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>FindMe</button>
+  </nav>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $=(s)=>document.querySelector(s);
+const COL={RED:'#d92d20',ORANGE:'#ef6c12',YELLOW:'#e0a106',GREEN:'#1aa260'};
+const LV={verified:'RED',needs_human_review:'ORANGE',corroborated:'ORANGE',candidate_unverified:'YELLOW'};
+const ORD={GREEN:0,YELLOW:1,ORANGE:2,RED:3};
+let map,incLayer,missLayer,routeLayer,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
+
+function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
+function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>'+e+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});}
+
+function initMap(){
+  map=L.map('map',{zoomControl:true,attributionControl:false}).setView([9.2,8.2],6);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd'}).addTo(map);
+  incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);
+}
+function drawMarkers(){
+  incLayer.clearLayers();missLayer.clearLayers();
+  INCS.forEach(i=>{const lv=LV[i.status]||'YELLOW';
+    L.circleMarker([i.lat,i.lng],{radius:9,color:COL[lv],weight:2,fillColor:COL[lv],fillOpacity:.45}).addTo(incLayer)
+     .bindPopup('<b>'+i.location_name+', '+i.state+'</b><br>'+lv+' · '+i.type.replace(/_/g,' ')+'<br>'+(i.status==='verified'?'Verified':'Developing'));});
+  MISS.forEach(m=>{
+    L.circle([m.search_lat,m.search_lng],{radius:m.radius_km*1000,color:'#1d6fe0',weight:1,dashArray:'6',fillColor:'#1d6fe0',fillOpacity:.07}).addTo(missLayer);
+    const pts=[[m.lat,m.lng]];
+    L.marker([m.lat,m.lng],{icon:missIcon('📍')}).addTo(missLayer).bindPopup('Last seen: '+m.place);
+    (m.sightings||[]).forEach(s=>{pts.push([s.lat,s.lng]);
+      L.circleMarker([s.lat,s.lng],{radius:5,color:'#0ea5e9',weight:2,fillColor:'#0ea5e9',fillOpacity:.85}).addTo(missLayer).bindPopup('Sighting: '+s.place);});
+    if(pts.length>1)L.polyline(pts,{color:'#1d6fe0',weight:2,dashArray:'4',opacity:.6}).addTo(missLayer);
+    L.marker([m.search_lat,m.search_lng],{icon:missIcon('🔎')}).addTo(missLayer)
+     .bindPopup('<b>'+m.name+'</b> ('+(m.age||'?')+')<br>Search radius: '+m.radius_km+' km · '+m.sighting_count+' sighting(s)');});
+}
+function itemInc(i){const lv=LV[i.status]||'YELLOW';return `<div class="item ${lv}" onclick="focusPt(${i.lat},${i.lng})">
+  <div class="r1"><span class="pl">${i.location_name}, ${i.state}</span><span class="badge ${lv}">${lv}</span></div>
+  <div class="ds">${i.summary||''}</div><div class="mt">${i.status==='verified'?'● Verified':'● Developing'} · ${i.type.replace(/_/g,' ')}</div></div>`;}
+function itemMiss(m){var grp=(m.count>1)?` · GROUP of ${m.count}`:'';
+  return `<div class="item miss" onclick="openCase(${m.id})">
+  <div class="r1"><span class="pl">${m.name}</span><span class="badge miss">${(m.status||'active').toUpperCase()}</span></div>
+  <div class="ds">Last seen ${m.exact_place||m.place}, ${m.hours}h ago${grp} · ${m.sighting_count} sighting(s)</div>
+  <div class="mt">🔎 Search radius ${m.radius_km} km</div></div>`;}
+function renderHome(){$('#homeList').innerHTML = SEG==='alerts'
+  ? (INCS.length?INCS.slice().sort((a,b)=>ORD[LV[b.status]]-ORD[LV[a.status]]).map(itemInc).join(''):'<p class="note">No active alerts near you.</p>')
+  : (MISS.length?MISS.map(itemMiss).join(''):'<p class="note">No active cases.</p>');}
+function renderMissList(){$('#missList').innerHTML=MISS.length?MISS.map(itemMiss).join(''):'<p class="note">No active cases.</p>';}
+function focusPt(lat,lng){go('home');setTimeout(()=>{map.invalidateSize();map.setView([lat,lng],10);},60);}
+
+function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('findme');
+  const sights=(m.sightings||[]).map(x=>`<div class="sight"><span class="dot">🔵</span><span><b>${x.place}</b> — ${x.note||'sighting'}</span></div>`).join('')
+    ||'<div class="sight" style="border:none;color:var(--faint)">No sightings yet. Be the first to report one.</div>';
+  $('#caseDetail').innerHTML=`
+    <div class="case">
+      <b>${m.name}</b>${m.count>1?' · <span class="badge" style="background:#7c3aed">GROUP of '+m.count+'</span>':''} · <span class="badge miss">${(m.status||'active').toUpperCase()}</span>
+      <div class="kv"><b>Last seen:</b> ${m.exact_place||m.place} (${m.place}), ${m.hours}h ago · <b>search radius ${m.radius_km} km</b> · ${m.sighting_count} sighting(s)</div>
+      <div class="kv"><b>Age(s):</b> ${m.age||'—'} &nbsp; <b>Vehicle:</b> ${m.vehicle||'—'}</div>
+      <div class="kv"><b>Clothing:</b> ${m.clothing||'—'} &nbsp; <b>Direction:</b> ${m.direction||'—'}</div>
+    </div>
+    <h2 class="t" style="margin-top:16px">Sighting trail</h2>${sights}
+    <h2 class="t" style="margin-top:16px">Did you see them? Report a sighting</h2>
+    <label class="f">Where</label><select id="sPlace"></select>
+    <label class="f">How long ago (hours)</label><input id="sHours" type="number" value="0.5" min="0" step="0.5" />
+    <label class="f">Note (vehicle, direction…)</label><input id="sNote" placeholder="e.g. White Hilux heading north" />
+    <button class="btn" id="sawBtn" onclick="addSighting(${m.id})">📍 I saw them — tighten the search</button>
+    <div class="chips" style="margin-top:12px">
+      <button id="mapBtn" onclick="focusPt(${m.search_lat},${m.search_lng})">🗺 View on map</button>
+      <button id="shareBtn" onclick="shareFlyer(${m.id})">📤 Share flyer</button>
+      <button id="recoverBtn" onclick="setCaseStatus(${m.id},'recovered')">✓ Mark recovered</button>
+    </div>`;
+  $('#sPlace').innerHTML=PLACES.map(x=>`<option>${x}</option>`).join('');
+  $('#sPlace').value = (m.sightings&&m.sightings.length)?m.sightings[m.sightings.length-1].place:m.place;
+  $('#caseDetail').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+async function addSighting(cid){cid=cid||CASE;if(!cid)return;
+  const body={case_id:cid,place:$('#sPlace').value,hours_ago:$('#sHours').value,note:$('#sNote').value.trim()};
+  const r=await fetch('/api/sighting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+  if(r.ok){MISS=r.missing||[];drawMarkers();renderHome();renderMissList();openCase(cid);}}
+async function setCaseStatus(id,status){
+  const r=await fetch('/api/case-status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({case_id:id,status})}).then(r=>r.json());
+  if(r.ok){MISS=r.missing||[];drawMarkers();renderHome();renderMissList();
+    if(status==='recovered'){$('#caseDetail').innerHTML='<div class="ok" style="display:block">✓ Case marked recovered. Thank you to everyone who helped bring them home.</div>';}
+    else openCase(id);}}
+function shareFlyer(id){const m=MISS.find(x=>x.id===id);if(!m)return;
+  const head=m.count>1?(m.count+' people (GROUP)'):(m.name+' ('+(m.age||'?')+')');
+  const txt=`🔎 MISSING: ${head}\nDetails: ${m.name}\nLast seen: ${m.exact_place||m.place}\nVehicle: ${m.vehicle||'—'}\nClothing: ${m.clothing||'—'}\nDirection: ${m.direction||'—'}\nIf you see them, report on DeySafe. Do NOT approach — share location.`;
+  if(navigator.share){navigator.share({title:'Missing: '+m.name,text:txt}).catch(()=>{});}
+  else{try{navigator.clipboard.writeText(txt);}catch(e){}alert('Flyer copied:\n\n'+txt);}}
+
+async function loadPlaces(){const m=await fetch('/api/places').then(r=>r.json());TYPES=m.types;PLACES=m.places;PLACE_COORDS=m.coords||{};
+  const o=m.places.map(p=>`<option>${p}</option>`).join('');
+  ['#areaSelect','#rPlace','#wFrom','#wTo','#mPlace'].forEach(s=>$(s).innerHTML=o);
+  $('#areaSelect').value='Kaduna';$('#wFrom').value='Abuja';$('#wTo').value='Kaduna';$('#mPlace').value='Kankara';
+  $('#typeGrid').innerHTML=TYPES.map(t=>`<button onclick="pick(this,'RTYPE','${t}')">${t.replace(/_/g,' ')}</button>`).join('');
+  $('#typeGrid').firstChild.classList.add('on');window.RTYPE=TYPES[0];
+  const sos=['kidnapping','robbery','accident','medical','fire','suspicious','missing person','other'];
+  $('#sosGrid').innerHTML=sos.map(t=>`<button onclick="pick(this,'STYPE','${t}')">${t}</button>`).join('');
+  $('#sosGrid').firstChild.classList.add('on');}
+function pick(el,k,v){el.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));el.classList.add('on');
+  if(k==='RTYPE')window.RTYPE=v;else SOS_TYPE=v;}
+async function loadLevel(){const p=$('#areaSelect').value;const r=await fetch('/api/risk?place='+encodeURIComponent(p)).then(r=>r.json());
+  chip(r.level);const pill=$('#lvpill');pill.textContent=r.level;pill.style.background=COL[r.level]+'22';pill.style.color=COL[r.level];
+  $('#guide').textContent=r.guidance;}
+async function loadData(){const[a,b,al]=await Promise.all([fetch('/api/incidents').then(r=>r.json()),fetch('/api/missing').then(r=>r.json()),fetch('/api/alerts').then(r=>r.json())]);
+  INCS=a.incidents||[];MISS=b.missing||[];renderBanner(al.alerts||[]);drawMarkers();renderHome();renderMissList();}
+function renderBanner(alerts){const el=$('#alertBanner');const a=alerts[0];
+  if(a){el.className='abanner L'+a.level;el.style.display='flex';
+    el.innerHTML='<b>⚠ '+a.level_label+'</b><span>'+a.title+' — '+a.guidance+'</span><span class="x" onclick="document.getElementById(\'alertBanner\').style.display=\'none\'">✕</span>';}
+  else{el.style.display='none';}}
+
+async function checkRoute(){const a=$('#wFrom').value,b=$('#wTo').value;
+  const[ra,rb]=await Promise.all([fetch('/api/risk?place='+encodeURIComponent(a)).then(r=>r.json()),fetch('/api/risk?place='+encodeURIComponent(b)).then(r=>r.json())]);
+  const w=ORD[ra.level]>=ORD[rb.level]?ra:rb;
+  $('#routeBox').innerHTML=`<div class="lvl ${w.level}"><b>${w.level}</b> · ${a} → ${b}<div class="guide">${w.guidance}</div><div class="mt" style="margin-top:6px;color:var(--faint)">Route drawn on the map →</div></div>`;
+  const A=PLACE_COORDS[a],B=PLACE_COORDS[b];
+  if(A&&B){go('home');setTimeout(function(){map.invalidateSize();routeLayer.clearLayers();
+    L.polyline([A,B],{color:COL[w.level],weight:6,opacity:.8}).addTo(routeLayer);
+    L.marker(A,{icon:missIcon('A')}).addTo(routeLayer).bindPopup(a);
+    L.marker(B,{icon:missIcon('B')}).addTo(routeLayer).bindPopup(b);
+    map.fitBounds([A,B],{padding:[60,60]});},90);}}
+async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').focus();return;}
+  const r=await fetch('/api/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:window.RTYPE,place:$('#rPlace').value,description:d})}).then(r=>r.json());
+  const o=$('#okBox');o.style.display='block';o.innerHTML=r.ok?`✓ Report received. ${$('#rPlace').value} is now <b>${r.risk.level}</b>. Thank you.`:'⚠ '+(r.error||'failed');
+  if(r.ok){$('#rDesc').value='';loadData();loadLevel();}}
+function sendSOS(){const o=$('#sosOk');o.style.display='block';o.innerHTML=`✓ <b>${SOS_TYPE}</b> alert prepared. In the full app this shares your live location with your trusted circle and opens an incident. <i>(Prototype.)</i>`;}
+async function sendMissing(){const n=$('#mName').value.trim();if(!n){$('#mName').focus();return;}
+  const r=await fetch('/api/missing',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:n,age:$('#mAge').value.trim(),place:$('#mPlace').value,exact_place:$('#mExact').value.trim(),count:$('#mCount').value,hours_ago:$('#mHours').value,
+      vehicle:$('#mVeh').value.trim(),clothing:$('#mClo').value.trim(),direction:$('#mDir').value.trim()})}).then(r=>r.json());
+  const o=$('#mOk');o.style.display='block';
+  if(r.ok){o.innerHTML='✓ Search case opened. See it on the map with its search area.';['#mName','#mExact','#mVeh','#mClo','#mDir'].forEach(s=>$(s).value='');MISS=r.missing||[];drawMarkers();renderHome();renderMissList();}
+  else o.innerHTML='⚠ '+(r.error||'failed');}
+
+function go(v){switchTab(v);document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));}
+function switchTab(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));$('#v-'+v).classList.add('active');
+  if(v==='home'){loadLevel();setTimeout(()=>map&&map.invalidateSize(),60);}}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.v));
+document.querySelectorAll('.seg').forEach(b=>b.onclick=()=>{document.querySelectorAll('.seg').forEach(x=>x.classList.remove('on'));b.classList.add('on');SEG=b.dataset.seg;renderHome();});
+$('#areaSelect').onchange=loadLevel;
+
+(async function(){initMap();await loadPlaces();await loadLevel();await loadData();
+  setTimeout(()=>map.invalidateSize(),120);
+  if('serviceWorker'in navigator){try{await navigator.serviceWorker.register('/sw.js');}catch(e){}}})();
+</script>
+</body>
+</html>

@@ -1,0 +1,354 @@
+"""DeySafe API + PWA + SHIELD operator console (standard library only).
+
+  GET  /api/health
+  GET  /api/incidents     public feed (decisions applied; dismissed hidden)
+  GET  /api/queue         SHIELD operator review queue
+  GET  /api/missing       missing-person cases (+ time-based search radius)
+  GET  /api/places
+  GET  /api/risk?place=<name>
+  POST /api/report  {type, place, description}                      ANONYMOUS - no PII
+  POST /api/missing {name, age, place, hours_ago, description}      FindMe case
+  POST /api/verify  {type, location_name, state, decision, note}    the human gate
+
+Public-data, warning-only. Nothing reaches 'verified' without a human via /api/verify.
+"""
+import sys
+import os
+import json
+import datetime
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APP_DIR = os.path.join(BASE, "app")
+DB_PATH = os.path.join(BASE, "data", "guardian.db")
+
+from db import DB
+import ingest
+import geoparse
+import corroborate
+import ai
+
+PLACES = json.load(open(os.path.join(BASE, "config", "locations.json"), encoding="utf-8"))["places"]
+PLACE_NAMES = sorted(p["name"] for p in PLACES)
+TYPES = ["kidnapping", "banditry_attack", "missing_person", "armed_robbery"]
+RISK = {"verified": 4, "needs_human_review": 3, "corroborated": 2, "candidate_unverified": 1, "dismissed": 0}
+REVIEW = ("needs_human_review", "corroborated")
+CTYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+          ".json": "application/json; charset=utf-8", ".css": "text/css; charset=utf-8",
+          ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json"}
+PUBLIC_GUIDANCE = {
+    "GREEN": "No verified danger nearby. Remain alert.",
+    "YELLOW": "Unconfirmed report nearby. Exercise caution.",
+    "ORANGE": "Active danger reported nearby. Avoid the area if you can.",
+    "RED": "Critical verified threat. Do not travel; follow official guidance.",
+}
+TYPE_RADIUS = {"kidnapping": 50, "banditry_attack": 100, "armed_robbery": 30, "missing_person": 30}
+TYPE_GUIDANCE = {
+    "kidnapping": "Avoid the area. Do NOT attempt a rescue. Share your live location with family. Emergency: 112.",
+    "banditry_attack": "Avoid this route. Travel by day and in convoy. Report movements you see. Emergency: 112.",
+    "armed_robbery": "Avoid the area. Secure valuables. Report to the nearest police. Emergency: 112.",
+    "missing_person": "If you see the person or vehicle, report a sighting on DeySafe. Do not approach. Emergency: 112.",
+}
+LEVEL_LABEL = {1: "ADVISORY", 2: "WARNING", 3: "DANGER", 4: "CRITICAL"}
+
+
+def alert_level(conf, sev):
+    if conf >= 90 or sev:
+        return 4
+    if conf >= 80:
+        return 3
+    if conf >= 70:
+        return 2
+    return 1
+
+
+def ikey(i):
+    return "{}|{}|{}".format(i["type"], i["location_name"], i["state"])
+
+
+def place_coords(name):
+    n = (name or "").strip().lower()
+    for p in PLACES:
+        if p["name"].lower() == n:
+            return p["lat"], p["lng"]
+    return 9.2, 8.2  # Nigeria centroid fallback
+
+
+def public_level(top):
+    # GDACS-style public severity. RED is reserved for human-verified threats.
+    return "RED" if top >= 4 else ("ORANGE" if top >= 2 else ("YELLOW" if top >= 1 else "GREEN"))
+
+
+def recompute(db):
+    detections = []
+    for r in db.conn.execute("SELECT * FROM signals"):
+        s = dict(r)
+        gp = geoparse.geoparse(s)
+        if gp:
+            gp.update({"signal_id": s["id"], "source_name": s["source_name"],
+                       "published_at": s["published_at"] or s["ingested_at"], "title": s["title"] or ""})
+            detections.append(gp)
+    db.replace_incidents(corroborate.build_incidents(detections))
+
+
+def ensure_seed(db):
+    # Seed sample data only on first boot (empty DB) so deployed data persists across restarts.
+    if db.conn.execute("SELECT COUNT(*) AS c FROM signals").fetchone()["c"] > 0:
+        recompute(db)
+        return
+    for s in ingest.gather(use_live=False, use_sample=True):
+        db.insert_signal(s)
+    recompute(db)
+    # one sample FindMe case so the map demonstrates a search radius
+    lat, lng = place_coords("Kankara")
+    db.insert_missing({"name": "[SAMPLE] Abducted students (group)", "age": "13-17", "place": "Kankara",
+                       "exact_place": "Government Science School, Kankara", "count": 20,
+                       "lat": lat, "lng": lng,
+                       "last_seen": (datetime.datetime.now() - datetime.timedelta(hours=3)).isoformat(timespec="seconds"),
+                       "description": "Sample mass-abduction case for demo — students taken from a school in Kankara.",
+                       "vehicle": "Several motorcycles + a white Hilux", "clothing": "School uniforms",
+                       "direction": "North into the forest toward Jibia"})
+    # one seeded active alert so the public banner demonstrates the broadcast layer
+    klat, klng = place_coords("Kaduna")
+    db.insert_alert({"incident_key": "kidnapping|Kaduna|Kaduna", "level": 3, "level_label": "DANGER",
+                     "title": "KIDNAPPING — Kaduna, Kaduna — armed men on the Kaduna-Abuja road",
+                     "guidance": TYPE_GUIDANCE["kidnapping"], "lat": klat, "lng": klng,
+                     "radius_km": 50, "reach": 6000})
+
+
+def with_decisions(db):
+    dec = db.decisions()
+    incs = db.all_incidents()
+    for i in incs:
+        d = dec.get(ikey(i))
+        i["decided"] = bool(d)
+        if d:
+            i["status"] = d["decision"]
+            i["decision_note"] = d.get("note") or ""
+    return incs
+
+
+def public_incidents(db):
+    return [i for i in with_decisions(db) if i["status"] != "dismissed"]
+
+
+def review_queue(db):
+    q = [i for i in with_decisions(db) if not i["decided"] and i["status"] in REVIEW]
+    return sorted(q, key=lambda i: -i["confidence"])
+
+
+def missing_with_radius(db):
+    out = []
+    for m in db.all_missing():
+        m = dict(m)
+        sights = db.sightings_for(m["id"])
+        m["sightings"] = sights
+        m["sighting_count"] = len(sights)
+        # Anchor the search on the MOST RECENT credible point: latest sighting if any, else last-seen.
+        if sights:
+            last = sights[-1]
+            alat, alng, atime, m["anchor"] = last["lat"], last["lng"], last["seen_at"], "sighting"
+        else:
+            alat, alng, atime, m["anchor"] = m["lat"], m["lng"], m["last_seen"], "last_seen"
+        try:
+            hrs = max(0.25, (datetime.datetime.now() - datetime.datetime.fromisoformat(atime)).total_seconds() / 3600)
+        except Exception:
+            hrs = 1.0
+        m["search_lat"], m["search_lng"] = alat, alng
+        m["hours"] = round(hrs, 1)
+        m["radius_km"] = int(min(hrs * 50, 250))  # ~50 km/h spread from the freshest point, capped
+        out.append(m)
+    return out
+
+
+def risk_for(incidents, place):
+    pl = (place or "").strip().lower()
+    rel = [i for i in incidents if pl and (pl in (i["location_name"] or "").lower() or pl in (i["state"] or "").lower())]
+    top = max((RISK.get(i["status"], 1) for i in rel), default=0)
+    level = public_level(top)
+    return {"place": place, "level": level, "guidance": PUBLIC_GUIDANCE[level], "count": len(rel),
+            "incidents": sorted(rel, key=lambda i: -i["confidence"])[:6]}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _json(self, obj, code=200):
+        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _static(self, path):
+        rel = os.path.normpath((path.lstrip("/") or "index.html")).replace("\\", "/")
+        if rel.startswith(".."):
+            return self.send_error(403)
+        fp = os.path.join(APP_DIR, rel)
+        if not os.path.isfile(fp):
+            fp = os.path.join(APP_DIR, "index.html")
+        with open(fp, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", CTYPES.get(os.path.splitext(fp)[1].lower(), "application/octet-stream"))
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path)
+        db = DB(DB_PATH)
+        if u.path == "/api/health":
+            return self._json({"ok": True, "incidents": len(public_incidents(db)),
+                               "queue": len(review_queue(db)), "missing": len(db.all_missing())})
+        if u.path == "/api/incidents":
+            return self._json({"incidents": public_incidents(db)})
+        if u.path == "/api/queue":
+            return self._json({"queue": review_queue(db)})
+        if u.path == "/api/missing":
+            return self._json({"missing": missing_with_radius(db)})
+        if u.path == "/api/alerts":
+            return self._json({"alerts": db.active_alerts()})
+        if u.path == "/api/places":
+            coords = {p["name"]: [p["lat"], p["lng"]] for p in PLACES}
+            return self._json({"places": PLACE_NAMES, "types": TYPES, "coords": coords})
+        if u.path == "/api/ai-status":
+            return self._json({"ai": ai.available(), "provider": ai.provider(), "keys": ai.key_count()})
+        if u.path == "/api/risk":
+            place = urllib.parse.parse_qs(u.query).get("place", [""])[0]
+            return self._json(risk_for(public_incidents(db), place))
+        return self._static(u.path)
+
+    def do_POST(self):
+        u = urllib.parse.urlparse(self.path)
+        ln = int(self.headers.get("Content-Length", "0") or 0)
+        try:
+            data = json.loads(self.rfile.read(ln).decode("utf-8")) if ln else {}
+        except Exception:
+            data = {}
+        db = DB(DB_PATH)
+
+        if u.path == "/api/report":
+            typ, place, desc = (data.get("type") or "").strip(), (data.get("place") or "").strip(), (data.get("description") or "").strip()
+            if not place or not desc:
+                return self._json({"ok": False, "error": "place and description required"}, 400)
+            type_word = typ.replace("_", " ") if typ else "incident"
+            db.insert_signal({"source_name": "Community report", "kind": "report",
+                              "title": "{} near {}".format(type_word, place),
+                              "text": "{} near {}. {}".format(type_word, place, desc),
+                              "url": "", "lang": "en",
+                              "published_at": datetime.datetime.now().isoformat(timespec="seconds")})
+            db.audit("api", "community_report", "place={} type={}".format(place, typ))
+            recompute(db)
+            return self._json({"ok": True, "risk": risk_for(public_incidents(db), place)})
+
+        if u.path == "/api/missing":
+            name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()
+            if not name or not place:
+                return self._json({"ok": False, "error": "name and place required"}, 400)
+            lat, lng = place_coords(place)
+            try:
+                hrs = float(data.get("hours_ago") or 1)
+            except Exception:
+                hrs = 1.0
+            db.insert_missing({"name": name, "age": (data.get("age") or "").strip(), "place": place,
+                               "exact_place": (data.get("exact_place") or "").strip(),
+                               "count": data.get("count") or 1, "lat": lat, "lng": lng,
+                               "last_seen": (datetime.datetime.now() - datetime.timedelta(hours=hrs)).isoformat(timespec="seconds"),
+                               "description": (data.get("description") or "").strip(),
+                               "vehicle": (data.get("vehicle") or "").strip(),
+                               "clothing": (data.get("clothing") or "").strip(),
+                               "direction": (data.get("direction") or "").strip()})
+            db.audit("api", "missing_report", "place={} count={}".format(place, data.get("count") or 1))
+            return self._json({"ok": True, "missing": missing_with_radius(db)})
+
+        if u.path == "/api/verify":
+            decision = (data.get("decision") or "").strip()
+            if decision not in ("verified", "dismissed"):
+                return self._json({"ok": False, "error": "decision must be verified|dismissed"}, 400)
+            key = "{}|{}|{}".format((data.get("type") or "").strip(),
+                                    (data.get("location_name") or "").strip(),
+                                    (data.get("state") or "").strip())
+            db.set_decision(key, decision, (data.get("note") or "").strip(), "operator")
+            db.audit("operator", "decision", "{} -> {}".format(key, decision))
+            alert = None
+            if decision == "verified":
+                inc = next((i for i in with_decisions(db) if ikey(i) == key), None)
+                if inc:
+                    lvl = alert_level(inc["confidence"], inc["severity"])
+                    rad = TYPE_RADIUS.get(inc["type"], 30)
+                    alert = {"incident_key": key, "level": lvl, "level_label": LEVEL_LABEL[lvl],
+                             "title": "{} — {}, {} — verified".format(inc["type"].replace("_", " ").upper(), inc["location_name"], inc["state"]),
+                             "guidance": TYPE_GUIDANCE.get(inc["type"], "Avoid the area and stay alert. Emergency: 112."),
+                             "lat": inc["lat"], "lng": inc["lng"], "radius_km": rad, "reach": rad * 120}
+                    db.insert_alert(alert)
+                    db.audit("system", "alert_fired", "L{} {} reach~{}".format(lvl, key, rad * 120))
+            else:
+                db.resolve_alert(key)
+            return self._json({"ok": True, "decision": decision, "queue": len(review_queue(db)), "alert": alert})
+
+        if u.path == "/api/sighting":
+            try:
+                cid = int(data.get("case_id"))
+            except Exception:
+                return self._json({"ok": False, "error": "case_id required"}, 400)
+            place = (data.get("place") or "").strip()
+            if not place:
+                return self._json({"ok": False, "error": "place required"}, 400)
+            lat, lng = place_coords(place)
+            try:
+                hrs = float(data.get("hours_ago") or 0.5)
+            except Exception:
+                hrs = 0.5
+            db.insert_sighting({"case_id": cid, "place": place, "lat": lat, "lng": lng,
+                                "seen_at": (datetime.datetime.now() - datetime.timedelta(hours=hrs)).isoformat(timespec="seconds"),
+                                "note": (data.get("note") or "").strip(), "source": "community"})
+            db.audit("api", "sighting", "case={} place={}".format(cid, place))
+            return self._json({"ok": True, "missing": missing_with_radius(db)})
+
+        if u.path == "/api/case-status":
+            try:
+                cid = int(data.get("case_id"))
+            except Exception:
+                return self._json({"ok": False, "error": "case_id required"}, 400)
+            status = (data.get("status") or "").strip()
+            if status not in ("active", "located", "recovered", "resolved"):
+                return self._json({"ok": False, "error": "bad status"}, 400)
+            db.set_missing_status(cid, status)
+            db.audit("operator", "case_status", "case={} -> {}".format(cid, status))
+            return self._json({"ok": True, "missing": missing_with_radius(db)})
+
+        if u.path == "/api/classify":
+            text = (data.get("text") or "").strip()
+            if not text:
+                return self._json({"ok": False, "error": "text required"}, 400)
+            gp = geoparse.geoparse({"title": "", "text": text})
+            rule_based = {"is_incident": bool(gp), "incident_type": gp["type"] if gp else None,
+                          "location_text": gp["location_name"] if gp else None,
+                          "severity": gp["severity"] if gp else 0, "method": "rule-based"}
+            if not ai.available():
+                return self._json({"ok": True, "ai": False,
+                                   "note": "Real LLM is OFF. Set GEMINI_API_KEY (or GROQ_API_KEY / CEREBRAS_API_KEY) to turn it on.",
+                                   "rule_based": rule_based})
+            return self._json({"ok": True, "ai": True, "provider": ai.provider(),
+                               "result": ai.classify(text), "rule_based": rule_based})
+
+        return self.send_error(404)
+
+
+def main():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    ensure_seed(DB(DB_PATH))
+    port = int(os.environ.get("PORT", "4500"))
+    host = os.environ.get("HOST", "0.0.0.0")
+    ai_on = ("ON (" + (ai.provider() or "") + ")") if ai.available() else "OFF — set CEREBRAS_API_KEY / GEMINI_API_KEY / GROQ_API_KEY"
+    print("DeySafe + SHIELD on %s:%d  |  AI: %s  |  operator console at /review.html" % (host, port, ai_on))
+    ThreadingHTTPServer((host, port), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,14 @@
+{
+  "_note": "SYNTHETIC sample signals for demonstration ONLY. These are NOT real events. They exist to show how the corroboration/confidence ladder behaves.",
+  "signals": [
+    {"source": "Sample Wire A", "hours_ago": 4, "lang": "en", "title": "Gunmen abduct travellers along Kaduna-Abuja highway", "text": "[SAMPLE] Armed men reportedly kidnapped several travellers near Kaduna along the Kaduna-Abuja road on Friday evening, residents said."},
+    {"source": "Sample Wire B", "hours_ago": 3, "lang": "en", "title": "Several feared kidnapped in Kaduna highway attack", "text": "[SAMPLE] Bandits attacked vehicles around Kaduna and abducted an unknown number of passengers; one person was feared killed."},
+    {"source": "Sample Community Report", "hours_ago": 2, "lang": "pcm", "title": "Dem kidnap people for Kaduna road", "text": "[SAMPLE] Gunmen don kidnap travellers for Kaduna expressway, people dey find dem family."},
+    {"source": "Sample Wire A", "hours_ago": 10, "lang": "en", "title": "Bandits raid Gusau community in Zamfara", "text": "[SAMPLE] Armed bandits raided a community near Gusau in Zamfara, rustling cattle and abducting two residents."},
+    {"source": "Sample Wire C", "hours_ago": 6, "lang": "en", "title": "Parents report missing students in Kankara", "text": "[SAMPLE] Families in Kankara said some students went missing after gunmen were seen near a school."},
+    {"source": "Sample Wire A", "hours_ago": 8, "lang": "en", "title": "Gunmen abduct residents in Shiroro, Niger State", "text": "[SAMPLE] Gunmen abducted and kidnapped several residents in Shiroro, Niger State during an overnight raid."},
+    {"source": "Sample Wire B", "hours_ago": 7, "lang": "en", "title": "Shiroro residents abducted in fresh kidnapping", "text": "[SAMPLE] A fresh kidnapping in Shiroro left several residents abducted; families are searching for them."},
+    {"source": "Sample Wire A", "hours_ago": 12, "lang": "en", "title": "Travellers kidnapped near Lokoja", "text": "[SAMPLE] Gunmen kidnapped travellers along a road near Lokoja, Kogi State; police are investigating."},
+    {"source": "Sample Wire C", "hours_ago": 11, "lang": "en", "title": "Kidnap of commuters reported in Lokoja", "text": "[SAMPLE] Residents reported the kidnap of commuters near Lokoja; the abducted persons have not been found."}
+  ]
+}

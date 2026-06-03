@@ -1,0 +1,13 @@
+{
+  "_note": "Public Nigerian news RSS feeds for the live-ingest path. Best-effort; failures are skipped. Used only with `--live`.",
+  "rss": [
+    {"name": "Premium Times", "url": "https://www.premiumtimesng.com/feed"},
+    {"name": "Punch", "url": "https://punchng.com/feed/"},
+    {"name": "Vanguard", "url": "https://www.vanguardngr.com/feed/"},
+    {"name": "Daily Post", "url": "https://dailypost.ng/feed/"},
+    {"name": "The Cable", "url": "https://www.thecable.ng/feed"},
+    {"name": "Channels TV", "url": "https://www.channelstv.com/feed/"},
+    {"name": "Daily Trust", "url": "https://dailytrust.com/feed/"},
+    {"name": "Leadership", "url": "https://leadership.ng/feed/"}
+  ]
+}

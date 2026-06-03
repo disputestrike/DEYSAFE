@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Guardian-NG — Detection Console (Prototype)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root{--bg:#0b0f17;--panel:#121826;--line:#1f2937;--text:#e6edf5;--muted:#8b97a8;
+        --red:#ef4444;--amber:#f59e0b;--blue:#38bdf8}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;height:100vh;display:flex;flex-direction:column}
+  #banner{background:#3b1d1d;color:#fecaca;border-bottom:1px solid #7f1d1d;padding:7px 14px;font-size:12.5px;font-weight:600;text-align:center;letter-spacing:.01em}
+  #wrap{flex:1;display:flex;min-height:0}
+  #side{width:340px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  #head{padding:16px 18px;border-bottom:1px solid var(--line)}
+  #head h1{font-size:18px;letter-spacing:-.01em}
+  #head .sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+  #legend{display:flex;gap:14px;padding:10px 18px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--muted);flex-wrap:wrap}
+  #legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:50%}
+  #list{overflow:auto;padding:8px;flex:1}
+  .card{background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px}
+  .card .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .pill{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em}
+  .card h3{font-size:13.5px;margin:6px 0 3px}
+  .card p{color:var(--muted);font-size:12px}
+  .meta{color:#6b7688;font-size:11px;margin-top:6px}
+  #map{flex:1}
+  .leaflet-popup-content{font:13px system-ui}
+</style>
+</head>
+<body>
+<div id="banner">PROTOTYPE · synthetic sample data · nothing here is a confirmed real event · this is a WARNING tool, never a targeting tool</div>
+<div id="wrap">
+  <aside id="side">
+    <div id="head">
+      <h1>Guardian-NG</h1>
+      <div class="sub">Protective warning engine — detection console</div>
+    </div>
+    <div id="legend">
+      <span><i class="dot" style="background:var(--red)"></i> needs human review</span>
+      <span><i class="dot" style="background:var(--amber)"></i> corroborated</span>
+      <span><i class="dot" style="background:var(--blue)"></i> candidate (unverified)</span>
+    </div>
+    <div id="list"></div>
+  </aside>
+  <div id="map"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const COLORS = {needs_human_review:'#ef4444', corroborated:'#f59e0b', candidate_unverified:'#38bdf8'};
+  const LABEL = {needs_human_review:'needs human review', corroborated:'corroborated', candidate_unverified:'candidate'};
+  const map = L.map('map', {zoomControl:true}).setView([9.2, 8.2], 6);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution:'&copy; OpenStreetMap &copy; CARTO', maxZoom:18
+  }).addTo(map);
+
+  fetch('incidents.json?t=' + Date.now()).then(r => r.json()).then(fc => {
+    const list = document.getElementById('list');
+    const feats = (fc.features || []).slice().sort((a,b) => b.properties.confidence - a.properties.confidence);
+    if (!feats.length) { list.innerHTML = '<p style="color:#8b97a8;padding:12px">No incidents in current snapshot. Run the pipeline.</p>'; }
+    feats.forEach(f => {
+      const p = f.properties, c = f.geometry.coordinates;
+      const color = COLORS[p.status] || '#94a3b8';
+      const r = 7 + Math.round(p.confidence / 8);
+      L.circleMarker([c[1], c[0]], {radius:r, color:color, weight:2, fillColor:color, fillOpacity:.35})
+        .addTo(map)
+        .bindPopup('<b>' + p.location_name + ', ' + p.state + '</b><br>' +
+                   p.type.replace('_',' ') + ' · <b>' + LABEL[p.status] + '</b><br>' +
+                   'confidence ' + p.confidence + ' · sources ' + p.source_count +
+                   '<br><span style="color:#555">' + (p.summary || '') + '</span>');
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML =
+        '<div class="row"><span class="pill" style="background:' + color + '22;color:' + color + '">' + LABEL[p.status] + '</span>' +
+        '<span style="font-weight:700;color:' + color + '">' + p.confidence + '</span></div>' +
+        '<h3>' + p.location_name + ', ' + p.state + '</h3>' +
+        '<p>' + (p.summary || '') + '</p>' +
+        '<div class="meta">' + p.type.replace('_',' ') + ' · ' + p.source_count + ' source(s) · severity ' + p.severity + '</div>';
+      card.onclick = () => map.setView([c[1], c[0]], 9);
+      list.appendChild(card);
+    });
+  }).catch(e => {
+    document.getElementById('list').innerHTML =
+      '<p style="color:#ef4444;padding:12px">Could not load incidents.json — run <code>python engine/pipeline.py</code> first.</p>';
+  });
+</script>
+</body>
+</html>

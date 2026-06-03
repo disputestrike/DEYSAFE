@@ -1,0 +1,2 @@
+# DeySafe / SHIELD prototype — Python standard library only; no external packages.
+# This file exists so the host (Railway/Nixpacks) detects a Python app.

@@ -1,0 +1,36 @@
+{
+  "_note": "STARTER keyword sets. Non-English terms must be reviewed/expanded by native Hausa/Yoruba/Igbo/Pidgin speakers before any real use.",
+  "incident_types": {
+    "kidnapping": {
+      "en": ["kidnap", "kidnapped", "kidnapping", "abduct", "abducted", "abduction", "hostage", "ransom", "whisked away", "taken hostage"],
+      "ha": ["sace", "garkuwa", "garkuwa da mutane", "satar mutane"],
+      "yo": ["jigbe", "ji gbe"],
+      "ig": ["toro ego", "wepu"]
+    },
+    "banditry_attack": {
+      "en": ["bandit", "bandits", "gunmen", "gunfire", "ambush", "raid", "raided", "attack", "attacked", "herdsmen attack", "armed men", "terrorists", "insurgents"],
+      "ha": ["yan bindiga", "'yan bindiga", "ta'addanci", "mahara"],
+      "yo": ["agbebon"],
+      "ig": ["ndi ogba egbe"]
+    },
+    "missing_person": {
+      "en": ["missing", "go missing", "went missing", "whereabouts unknown", "declared missing", "search for missing"],
+      "ha": ["bata", "bacewa"],
+      "yo": ["sonu", "ti sonu"],
+      "ig": ["furu efu"]
+    },
+    "armed_robbery": {
+      "en": ["armed robber", "armed robbers", "armed robbery", "robbery", "robbers"],
+      "ha": ["fashi", "yan fashi"],
+      "yo": ["jaguda"],
+      "ig": ["ndi ohi"]
+    }
+  },
+  "severity_terms": ["killed", "kill", "dead", "death", "corpse", "corpses", "slain", "shot dead", "wounded", "injured", "bodies", "feared killed"],
+  "language_hints": {
+    "ha": ["yan", "bindiga", "sace", "mutane", "garkuwa", "ta'addanci", "mahara"],
+    "yo": ["awon", "omo", "sonu", "jigbe"],
+    "ig": ["ndi", "efu", "ego"],
+    "pcm": ["dem", "wey", "don", "abi", "dey", "naija"]
+  }
+}

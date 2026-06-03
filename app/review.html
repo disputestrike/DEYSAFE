@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SHIELD — Situation Room</title>
+<style>
+  :root{--bg:#0b1220;--card:#141d31;--line:#243149;--text:#eef2f8;--muted:#93a0b5;--faint:#5f6c82;
+        --brand:#5b8cff;--green:#22c55e;--red:#ef4444;--amber:#f59e0b}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#070b14;color:var(--text);font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;
+    display:flex;justify-content:center;padding:24px 14px 60px}
+  .wrap{width:100%;max-width:720px}
+  header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#5b8cff,#3b5bdb);display:grid;place-items:center}
+  .logo svg{width:21px;height:21px}
+  h1{font-size:19px;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:13px}
+  .gate{background:rgba(91,140,255,.1);border:1px solid rgba(91,140,255,.35);border-radius:12px;
+    padding:12px 14px;margin:16px 0;color:#bcd0ff;font-size:13.5px}
+  .count{display:flex;align-items:baseline;gap:8px;margin:18px 2px 12px}
+  .count b{font-size:26px;font-weight:800}.count span{color:var(--muted);font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;border-left:4px solid var(--amber)}
+  .card.needs_human_review{border-left-color:var(--red)}
+  .r1{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .place{font-weight:700;font-size:16px}
+  .st{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:3px 9px;border-radius:999px;background:rgba(239,68,68,.16);color:#f87171}
+  .st.corroborated{background:rgba(245,158,11,.16);color:#fbbf24}
+  .desc{color:var(--muted);font-size:13.5px;margin:7px 0}
+  .meta{color:var(--faint);font-size:12px}
+  .acts{display:flex;gap:10px;margin-top:14px}
+  button{flex:1;border:none;border-radius:10px;padding:12px;font:inherit;font-weight:700;cursor:pointer}
+  .verify{background:var(--green);color:#04210f}
+  .dismiss{background:var(--card);border:1px solid var(--line);color:var(--muted)}
+  button:active{transform:translateY(1px)}
+  .empty{color:var(--muted);text-align:center;padding:40px 0}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#16203a;border:1px solid var(--line);
+    padding:11px 18px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z" fill="#fff" opacity=".95"/></svg></div>
+    <div><h1>SHIELD · Situation Room</h1><div class="sub">Operator review — the human gate · powers DeySafe</div></div>
+  </header>
+  <div class="gate">⚖️ Nothing warns the public as <b>verified</b> until a person approves it here. <b>Verify</b> confirms and raises a public alert. <b>Dismiss</b> removes it. Every action is written to the audit log.</div>
+  <div class="count"><b id="n">0</b><span>incidents awaiting review</span></div>
+  <div id="list"></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $ = (s)=>document.querySelector(s);
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
+
+async function load(){
+  const d = await fetch('/api/queue').then(r=>r.json());
+  const q = d.queue||[];
+  $('#n').textContent = q.length;
+  if(!q.length){ $('#list').innerHTML='<div class="empty">✓ Queue clear. No incidents awaiting review.</div>'; return; }
+  $('#list').innerHTML = q.map(i=>`
+    <div class="card ${i.status}">
+      <div class="r1"><span class="place">${i.location_name}, ${i.state}</span>
+        <span class="st ${i.status}">${i.status.replace(/_/g,' ')}</span></div>
+      <div class="desc">${i.summary||''}</div>
+      <div class="meta">${i.type.replace(/_/g,' ')} · ${i.source_count} source(s) · severity ${i.severity} · confidence ${i.confidence}</div>
+      <div class="acts">
+        <button class="verify" onclick='decide(${JSON.stringify(JSON.stringify(i))}, "verified")'>✓ Verify & warn public</button>
+        <button class="dismiss" onclick='decide(${JSON.stringify(JSON.stringify(i))}, "dismissed")'>Dismiss</button>
+      </div>
+    </div>`).join('');
+}
+async function decide(raw, decision){
+  const i = JSON.parse(raw);
+  const res = await fetch('/api/verify',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({type:i.type,location_name:i.location_name,state:i.state,decision})}).then(r=>r.json());
+  if(res.ok){ toast(decision==='verified'?('✓ '+i.location_name+' verified — public alert raised'):('Dismissed '+i.location_name)); load(); }
+  else toast('⚠ '+(res.error||'failed'));
+}
+load();
+</script>
+</body>
+</html>
