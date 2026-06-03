@@ -38,8 +38,8 @@
   label.f{display:block;font-size:12px;color:var(--muted);font-weight:600;margin:12px 2px 6px}
   .pill{font-size:12px;font-weight:800;padding:7px 12px;border-radius:999px;white-space:nowrap}
   .guide{color:var(--muted);font-size:13px;margin:9px 2px 0}
-  .chips{display:flex;gap:8px;overflow-x:auto;margin:14px 0 4px;padding-bottom:2px}
-  .chips button{flex:none;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 13px;font:inherit;font-weight:700;font-size:13px;cursor:pointer;color:var(--ink)}
+  .chips{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0 4px}
+  .chips button{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:12px 10px;font:inherit;font-weight:700;font-size:13px;cursor:pointer;color:var(--ink);text-align:center}
   .chips button:nth-child(1){color:#c2480e;background:#fdf1ea;border-color:#f6d2bf}
   .chips button:nth-child(2){color:#fff;background:var(--red);border-color:var(--red)}
   .segtabs{display:flex;gap:6px;margin:14px 0 10px}
@@ -281,16 +281,27 @@ function renderBanner(alerts){const el=$('#alertBanner');const a=alerts[0];
     el.innerHTML='<b>⚠ '+a.level_label+'</b><span>'+a.title+' — '+a.guidance+'</span><span class="x" onclick="document.getElementById(\'alertBanner\').style.display=\'none\'">✕</span>';}
   else{el.style.display='none';}}
 
+function distToSeg(p,a,b){var s=Math.cos(Math.PI/180*((a[0]+b[0])/2));
+  var ax=a[1]*s,ay=a[0],bx=b[1]*s,by=b[0],px=p[1]*s,py=p[0];
+  var dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy;var t=L2?((px-ax)*dx+(py-ay)*dy)/L2:0;t=Math.max(0,Math.min(1,t));
+  var cx=ax+t*dx,cy=ay+t*dy;return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy))*111;}
 async function checkRoute(){const a=$('#wFrom').value,b=$('#wTo').value;
   const[ra,rb]=await Promise.all([fetch('/api/risk?place='+encodeURIComponent(a)).then(r=>r.json()),fetch('/api/risk?place='+encodeURIComponent(b)).then(r=>r.json())]);
-  const w=ORD[ra.level]>=ORD[rb.level]?ra:rb;
-  $('#routeBox').innerHTML=`<div class="lvl ${w.level}"><b>${w.level}</b> · ${a} → ${b}<div class="guide">${w.guidance}</div><div class="mt" style="margin-top:6px;color:var(--faint)">Route drawn on the map →</div></div>`;
   const A=PLACE_COORDS[a],B=PLACE_COORDS[b];
-  if(A&&B){go('home');setTimeout(function(){map.invalidateSize();routeLayer.clearLayers();
-    L.polyline([A,B],{color:COL[w.level],weight:6,opacity:.8}).addTo(routeLayer);
+  let onRoute=(A&&B)?INCS.filter(function(i){return distToSeg([i.lat,i.lng],A,B)<55;}):[];
+  onRoute.sort(function(x,y){return (ORD[LV[y.status]]||0)-(ORD[LV[x.status]]||0);});
+  let worst=ORD[ra.level]>=ORD[rb.level]?ra.level:rb.level;
+  onRoute.forEach(function(i){var l=LV[i.status];if((ORD[l]||0)>(ORD[worst]||0))worst=l;});
+  const guide={GREEN:'Road looks clear. Stay alert and keep moving.',YELLOW:'Caution — unconfirmed reports near this route.',ORANGE:'Active danger on this corridor. Travel by day, in convoy, or delay.',RED:'Verified threat on this route. Do not travel — wait or reroute.'}[worst];
+  const list=onRoute.length?onRoute.map(function(i){var l=LV[i.status];return '<div class="alert '+l+'"><div class="r1"><span class="pl">'+i.location_name+', '+i.state+'</span><span class="badge '+l+'">'+l+'</span></div><div class="mt">'+i.type.replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+'</div></div>';}).join(''):'<p class="note">No incidents reported along this route right now.</p>';
+  $('#routeBox').innerHTML='<div class="lvl '+worst+'"><b>'+worst+' · '+a+' → '+b+'</b><div class="guide">'+guide+'</div><div class="mt" style="margin-top:6px">'+onRoute.length+' incident(s) on this corridor</div></div>'
+    +'<button class="btn sec" onclick="go(\'home\')">🗺 View route on map</button>'
+    +'<h2 class="t" style="margin-top:16px">On your route</h2>'+list;
+  if(A&&B){routeLayer.clearLayers();
+    L.polyline([A,B],{color:COL[worst],weight:6,opacity:.85}).addTo(routeLayer);
     L.marker(A,{icon:missIcon('A')}).addTo(routeLayer).bindPopup(a);
     L.marker(B,{icon:missIcon('B')}).addTo(routeLayer).bindPopup(b);
-    map.fitBounds([A,B],{padding:[60,60]});},90);}}
+    try{map.fitBounds([A,B],{padding:[60,60]});}catch(e){}}}
 async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').focus();return;}
   const r=await fetch('/api/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:window.RTYPE,place:$('#rPlace').value,description:d})}).then(r=>r.json());
   const o=$('#okBox');o.style.display='block';o.innerHTML=r.ok?`✓ Report received. ${$('#rPlace').value} is now <b>${r.risk.level}</b>. Thank you.`:'⚠ '+(r.error||'failed');
