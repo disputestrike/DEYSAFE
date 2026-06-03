@@ -88,7 +88,8 @@ def geocode(q):
         return None
     for p in PLACES:
         if p["name"].lower() == q.lower():
-            return {"name": p["name"], "lat": p["lat"], "lng": p["lng"], "source": "gazetteer"}
+            return {"name": p["name"], "lat": p["lat"], "lng": p["lng"], "source": "gazetteer",
+                    "state": p.get("state", ""), "hotspot": p.get("hotspot", False)}
     key = q.lower()
     if key in _geocache:
         return _geocache[key]
@@ -144,6 +145,19 @@ def recompute(db):
     detections = []
     for r in db.conn.execute("SELECT * FROM signals"):
         s = dict(r)
+        # Structured report: place was already geocoded + type chosen, so build the
+        # detection directly. Works for ANY place, not only the gazetteer towns.
+        if s.get("gtype") and s.get("lat") is not None and s.get("lng") is not None:
+            detections.append({
+                "type": s["gtype"], "terms": [],
+                "location_name": s.get("location_name") or "reported area",
+                "state": s.get("state") or "", "lat": s["lat"], "lng": s["lng"],
+                "hotspot": False, "lang": s.get("lang") or "en",
+                "severity": s.get("gseverity") or 0,
+                "signal_id": s["id"], "source_name": s["source_name"],
+                "published_at": s["published_at"] or s["ingested_at"], "title": s["title"] or ""})
+            continue
+        # Unstructured signal (e.g. live RSS): fall back to gazetteer geoparse.
         gp = geoparse.geoparse(s)
         if gp:
             gp.update({"signal_id": s["id"], "source_name": s["source_name"],
@@ -304,14 +318,23 @@ class Handler(BaseHTTPRequestHandler):
             if not place or not desc:
                 return self._json({"ok": False, "error": "place and description required"}, 400)
             type_word = typ.replace("_", " ") if typ else "incident"
+            g = geocode(place)  # gazetteer -> free OSM; lets a typed report of ANY town hit the map
+            lat = g["lat"] if g else None
+            lng = g["lng"] if g else None
+            loc_name = g["name"] if g else place
+            state = g.get("state", "") if g else ""
+            sev = geoparse.detect_severity(desc + " " + type_word)
             db.insert_signal({"source_name": "Community report", "kind": "report",
-                              "title": "{} near {}".format(type_word, place),
+                              "title": "{} near {}".format(type_word, loc_name),
                               "text": "{} near {}. {}".format(type_word, place, desc),
                               "url": "", "lang": "en",
-                              "published_at": datetime.datetime.now().isoformat(timespec="seconds")})
-            db.audit("api", "community_report", "place={} type={}".format(place, typ))
+                              "published_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                              "lat": lat, "lng": lng, "location_name": loc_name, "state": state,
+                              "gtype": (typ or None), "gseverity": sev})
+            db.audit("api", "community_report", "place={} type={} geo={}".format(place, typ, bool(g)))
             recompute(db)
-            return self._json({"ok": True, "risk": risk_for(public_incidents(db), place)})
+            risk = risk_at(public_incidents(db), lat, lng) if lat is not None else risk_for(public_incidents(db), place)
+            return self._json({"ok": True, "risk": risk})
 
         if u.path == "/api/missing":
             name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()

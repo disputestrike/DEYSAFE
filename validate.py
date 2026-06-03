@@ -132,6 +132,9 @@ _, a1, _ = call("GET", "/api/alerts"); nb = len(a1.get("alerts", []))
 call("POST", "/api/verify", {"type": "banditry_attack", "location_name": "Gusau", "state": "Zamfara", "decision": "verified"})
 _, a2, _ = call("GET", "/api/alerts"); na = len(a2.get("alerts", []))
 check("operator verify fires a public alert", na >= nb and na > 0, str(nb) + " -> " + str(na))
+s, j, _ = call("POST", "/api/report", {"type": "banditry_attack", "place": "Buni Yadi", "description": "gunmen sighted on the road, several vehicles"})
+rsk = j.get("risk") or {}
+check("typed off-gazetteer report becomes a map incident", s == 200 and j.get("ok") and rsk.get("count", 0) >= 1, rsk.get("count"))
 
 print("\n=== RESULT: %d passed, %d failed ===" % (P[0], F[0]))
 for x in FAILS:

@@ -54,7 +54,18 @@ class DB:
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self):
+        # Structured community reports carry their own geocoded coords + type so a
+        # typed report of ANY place (not just gazetteer towns) becomes a map incident.
+        for col, decl in (("lat", "REAL"), ("lng", "REAL"), ("location_name", "TEXT"),
+                          ("state", "TEXT"), ("gtype", "TEXT"), ("gseverity", "INTEGER")):
+            try:
+                self.conn.execute("ALTER TABLE signals ADD COLUMN " + col + " " + decl)
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     def insert_signal(self, sig):
         raw = "{}|{}|{}".format(sig.get("source_name", ""), sig.get("title", ""), sig.get("text", "")).encode("utf-8")
@@ -63,10 +74,13 @@ class DB:
         if row:
             return row["id"], False
         cur = self.conn.execute(
-            "INSERT INTO signals (source_name, kind, title, text, url, lang, published_at, ingested_at, raw_hash)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO signals (source_name, kind, title, text, url, lang, published_at, ingested_at, raw_hash,"
+            " lat, lng, location_name, state, gtype, gseverity)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (sig.get("source_name"), sig.get("kind"), sig.get("title"), sig.get("text"),
-             sig.get("url"), sig.get("lang"), sig.get("published_at"), now_iso(), h))
+             sig.get("url"), sig.get("lang"), sig.get("published_at"), now_iso(), h,
+             sig.get("lat"), sig.get("lng"), sig.get("location_name"), sig.get("state"),
+             sig.get("gtype"), sig.get("gseverity")))
         self.conn.commit()
         return cur.lastrowid, True
 

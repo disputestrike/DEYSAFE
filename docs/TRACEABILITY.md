@@ -8,7 +8,7 @@ against this document.
 MEASURE (pass rate) → ADJUST. Nothing is "done" until it's in the matrix AND passes its gate.
 
 **Run the automated gate:** `python validate.py` (against the live server).
-**Last run: 2026-06-03 → 38 passed / 0 failed** (19 endpoint + 16 chaos + 3 functional).
+**Last run: 2026-06-03 → 39 passed / 0 failed** (19 endpoint + 16 chaos + 4 functional).
 
 Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your account/key · ⛔ excluded by a safety bright-line
 
@@ -31,7 +31,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 |---|---|---|---|---|---|
 | Map-first home (Leaflet + markers) | Doc P3.1 | `app/index.html` | ✅ | served HTML / browser | PASS |
 | Area risk GREEN/YELLOW/ORANGE/RED + guidance (typed area, proximity) | Doc P4 / GDACS | `api.risk_for` + `api.risk_at` + index | ✅ | `GET /api/risk` (place + lat/lng) + chaos | PASS |
-| Anonymous incident reporting | Doc P3.2 | `api.report` + index | ✅ | `POST /api/report` + chaos | PASS |
+| Anonymous incident reporting — typed place → geocoded map incident (ANY town, human-gated `candidate_unverified`) | Doc P3.2 | `api.report` (geocode + structured `recompute`) + index | ✅ | `POST /api/report` + off-gazetteer incident + chaos | PASS |
 | Public alert banner (top of screen) | Doc P3.1 | `index.renderBanner` + `api.alerts` | ✅ | `/api/alerts` + verify fires | PASS |
 | WakaSafe route detail — type ANY from/to (level + summary + incidents-on-corridor + map) | DeySafe add (Tesla) | `index.checkRoute` (geocoded) + `distToSeg` | ✅ | Abuja→Kaduna detail | PASS |
 | **Free-text location** — type ANY town/village (not a 48-item dropdown) | user CAPA #1 | `api.geocode` gazetteer→OSM/Nominatim (no key) + index `geocodeClient` + shared `<datalist>` | ✅ | `/api/geocode` + `/api/risk?lat&lng` + off-centroid pin | PASS |
@@ -104,7 +104,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 ---
 
 ## 3. NOT built yet (honest scope — ~a third of the master doc done)
-Production stack (Next.js + Supabase/PostGIS + Vercel) · **house-level GPS precision** (✅ typed places now resolve ANYWHERE in Nigeria via OSM/Nominatim — the 48-town wall is gone — but pins are town-centroid accurate, not house-number) · **report→incident pipeline is still gazetteer-based** (`geoparse`): a typed *report* of an unrecognised town is logged + audited but may not yet create a map incident — NEXT CAPA · user accounts & auth · reputation system · live push/WhatsApp/SMS · satellite SAR/VIIRS pipeline · 72-hour risk forecast · NRT integration · scheduled cron scrapers · Telegram/Facebook/YouTube monitors · predictive model · evidentiary chain-of-custody.
+Production stack (Next.js + Supabase/PostGIS + Vercel) · **house-level GPS precision** (✅ typed places now resolve ANYWHERE in Nigeria via OSM/Nominatim — the 48-town wall is gone — but pins are town-centroid accurate, not house-number) · ✅ **report→incident now geocodes** (a typed report of ANY town creates a human-gated `candidate_unverified` map incident; only the unstructured **live-RSS** ingest path still uses gazetteer `geoparse` — that's the next geo CAPA) · user accounts & auth · reputation system · live push/WhatsApp/SMS · satellite SAR/VIIRS pipeline · 72-hour risk forecast · NRT integration · scheduled cron scrapers · Telegram/Facebook/YouTube monitors · predictive model · evidentiary chain-of-custody.
 
 **Gated on YOU:** an AI key (turns on real AI) · production accounts (Supabase/Vercel) · channel keys (push/WhatsApp/SMS).
 
