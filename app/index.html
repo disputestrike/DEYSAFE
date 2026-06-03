@@ -68,6 +68,11 @@
   .sight{font-size:13px;color:var(--ink);padding:8px 0;border-top:1px solid var(--line);display:flex;gap:8px}
   .sight .dot{color:#0ea5e9}
   .note{color:var(--faint);font-size:12px;text-align:center;margin:14px 8px 0;line-height:1.5}
+  .locctrl{display:flex;flex-direction:column;gap:6px}
+  .locctrl button{width:42px;height:42px;border:none;border-radius:11px;background:#fff;color:#1f2a44;box-shadow:0 2px 10px rgba(16,24,40,.22);font-size:19px;line-height:1;cursor:pointer;display:grid;place-items:center}
+  .locctrl button:active{transform:translateY(1px)}
+  .toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);background:#10233f;color:#eaf0fb;border:1px solid #25406b;padding:10px 16px;border-radius:999px;font-size:13.5px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:1200;max-width:90%;text-align:center}
+  .toast.show{opacity:1}
   .mm{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.3);border:2px solid #fff}
   .mm span{transform:rotate(45deg);font-size:13px}
   nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:600}
@@ -96,6 +101,7 @@
   </header>
   <div id="alertBanner" class="abanner" style="display:none"></div>
   <datalist id="placelist"></datalist>
+  <div class="toast" id="toast"></div>
   <main>
     <section class="view active" id="v-home">
       <div id="map"></div>
@@ -184,6 +190,14 @@ function initMap(){
   map=L.map('map',{zoomControl:true,attributionControl:false}).setView([9.2,8.2],6);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd'}).addTo(map);
   incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);areaLayer=L.layerGroup().addTo(map);
+  var Ctrl=L.Control.extend({options:{position:'bottomright'},onAdd:function(){
+    var d=L.DomUtil.create('div','locctrl');
+    var b1=L.DomUtil.create('button','',d);b1.innerHTML='📍';b1.title='Center on my location (private)';
+    var b2=L.DomUtil.create('button','',d);b2.innerHTML='⤢';b2.title='Reset map view';
+    L.DomEvent.on(b1,'click',function(e){L.DomEvent.stop(e);locateMe();});
+    L.DomEvent.on(b2,'click',function(e){L.DomEvent.stop(e);resetView();});
+    L.DomEvent.disableClickPropagation(d);return d;}});
+  map.addControl(new Ctrl());
   map.on('click',onMapTap);
 }
 var tapPin=null;
@@ -272,22 +286,43 @@ async function loadPlaces(){const m=await fetch('/api/places').then(r=>r.json())
 function pick(el,k,v){el.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));el.classList.add('on');
   if(k==='RTYPE')window.RTYPE=v;else SOS_TYPE=v;}
 async function geocodeClient(q){try{const r=await fetch('/api/geocode?q='+encodeURIComponent(q)).then(x=>x.json());return r.result;}catch(e){return null;}}
-async function loadLevel(){const p=$('#areaSelect').value.trim();if(!p)return;
-  const rep=$('#areaReport');if(rep)rep.innerHTML='<p class="note">Building area report…</p>';
-  let r,g=await geocodeClient(p);
-  if(g){r=await fetch('/api/risk?lat='+g.lat+'&lng='+g.lng).then(x=>x.json());}
-  else{r=await fetch('/api/risk?place='+encodeURIComponent(p)).then(x=>x.json());}
-  const lvl=r.level||'GREEN',name=(g&&g.name)||p,rad=r.radius_km||60,n=r.count||0;
+function toast(t){var e=$('#toast');if(!e)return;e.textContent=t;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(function(){e.classList.remove('show');},2600);}
+function hav(la1,lo1,la2,lo2){var R=6371,p1=la1*Math.PI/180,p2=la2*Math.PI/180,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180;var x=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2);return 2*R*Math.asin(Math.sqrt(x));}
+const GUIDE={GREEN:"No verified danger nearby. Remain alert.",YELLOW:"Unconfirmed report nearby. Exercise caution.",ORANGE:"Active danger reported nearby. Avoid the area if you can.",RED:"Critical verified threat. Do not travel; follow official guidance."};
+// On-device area report from already-loaded PUBLIC incidents. Used by "locate me"
+// so your GPS coordinate never leaves your phone (privacy bright line).
+function riskAtClient(lat,lng,rad){rad=rad||60;
+  var rel=INCS.map(function(i){return {lat:i.lat,lng:i.lng,status:i.status,type:i.type,location_name:i.location_name,state:i.state,distance_km:Math.round(hav(lat,lng,i.lat,i.lng)*10)/10};})
+              .filter(function(i){return i.distance_km<=rad;});
+  var worst='GREEN';rel.forEach(function(i){var l=LV[i.status]||'YELLOW';if(ORD[l]>ORD[worst])worst=l;});
+  rel.sort(function(a,b){var d=ORD[LV[b.status]||'YELLOW']-ORD[LV[a.status]||'YELLOW'];return d||(a.distance_km-b.distance_km);});
+  return {level:worst,guidance:GUIDE[worst],radius_km:rad,count:rel.length,incidents:rel.slice(0,8)};}
+function showArea(name,r,lat,lng,isMe){
+  const lvl=r.level||'GREEN',rad=r.radius_km||60,n=r.count||0,rep=$('#areaReport');
   chip(lvl);const pill=$('#lvpill');pill.textContent=lvl;pill.style.background=COL[lvl]+'22';pill.style.color=COL[lvl];
   $('#guide').textContent=r.guidance||'';
   const list=(r.incidents||[]).map(function(i){var lv=LV[i.status]||'YELLOW';
     return '<div class="alert '+lv+'" onclick="focusPt('+i.lat+','+i.lng+')"><div class="r1"><span class="pl">'+i.location_name+', '+i.state+'</span><span class="badge '+lv+'">'+lv+'</span></div><div class="mt">'+i.type.replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+(i.distance_km!=null?(' · '+i.distance_km+' km away'):'')+'</div></div>';}).join('');
-  if(rep)rep.innerHTML='<div class="lvl '+lvl+'"><b>'+lvl+' · '+name+'</b><div class="guide">'+(r.guidance||'')+'</div><div class="mt" style="margin-top:6px">'+n+' incident(s) within '+rad+' km</div></div>'
+  if(rep)rep.innerHTML='<div class="lvl '+lvl+'"><b>'+lvl+' · '+name+'</b><div class="guide">'+(r.guidance||'')+'</div><div class="mt" style="margin-top:6px">'+n+' incident(s) within '+rad+' km'+(isMe?' · 📍 stays on your device':'')+'</div></div>'
     +(list?('<h2 class="t" style="margin-top:14px">In your area ('+rad+' km)</h2>'+list):'<p class="note">No incidents reported within '+rad+' km right now. Stay alert.</p>');
-  if(g&&map&&areaLayer){areaLayer.clearLayers();
-    L.circle([g.lat,g.lng],{radius:rad*1000,color:COL[lvl],weight:2,fillColor:COL[lvl],fillOpacity:.08}).addTo(areaLayer);
-    L.marker([g.lat,g.lng],{icon:missIcon('🏠')}).addTo(areaLayer).bindPopup('Your area: '+name);
-    try{map.setView([g.lat,g.lng],8);}catch(e){}}}
+  if(lat!=null&&map&&areaLayer){areaLayer.clearLayers();
+    L.circle([lat,lng],{radius:rad*1000,color:COL[lvl],weight:2,fillColor:COL[lvl],fillOpacity:.08}).addTo(areaLayer);
+    L.marker([lat,lng],{icon:missIcon(isMe?'📍':'🏠')}).addTo(areaLayer).bindPopup(isMe?'You are here · private to your device':('Your area: '+name));
+    try{map.setView([lat,lng],isMe?11:8);}catch(e){}}}
+async function loadLevel(){const p=$('#areaSelect').value.trim();if(!p)return;
+  const rep=$('#areaReport');if(rep)rep.innerHTML='<p class="note">Building area report…</p>';
+  let r,g=await geocodeClient(p);
+  if(g){r=await fetch('/api/risk?lat='+g.lat+'&lng='+g.lng).then(x=>x.json());showArea(g.name||p,r,g.lat,g.lng,false);}
+  else{r=await fetch('/api/risk?place='+encodeURIComponent(p)).then(x=>x.json());showArea(p,r,null,null,false);}}
+function locateMe(){
+  if(!navigator.geolocation){toast('Location not supported — type your area');$('#areaSelect').focus();return;}
+  toast('📍 Finding you — stays on your device…');
+  navigator.geolocation.getCurrentPosition(function(pos){
+    var lat=pos.coords.latitude,lng=pos.coords.longitude;
+    showArea('Your location',riskAtClient(lat,lng,60),lat,lng,true);
+  },function(err){toast('Location off — type your area instead');$('#areaSelect').focus();},
+  {enableHighAccuracy:true,timeout:8000,maximumAge:30000});}
+function resetView(){if(map){try{map.setView([9.2,8.2],6);}catch(e){}}}
 async function loadData(){const[a,b,al]=await Promise.all([fetch('/api/incidents').then(r=>r.json()),fetch('/api/missing').then(r=>r.json()),fetch('/api/alerts').then(r=>r.json())]);
   INCS=a.incidents||[];MISS=b.missing||[];renderBanner(al.alerts||[]);drawMarkers();renderHome();renderMissList();}
 function renderBanner(alerts){const el=$('#alertBanner');const a=alerts[0];
