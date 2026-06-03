@@ -8,7 +8,7 @@ against this document.
 MEASURE (pass rate) → ADJUST. Nothing is "done" until it's in the matrix AND passes its gate.
 
 **Run the automated gate:** `python validate.py` (against the live server).
-**Last run: 2026-06-03 → 39 passed / 0 failed** (19 endpoint + 16 chaos + 4 functional).
+**Last run: 2026-06-03 → 40 passed / 0 failed** (20 endpoint + 16 chaos + 4 functional).
 
 Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your account/key · ⛔ excluded by a safety bright-line
 
@@ -19,7 +19,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 ### A. Intelligence engine
 | Feature | Source | Where it lives | Status | Validation | Result |
 |---|---|---|---|---|---|
-| Signal ingestion (samples + live RSS) | Doc P6 | `engine/ingest.py` | ✅ / live-RSS ◑ | pipeline run | PASS (samples) |
+| Signal ingestion (samples + live RSS) | Doc P6 | `engine/ingest.py` + `api` `/api/ingest-live` + console "⟳ Pull live public feeds" | ✅ (live: 8 public NG feeds, operator-triggered) | `POST /api/ingest-live` gate + live: 124 items → real incidents | PASS |
 | Geo-parse (type + NG location + language) | Doc P5 | `engine/geoparse.py` | ✅ | `/api/classify` rule-based | PASS |
 | Corroboration · confidence · abstention | Doc P3.3 | `engine/corroborate.py` | ✅ | functional flow C | PASS |
 | Human-gate (nothing auto-verifies) | Doc P3.3 / P4(human ctrl) | `corroborate.py` + `api.verify` | ✅ | verify required to confirm | PASS |
@@ -57,6 +57,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Feature | Source | Where it lives | Status | Validation | Result |
 |---|---|---|---|---|---|
 | Triage queue (review-worthy, undecided) | Doc P3.5 | `api.review_queue` + `app/review.html` | ✅ | `GET /api/queue` | PASS |
+| Operator-triggered live scrape (public NG news → queue) | user ask "is this scraping?" | `api` `/api/ingest-live` + console button | ✅ | gate + live (124 items, never-500) | PASS |
 | Verify / Dismiss (the human gate) | Doc P3.5 | `api.verify` + review.html | ✅ | verify flow | PASS |
 | Alert generation on verify (L1–4 + radius + guidance + reach) | Doc P3.3 | `api.verify` → `alerts` | ✅ | verify fires alert | PASS |
 | Pattern intel · 72h forecast · source health · satellite review | Doc P3.5/P3.8 | — | ☐ / 🔑 | — | N/A |

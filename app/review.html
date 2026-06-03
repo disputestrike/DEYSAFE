@@ -46,6 +46,10 @@
     <div><h1>SHIELD · Situation Room</h1><div class="sub">Operator review — the human gate · powers DeySafe</div></div>
   </header>
   <div class="gate">⚖️ Nothing warns the public as <b>verified</b> until a person approves it here. <b>Verify</b> confirms and raises a public alert. <b>Dismiss</b> removes it. Every action is written to the audit log.</div>
+  <div style="display:flex;gap:10px;align-items:center;margin:14px 0;flex-wrap:wrap">
+    <button id="pull" style="flex:0 0 auto;padding:11px 16px;background:var(--brand);color:#fff;border:none;border-radius:10px;font-weight:700;cursor:pointer" onclick="pullLive()">⟳ Pull live public feeds</button>
+    <span class="sub" id="pullMsg">Scrapes public Nigerian news now → triage below.</span>
+  </div>
   <div class="count"><b id="n">0</b><span>incidents awaiting review</span></div>
   <div id="list"></div>
 </div>
@@ -77,6 +81,19 @@ async function decide(raw, decision){
     body:JSON.stringify({type:i.type,location_name:i.location_name,state:i.state,decision})}).then(r=>r.json());
   if(res.ok){ toast(decision==='verified'?('✓ '+i.location_name+' verified — public alert raised'):('Dismissed '+i.location_name)); load(); }
   else toast('⚠ '+(res.error||'failed'));
+}
+async function pullLive(){
+  const b=$('#pull'); b.disabled=true; const old=b.textContent; b.textContent='⟳ Pulling…';
+  $('#pullMsg').textContent='Fetching public news feeds…';
+  try{
+    const r=await fetch('/api/ingest-live',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(x=>x.json());
+    $('#pullMsg').textContent = r.ok
+      ? ('Fetched '+r.fetched+' news items · '+r.added+' new · '+r.incidents+' live incidents · '+r.queue+' awaiting review')
+      : 'Some feeds failed — showing what we got.';
+    toast(r.ok?('✓ Live pull: '+r.added+' new signals'):'⚠ Live pull had errors');
+    load();
+  }catch(e){ $('#pullMsg').textContent='Live pull failed (network).'; toast('⚠ Live pull failed'); }
+  b.disabled=false; b.textContent=old;
 }
 load();
 </script>

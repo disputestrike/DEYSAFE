@@ -336,6 +336,28 @@ class Handler(BaseHTTPRequestHandler):
             risk = risk_at(public_incidents(db), lat, lng) if lat is not None else risk_for(public_incidents(db), place)
             return self._json({"ok": True, "risk": risk})
 
+        if u.path == "/api/ingest-live":
+            # Operator-triggered pull of PUBLIC Nigerian news RSS. Public data only;
+            # per-feed failures are skipped. RSS is unstructured -> gazetteer geoparse;
+            # everything lands as candidate_unverified (human still gates escalation).
+            fetched, added, ok = 0, 0, True
+            try:
+                sigs = ingest.load_live()
+                fetched = len(sigs)
+                for sg in sigs:
+                    _id, is_new = db.insert_signal(sg)
+                    if is_new:
+                        added += 1
+                recompute(db)
+            except Exception as e:
+                db.audit("operator", "ingest_live_error", repr(e)[:200])
+                ok = False
+            inc = len(public_incidents(db))
+            if ok:
+                db.audit("operator", "ingest_live", "fetched={} added={} incidents={}".format(fetched, added, inc))
+            return self._json({"ok": ok, "fetched": fetched, "added": added, "incidents": inc,
+                               "queue": len(review_queue(db))})
+
         if u.path == "/api/missing":
             name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()
             if not name or not place:
