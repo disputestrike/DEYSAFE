@@ -79,10 +79,10 @@
     nav{position:static;order:1;width:auto;max-width:none;transform:none;justify-content:flex-start;border-top:none;border-bottom:1px solid var(--line);padding:0 8px}
     nav button{flex:none;flex-direction:row;gap:8px;padding:14px 18px;font-size:13.5px}
     nav button svg{width:18px;height:18px}
-    main{order:2;padding-bottom:0;display:flex;flex-direction:column;flex:1}
-    #v-home{display:flex;flex-direction:row;flex:1}
-    #v-home .panel{order:0;width:384px;flex:none;height:calc(100vh - 108px);overflow:auto;border-right:1px solid var(--line)}
-    #v-home #map{order:1;flex:1;height:calc(100vh - 108px)}
+    main{order:2;padding-bottom:0;display:flex;flex-direction:column;flex:1;min-height:0}
+    #v-home.active{display:flex;flex-direction:row;flex:1;min-height:0}
+    #v-home .panel{order:0;width:384px;flex:none;height:auto;overflow:auto;border-right:1px solid var(--line)}
+    #v-home #map{order:1;flex:1;height:auto}
     .view.pad{max-width:600px;margin:0 auto;width:100%}
   }
 </style>
@@ -123,7 +123,7 @@
 
     <section class="view pad" id="v-report">
       <h2 class="t">Report danger</h2>
-      <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Anonymous. We never ask who you are.</p>
+      <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Anonymous. We never ask who you are. <b>Tip:</b> tap the map to set the spot.</p>
       <div class="types" id="typeGrid"></div>
       <label class="f">Nearest town / area</label><select id="rPlace"></select>
       <label class="f">What's happening? (no names — what &amp; where)</label>
@@ -182,7 +182,15 @@ function initMap(){
   map=L.map('map',{zoomControl:true,attributionControl:false}).setView([9.2,8.2],6);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd'}).addTo(map);
   incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);
+  map.on('click',onMapTap);
 }
+var tapPin=null;
+function nearestPlace(lat,lng){var best=null,bd=1e18;for(var name in PLACE_COORDS){var c=PLACE_COORDS[name];var d=(c[0]-lat)*(c[0]-lat)+(c[1]-lng)*(c[1]-lng);if(d<bd){bd=d;best=name;}}return best;}
+function onMapTap(e){var np=nearestPlace(e.latlng.lat,e.latlng.lng);if(!np)return;
+  if(tapPin)map.removeLayer(tapPin);
+  tapPin=L.marker(e.latlng,{icon:missIcon('!')}).addTo(map)
+    .bindPopup('Near <b>'+np+'</b><br><a href="#" onclick="go(\'report\');return false">⚠ Report danger here →</a>').openPopup();
+  $('#rPlace').value=np;}
 function drawMarkers(){
   incLayer.clearLayers();missLayer.clearLayers();
   INCS.forEach(i=>{const lv=LV[i.status]||'YELLOW';
