@@ -30,7 +30,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Feature | Source | Where it lives | Status | Validation | Result |
 |---|---|---|---|---|---|
 | Map-first home (Leaflet + markers) | Doc P3.1 | `app/index.html` | ✅ | served HTML / browser | PASS |
-| Area risk GREEN/YELLOW/ORANGE/RED + guidance (typed area, proximity) | Doc P4 / GDACS | `api.risk_for` + `api.risk_at` + index | ✅ | `GET /api/risk` (place + lat/lng) + chaos | PASS |
+| **Geofenced area report** ("drill fence") — type area → written report: level + N incidents within radius + per-incident type/status/distance + circle on map | Doc P4 / GDACS + user "drill fence" | `api.risk_at` (radius+distance) + index `loadLevel`/`areaLayer` | ✅ | `GET /api/risk?lat&lng` + browser (Kaduna ORANGE, Gusau RED) | PASS |
 | Anonymous incident reporting — typed place → geocoded map incident (ANY town, human-gated `candidate_unverified`) | Doc P3.2 | `api.report` (geocode + structured `recompute`) + index | ✅ | `POST /api/report` + off-gazetteer incident + chaos | PASS |
 | Public alert banner (top of screen) | Doc P3.1 | `index.renderBanner` + `api.alerts` | ✅ | `/api/alerts` + verify fires | PASS |
 | WakaSafe route detail — type ANY from/to (level + summary + incidents-on-corridor + map) | DeySafe add (Tesla) | `index.checkRoute` (geocoded) + `distToSeg` | ✅ | Abuja→Kaduna detail | PASS |
@@ -66,6 +66,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Feature | Source | Where it lives | Status | Validation | Result |
 |---|---|---|---|---|---|
 | LLM classifier — Cerebras **round-robin 5 keys** + failover (Gemini/Groq alt) | Doc P5 | `engine/ai.py` | ✅ built, **OFF (no key)** 🔑 | `/api/ai-status` + `/api/classify` | PASS (off→rule-based) |
+| **Live news → AI extraction** (AI reads news geoparse can't place → type+place → geocode → structured incident; capped 30/pull, key-gated) | Doc P5 | `api` `/api/ingest-live` (`ai.classify`+`coords_for`+`db.update_signal_geo`) | ◑ built, **needs key to prove** 🔑 | gate: no-key path green; `ai_on`/`ai_used` in response | PASS (off→rule-based) |
 | Multi-language extraction (EN/HA/YO/Pidgin) | Doc P5 | `ai.SYSTEM` | ◑ built, unproven w/o key | — | needs key |
 
 ### F. Broadcast / channels
@@ -105,7 +106,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 ---
 
 ## 3. NOT built yet (honest scope — ~a third of the master doc done)
-Production stack (Next.js + Supabase/PostGIS + Vercel) · **house-level GPS precision** (✅ typed places now resolve ANYWHERE in Nigeria via OSM/Nominatim — the 48-town wall is gone — but pins are town-centroid accurate, not house-number) · ✅ **report→incident now geocodes** (a typed report of ANY town creates a human-gated `candidate_unverified` map incident; only the unstructured **live-RSS** ingest path still uses gazetteer `geoparse` — that's the next geo CAPA) · user accounts & auth · reputation system · live push/WhatsApp/SMS · satellite SAR/VIIRS pipeline · 72-hour risk forecast · NRT integration · scheduled cron scrapers · Telegram/Facebook/YouTube monitors · predictive model · evidentiary chain-of-custody.
+Production stack (Next.js + Supabase/PostGIS + Vercel) · **house-level GPS precision** (✅ typed places now resolve ANYWHERE in Nigeria via OSM/Nominatim — the 48-town wall is gone — but pins are town-centroid accurate, not house-number) · ✅ **report→incident now geocodes** (a typed report of ANY town creates a human-gated `candidate_unverified` map incident) · ✅ **live news → AI extraction wired** (when a Cerebras key is set, news the gazetteer can't place is AI-read → geocoded → mapped; capped 30/pull; **needs your key to prove**) · user accounts & auth · reputation system · live push/WhatsApp/SMS · satellite SAR/VIIRS pipeline · 72-hour risk forecast · NRT integration · scheduled cron scrapers · Telegram/Facebook/YouTube monitors · predictive model · evidentiary chain-of-custody.
 
 **Gated on YOU:** an AI key (turns on real AI) · production accounts (Supabase/Vercel) · channel keys (push/WhatsApp/SMS).
 

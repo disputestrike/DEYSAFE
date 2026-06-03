@@ -102,6 +102,7 @@
       <div class="panel">
         <div class="srow"><input id="areaSelect" list="placelist" autocomplete="off" placeholder="Type your town or area…" aria-label="Your area" /><span class="pill" id="lvpill">—</span></div>
         <div class="guide" id="guide"></div>
+        <div id="areaReport"></div>
         <div class="chips">
           <button onclick="go('report')">⚠ Report danger</button>
           <button onclick="go('sos')">🆘 Help</button>
@@ -174,7 +175,7 @@ const $=(s)=>document.querySelector(s);
 const COL={RED:'#d92d20',ORANGE:'#ef6c12',YELLOW:'#e0a106',GREEN:'#1aa260'};
 const LV={verified:'RED',needs_human_review:'ORANGE',corroborated:'ORANGE',candidate_unverified:'YELLOW'};
 const ORD={GREEN:0,YELLOW:1,ORANGE:2,RED:3};
-let map,incLayer,missLayer,routeLayer,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
+let map,incLayer,missLayer,routeLayer,areaLayer,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
 
 function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
 function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>'+e+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});}
@@ -182,7 +183,7 @@ function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>
 function initMap(){
   map=L.map('map',{zoomControl:true,attributionControl:false}).setView([9.2,8.2],6);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd'}).addTo(map);
-  incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);
+  incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);areaLayer=L.layerGroup().addTo(map);
   map.on('click',onMapTap);
 }
 var tapPin=null;
@@ -272,11 +273,21 @@ function pick(el,k,v){el.parentNode.querySelectorAll('button').forEach(b=>b.clas
   if(k==='RTYPE')window.RTYPE=v;else SOS_TYPE=v;}
 async function geocodeClient(q){try{const r=await fetch('/api/geocode?q='+encodeURIComponent(q)).then(x=>x.json());return r.result;}catch(e){return null;}}
 async function loadLevel(){const p=$('#areaSelect').value.trim();if(!p)return;
+  const rep=$('#areaReport');if(rep)rep.innerHTML='<p class="note">Building area report…</p>';
   let r,g=await geocodeClient(p);
-  if(g){r=await fetch('/api/risk?lat='+g.lat+'&lng='+g.lng).then(x=>x.json());if(map){try{map.setView([g.lat,g.lng],9);}catch(e){}}}
+  if(g){r=await fetch('/api/risk?lat='+g.lat+'&lng='+g.lng).then(x=>x.json());}
   else{r=await fetch('/api/risk?place='+encodeURIComponent(p)).then(x=>x.json());}
-  chip(r.level);const pill=$('#lvpill');pill.textContent=r.level;pill.style.background=COL[r.level]+'22';pill.style.color=COL[r.level];
-  $('#guide').textContent=r.guidance+' ('+(r.count||0)+' nearby)';}
+  const lvl=r.level||'GREEN',name=(g&&g.name)||p,rad=r.radius_km||60,n=r.count||0;
+  chip(lvl);const pill=$('#lvpill');pill.textContent=lvl;pill.style.background=COL[lvl]+'22';pill.style.color=COL[lvl];
+  $('#guide').textContent=r.guidance||'';
+  const list=(r.incidents||[]).map(function(i){var lv=LV[i.status]||'YELLOW';
+    return '<div class="alert '+lv+'" onclick="focusPt('+i.lat+','+i.lng+')"><div class="r1"><span class="pl">'+i.location_name+', '+i.state+'</span><span class="badge '+lv+'">'+lv+'</span></div><div class="mt">'+i.type.replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+(i.distance_km!=null?(' · '+i.distance_km+' km away'):'')+'</div></div>';}).join('');
+  if(rep)rep.innerHTML='<div class="lvl '+lvl+'"><b>'+lvl+' · '+name+'</b><div class="guide">'+(r.guidance||'')+'</div><div class="mt" style="margin-top:6px">'+n+' incident(s) within '+rad+' km</div></div>'
+    +(list?('<h2 class="t" style="margin-top:14px">In your area ('+rad+' km)</h2>'+list):'<p class="note">No incidents reported within '+rad+' km right now. Stay alert.</p>');
+  if(g&&map&&areaLayer){areaLayer.clearLayers();
+    L.circle([g.lat,g.lng],{radius:rad*1000,color:COL[lvl],weight:2,fillColor:COL[lvl],fillOpacity:.08}).addTo(areaLayer);
+    L.marker([g.lat,g.lng],{icon:missIcon('🏠')}).addTo(areaLayer).bindPopup('Your area: '+name);
+    try{map.setView([g.lat,g.lng],8);}catch(e){}}}
 async function loadData(){const[a,b,al]=await Promise.all([fetch('/api/incidents').then(r=>r.json()),fetch('/api/missing').then(r=>r.json()),fetch('/api/alerts').then(r=>r.json())]);
   INCS=a.incidents||[];MISS=b.missing||[];renderBanner(al.alerts||[]);drawMarkers();renderHome();renderMissList();}
 function renderBanner(alerts){const el=$('#alertBanner');const a=alerts[0];

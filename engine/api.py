@@ -129,11 +129,20 @@ def _hav(a, b):
 
 
 def risk_at(incidents, lat, lng, radius_km=60):
-    rel = [i for i in incidents if _hav((lat, lng), (i["lat"], i["lng"])) <= radius_km]
+    # Geofenced ("drill fence") area report: every incident within radius_km of the
+    # typed point, each tagged with its distance, worst-severity first then nearest.
+    rel = []
+    for i in incidents:
+        d = _hav((lat, lng), (i["lat"], i["lng"]))
+        if d <= radius_km:
+            j = dict(i)
+            j["distance_km"] = round(d, 1)
+            rel.append(j)
     top = max((RISK.get(i["status"], 1) for i in rel), default=0)
     level = public_level(top)
-    return {"place": None, "lat": lat, "lng": lng, "level": level, "guidance": PUBLIC_GUIDANCE[level],
-            "count": len(rel), "incidents": sorted(rel, key=lambda i: -i["confidence"])[:6]}
+    rel.sort(key=lambda i: (-RISK.get(i["status"], 1), i["distance_km"]))
+    return {"place": None, "lat": lat, "lng": lng, "radius_km": radius_km, "level": level,
+            "guidance": PUBLIC_GUIDANCE[level], "count": len(rel), "incidents": rel[:8]}
 
 
 def public_level(top):
@@ -340,23 +349,38 @@ class Handler(BaseHTTPRequestHandler):
             # Operator-triggered pull of PUBLIC Nigerian news RSS. Public data only;
             # per-feed failures are skipped. RSS is unstructured -> gazetteer geoparse;
             # everything lands as candidate_unverified (human still gates escalation).
-            fetched, added, ok = 0, 0, True
+            fetched, added, ai_used, ok = 0, 0, 0, True
+            AI_CAP = 30  # bound LLM calls per pull (cost/latency); reported, not silent
             try:
                 sigs = ingest.load_live()
                 fetched = len(sigs)
                 for sg in sigs:
-                    _id, is_new = db.insert_signal(sg)
-                    if is_new:
-                        added += 1
+                    sid, is_new = db.insert_signal(sg)
+                    if not is_new:
+                        continue
+                    added += 1
+                    # Spend AI ONLY on fresh news the rule-based parser can't place.
+                    # AI extracts type+place -> geocode -> promote to a structured signal.
+                    if ai.available() and ai_used < AI_CAP and not geoparse.geoparse(sg):
+                        ai_used += 1
+                        res = ai.classify((sg.get("title", "") + ". " + sg.get("text", "")).strip())
+                        if isinstance(res, dict) and res.get("is_incident") and res.get("incident_type") in TYPES and res.get("location_text"):
+                            g = geocode(res["location_text"])
+                            if g:
+                                db.update_signal_geo(sid, {
+                                    "lat": g["lat"], "lng": g["lng"], "location_name": g["name"],
+                                    "state": res.get("state") or g.get("state", ""),
+                                    "gtype": res["incident_type"],
+                                    "gseverity": 1 if res.get("urgency") in ("high", "critical") else 0})
                 recompute(db)
             except Exception as e:
                 db.audit("operator", "ingest_live_error", repr(e)[:200])
                 ok = False
             inc = len(public_incidents(db))
             if ok:
-                db.audit("operator", "ingest_live", "fetched={} added={} incidents={}".format(fetched, added, inc))
-            return self._json({"ok": ok, "fetched": fetched, "added": added, "incidents": inc,
-                               "queue": len(review_queue(db))})
+                db.audit("operator", "ingest_live", "fetched={} added={} ai={} incidents={}".format(fetched, added, ai_used, inc))
+            return self._json({"ok": ok, "fetched": fetched, "added": added, "ai_used": ai_used,
+                               "ai_on": ai.available(), "incidents": inc, "queue": len(review_queue(db))})
 
         if u.path == "/api/missing":
             name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()

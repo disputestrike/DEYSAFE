@@ -89,7 +89,7 @@ s, j, _ = call("POST", "/api/sighting", {"case_id": cid, "place": "Jibia", "hour
 s, j, _ = call("POST", "/api/verify", {"type": "kidnapping", "location_name": "Shiroro", "state": "Niger", "decision": "verified"}); check("POST /api/verify (+alert)", s == 200 and j.get("ok"), j)
 s, j, _ = call("POST", "/api/case-status", {"case_id": cid, "status": "located"}); check("POST /api/case-status", s == 200 and j.get("ok"), j)
 s, j, _ = call("POST", "/api/classify", {"text": "Gunmen kidnapped 15 students in Kankara"}); check("POST /api/classify", s == 200 and "ai" in j, j)
-s, j, _ = call("POST", "/api/ingest-live", {}, timeout=90); check("POST /api/ingest-live (public RSS, no key, never 500)", s == 200 and "fetched" in j and "incidents" in j, j)
+s, j, _ = call("POST", "/api/ingest-live", {}, timeout=90); check("POST /api/ingest-live (public RSS, key-gated AI, never 500)", s == 200 and "fetched" in j and "incidents" in j and "ai_on" in j, j)
 s, j, _ = call("POST", "/api/missing", {"name": "Geo Test Case", "place": "Gwoza", "hours_ago": 1, "count": 1})
 gcase = next((x for x in (j.get("missing") or []) if x.get("name") == "Geo Test Case"), {})
 check("typed non-dropdown place gets real coords (FindMe pin off-centroid)", s == 200 and 4 < (gcase.get("lat") or 0) < 14 and not (abs((gcase.get("lat") or 0) - 9.2) < 0.05 and abs((gcase.get("lng") or 0) - 8.2) < 0.05), gcase.get("lat"))

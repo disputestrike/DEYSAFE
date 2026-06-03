@@ -87,10 +87,11 @@ async function pullLive(){
   $('#pullMsg').textContent='Fetching public news feeds…';
   try{
     const r=await fetch('/api/ingest-live',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(x=>x.json());
+    const aimsg = r.ai_on ? (' · 🤖 AI-extracted '+r.ai_used) : ' · AI off (set CEREBRAS key)';
     $('#pullMsg').textContent = r.ok
-      ? ('Fetched '+r.fetched+' news items · '+r.added+' new · '+r.incidents+' live incidents · '+r.queue+' awaiting review')
+      ? ('Fetched '+r.fetched+' · '+r.added+' new · '+r.incidents+' incidents · '+r.queue+' to review'+aimsg)
       : 'Some feeds failed — showing what we got.';
-    toast(r.ok?('✓ Live pull: '+r.added+' new signals'):'⚠ Live pull had errors');
+    toast(r.ok?('✓ Live pull: '+r.added+' new'+(r.ai_on?(' · AI '+r.ai_used):'')):'⚠ Live pull had errors');
     load();
   }catch(e){ $('#pullMsg').textContent='Live pull failed (network).'; toast('⚠ Live pull failed'); }
   b.disabled=false; b.textContent=old;

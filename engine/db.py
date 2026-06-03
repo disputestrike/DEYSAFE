@@ -84,6 +84,15 @@ class DB:
         self.conn.commit()
         return cur.lastrowid, True
 
+    def update_signal_geo(self, sid, geo):
+        # Used when an AI key extracts type+place from unstructured news: promote the
+        # signal to a structured one so recompute() pins it like a community report.
+        self.conn.execute(
+            "UPDATE signals SET lat=?, lng=?, location_name=?, state=?, gtype=?, gseverity=? WHERE id=?",
+            (geo.get("lat"), geo.get("lng"), geo.get("location_name"), geo.get("state"),
+             geo.get("gtype"), geo.get("gseverity"), sid))
+        self.conn.commit()
+
     def replace_incidents(self, incidents):
         self.conn.execute("DELETE FROM incidents")
         self.conn.execute("DELETE FROM incident_signals")
