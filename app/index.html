@@ -324,7 +324,8 @@ $('#areaSelect').onchange=loadLevel;
 
 (async function(){initMap();await loadPlaces();await loadLevel();await loadData();
   setTimeout(()=>map.invalidateSize(),120);
-  if('serviceWorker'in navigator){try{await navigator.serviceWorker.register('/sw.js');}catch(e){}}})();
+  // Unregister any stale service worker so the app is never served from a cache.
+  if('serviceWorker'in navigator){try{var rs=await navigator.serviceWorker.getRegistrations();rs.forEach(function(r){r.unregister();});}catch(e){}}})();
 </script>
 </body>
 </html>

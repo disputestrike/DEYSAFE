@@ -1,17 +1,14 @@
-const CACHE = 'deysafe-v2';
-const SHELL = ['/', '/index.html', '/manifest.json', '/icon.svg'];
-
-self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+// KILL-SWITCH service worker.
+// Any browser still holding an old cached app will fetch this on its next visit,
+// which unregisters the stale worker and clears all caches so the fresh app loads.
+// (A versioned offline SW can be re-added for production later.)
+self.addEventListener('install', function () { self.skipWaiting(); });
+self.addEventListener('activate', function (e) {
+  e.waitUntil((async function () {
+    try { const ks = await caches.keys(); await Promise.all(ks.map(function (k) { return caches.delete(k); })); } catch (_) {}
+    try { await self.registration.unregister(); } catch (_) {}
+    try { const cs = await self.clients.matchAll(); cs.forEach(function (c) { c.navigate(c.url); }); } catch (_) {}
+  })());
 });
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
-self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-  if (url.pathname.startsWith('/api/')) return; // API is always live network
-  // Network-first for HTML/navigation so the app is never stale; cache is offline fallback.
-  if (e.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
-    e.respondWith(fetch(e.request).catch(() => caches.match('/index.html')));
-    return;
-  }
-  e.respondWith(caches.match(e.request).then((r) => r || fetch(e.request)));
-});
+// No fetch interception — always go to the network.
+self.addEventListener('fetch', function () {});
