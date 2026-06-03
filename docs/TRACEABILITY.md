@@ -1,0 +1,117 @@
+# DeySafe / SHIELD — Traceability & Validation Matrix (NORTH STAR)
+
+**Purpose:** one source of truth that maps every feature we've discussed to *where it lives*,
+*its status*, *how it's validated*, and *the result*. We build, measure, and accept work
+against this document.
+
+**Engineering process (every change):** MONITOR (run the gate) → CORRECT (fix fails) →
+MEASURE (pass rate) → ADJUST. Nothing is "done" until it's in the matrix AND passes its gate.
+
+**Run the automated gate:** `python validate.py` (against the live server).
+**Last run: 2026-06-02 → 33 passed / 0 failed** (16 endpoint + 14 chaos + 3 functional).
+
+Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your account/key · ⛔ excluded by a safety bright-line
+
+---
+
+## 1. Feature traceability
+
+### A. Intelligence engine
+| Feature | Source | Where it lives | Status | Validation | Result |
+|---|---|---|---|---|---|
+| Signal ingestion (samples + live RSS) | Doc P6 | `engine/ingest.py` | ✅ / live-RSS ◑ | pipeline run | PASS (samples) |
+| Geo-parse (type + NG location + language) | Doc P5 | `engine/geoparse.py` | ✅ | `/api/classify` rule-based | PASS |
+| Corroboration · confidence · abstention | Doc P3.3 | `engine/corroborate.py` | ✅ | functional flow C | PASS |
+| Human-gate (nothing auto-verifies) | Doc P3.3 / P4(human ctrl) | `corroborate.py` + `api.verify` | ✅ | verify required to confirm | PASS |
+| Append-only audit | Doc P3.9 | `db.audit` | ◑ (data only, no UI) | table writes | PARTIAL |
+| Storage | Doc P2 | `engine/db.py` (SQLite) | ✅ (Postgres ☐) | all endpoints + injection test | PASS |
+
+### B. Public app — DeySafe PWA
+| Feature | Source | Where it lives | Status | Validation | Result |
+|---|---|---|---|---|---|
+| Map-first home (Leaflet + markers) | Doc P3.1 | `app/index.html` | ✅ | served HTML / browser | PASS |
+| Area risk GREEN/YELLOW/ORANGE/RED + guidance | Doc P4 / GDACS | `api.risk_for` + index | ✅ | `GET /api/risk` + chaos | PASS |
+| Anonymous incident reporting | Doc P3.2 | `api.report` + index | ✅ | `POST /api/report` + chaos | PASS |
+| Public alert banner (top of screen) | Doc P3.1 | `index.renderBanner` + `api.alerts` | ✅ | `/api/alerts` + verify fires | PASS |
+| WakaSafe route detail (level + summary + incidents-on-corridor + map) | DeySafe add (Tesla) | `index.checkRoute` + `distToSeg` | ✅ | Abuja→Kaduna detail | PASS |
+| Tap-map-to-report | DeySafe add | `index.onMapTap` | ✅ | manual | PASS |
+| Action buttons 2×2 grid (no sideways scroll) | user feedback | `index .chips` | ✅ | manual | PASS |
+| Responsive desktop (no page-scroll) | user feedback | `index @media` (`#v-home.active`) | ✅ | manual | PASS |
+| Installable PWA (manifest) | Doc P7 | `app/manifest.json` | ✅ | served | PASS |
+| Service worker (kill-switch, no stale cache) | bugfix | `app/sw.js` | ✅ | manual | PASS |
+| SOS / Help one-tap | DeySafe add | `index` | ◑ STUB (no real dispatch ⛔) | manual | PARTIAL (honest stub) |
+
+### C. FindMe — missing persons
+| Feature | Source | Where it lives | Status | Validation | Result |
+|---|---|---|---|---|---|
+| Missing-person case (name/age/place/exact/vehicle/clothing/direction) | DeySafe add | `db.missing` + `api` + index | ✅ | `POST /api/missing` | PASS |
+| GROUP / mass-abduction headcount | user feedback | `db.count` + index | ✅ | missing `count` | PASS |
+| Crowdsourced sightings (re-anchor + tighten) | DeySafe add | `db.sightings` + `api` + index | ✅ | sighting tightens radius | PASS |
+| Time-based search radius ("triangulation") | DeySafe add | `api.missing_with_radius` | ✅ | flow C | PASS |
+| Case states (active/located/recovered) | DeySafe add | `api.case-status` | ✅ | `POST /api/case-status` | PASS |
+| Shareable flyer · map trail | DeySafe add | `index.shareFlyer/drawMarkers` | ✅ | manual | PASS |
+
+### D. SHIELD operator console
+| Feature | Source | Where it lives | Status | Validation | Result |
+|---|---|---|---|---|---|
+| Triage queue (review-worthy, undecided) | Doc P3.5 | `api.review_queue` + `app/review.html` | ✅ | `GET /api/queue` | PASS |
+| Verify / Dismiss (the human gate) | Doc P3.5 | `api.verify` + review.html | ✅ | verify flow | PASS |
+| Alert generation on verify (L1–4 + radius + guidance + reach) | Doc P3.3 | `api.verify` → `alerts` | ✅ | verify fires alert | PASS |
+| Pattern intel · 72h forecast · source health · satellite review | Doc P3.5/P3.8 | — | ☐ / 🔑 | — | N/A |
+
+### E. AI (real LLM)
+| Feature | Source | Where it lives | Status | Validation | Result |
+|---|---|---|---|---|---|
+| LLM classifier — Cerebras **round-robin 5 keys** + failover (Gemini/Groq alt) | Doc P5 | `engine/ai.py` | ✅ built, **OFF (no key)** 🔑 | `/api/ai-status` + `/api/classify` | PASS (off→rule-based) |
+| Multi-language extraction (EN/HA/YO/Pidgin) | Doc P5 | `ai.SYSTEM` | ◑ built, unproven w/o key | — | needs key |
+
+### F. Broadcast / channels
+| Feature | Source | Where it lives | Status | Result |
+|---|---|---|---|---|
+| In-app alert + reach estimate | Doc P3.3 | `api.alerts` | ✅ | PASS |
+| Push / WhatsApp / SMS-USSD (live send) | Doc P2/P3.7 | — | ☐ 🔑 | needs OneSignal/Meta/Africa's-Talking |
+| Responder routing + acknowledgement | DeySafe add | — | ☐ | — |
+
+### G. Deploy / ops
+| Feature | Where it lives | Status | Result |
+|---|---|---|---|
+| Railway-ready ($PORT/0.0.0.0, seed-if-empty, data-dir, Procfile, requirements) | `Procfile`, `api.py` | ✅ | PASS |
+| Deploy guide | `DEPLOY.md` | ✅ | PASS |
+| Git repo (branch `main`, committed) | repo | ✅ | PASS |
+| Persistent local server | `python engine/api.py` (detached) | ✅ | PASS |
+| Production DB (Postgres dual-mode via `DATABASE_URL`) | — | ☐ next | — |
+
+---
+
+## 2. Compliance & safety bright-lines (QC gate)
+| Requirement | Status | Evidence |
+|---|---|---|
+| Warning system, NOT a targeting/surveillance system (event-centric) | ✅ | design; no person-tracking endpoints |
+| Nothing auto-verified — human authorizes high-impact | ✅ | `validate.py` verify-required |
+| No telecom / financial / RF / biometric ingestion | ⛔ excluded | not built by design |
+| No auto-dispatch to armed/military responders | ⛔ excluded | SOS copy: "never auto-dispatches armed responders" |
+| Public data only | ✅ | `ingest.py` (RSS) |
+| Anonymous reporting, no PII stored | ✅ | `api.report` stores text only |
+| No naming individuals (locations/descriptions only) | ✅ | design |
+| SQL-injection safe (parameterized queries) | ✅ | chaos test: injection string + DB-intact PASS |
+| Input validation — never 500-crash on bad input | ✅ | 14/14 chaos checks PASS |
+| No stale cached app served (kill-switch SW) | ✅ | `sw.js` |
+| No secrets hardcoded (env only) | ✅ / ⚠️ | code uses env; **doc's 5 Cerebras keys are exposed → ROTATE** |
+| NDPA (Nigeria Data Protection Act) | ◑ | anonymous ✅; retention schedule + erasure ☐ |
+
+---
+
+## 3. NOT built yet (honest scope — ~a third of the master doc done)
+Production stack (Next.js + Supabase/PostGIS + Vercel) · 774-LGA / street-level geo (currently ~48 towns, approximate pins; needs GPS + HDX/OSM) · user accounts & auth · reputation system · live push/WhatsApp/SMS · satellite SAR/VIIRS pipeline · 72-hour risk forecast · NRT integration · scheduled cron scrapers · Telegram/Facebook/YouTube monitors · predictive model · evidentiary chain-of-custody.
+
+**Gated on YOU:** an AI key (turns on real AI) · production accounts (Supabase/Vercel) · channel keys (push/WhatsApp/SMS).
+
+---
+
+## 4. Pre-release gates (run before every release)
+1. **Click-through** — every endpoint returns correctly (`validate.py` section A). ✅ 16/16
+2. **Chaos** — bad/empty/huge/malformed/injection inputs validate, never crash (section B). ✅ 14/14
+3. **Functional** — corroboration raises level, sighting tightens search, verify fires alert (section C). ✅ 3/3
+4. **Visual/manual** — open `http://localhost:4500`; the in-tool screenshot can't capture the live Leaflet map (tool limitation), verified via served HTML + DOM.
+
+**To accept a new feature:** add its row here, give it a validation in `validate.py`, and it must PASS.
