@@ -41,6 +41,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | 📍 Locate-me + ⤢ reset view (Google-Maps style control) — **GPS computed ON-DEVICE, coordinate never sent to server** | user ask + privacy bright-line | `index` Leaflet ctrl + `locateMe`/`riskAtClient`/`resetView` | ✅ | browser: 0 network calls on locate, private marker + report | PASS |
 | Voice talk-back (TTS) — area + route spoken like a nav app | user ask | `index` `speak`/`sayArea`/`sayRoute` (Web Speech) | ✅ | browser: utterance composed | PASS |
 | Voice input (speech→text) — "Kaduna" / "Lagos to Kano" → runs area/route + speaks back | user ask | `index` `startVoice`/`handleVoice` (SpeechRecognition; Chrome/Android, hidden if unsupported) | ✅ | browser: intent routing both cases, 0 errors | PASS |
+| **Proactive proximity warnings** (Waze/Google style) — watch location as you move, warn of danger within 40 km (banner + voice), dedup; **GPS stays ON-DEVICE** | user "Waze proactive warning" | `index` `toggleWatch`/`checkProximity`/`proWarn` (`watchPosition`, client-side) | ✅ | browser: near-Kaduna → fires kidnapping warning, dedupes, 0 errors | PASS |
 | Action buttons 2×2 grid (no sideways scroll) | user feedback | `index .chips` | ✅ | manual | PASS |
 | Responsive desktop (no page-scroll) | user feedback | `index @media` (`#v-home.active`) | ✅ | manual | PASS |
 | Installable PWA (manifest) | Doc P7 | `app/manifest.json` | ✅ | served | PASS |
