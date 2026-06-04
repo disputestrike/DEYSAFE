@@ -8,7 +8,7 @@ against this document.
 MEASURE (pass rate) → ADJUST. Nothing is "done" until it's in the matrix AND passes its gate.
 
 **Run the automated gate:** `python validate.py` (against the live server).
-**Last run: 2026-06-04 → 49 passed / 0 failed** (27 endpoint + 18 chaos + 4 functional) — verified on **BOTH SQLite and PostgreSQL**.
+**Last run: 2026-06-04 → 56 passed / 0 failed** (32 endpoint + 20 chaos + 4 functional) — verified on **BOTH SQLite and PostgreSQL**.
 
 Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your account/key · ⛔ excluded by a safety bright-line
 
@@ -58,6 +58,8 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Crowdsourced sightings (re-anchor + tighten) | DeySafe add | `db.sightings` + `api` + index | ✅ | sighting tightens radius | PASS |
 | Time-based search radius (single circle) | DeySafe add | `api.missing_with_radius` | ✅ | flow C | PASS |
 | **Venn-diagram triangulation** — last-seen + every sighting = a reachability ring; intersection (densest overlap) = most-likely zone + 🎯 marker + spoken stat; more sightings → tighter | user "triangulation shape" / Venn | `index.triangulate` (client-side) | ✅ | browser: 3/3 sources → ~24 km zone, 0 errors | PASS |
+| **Movement prediction (Strava)** — heading cone + ➡️ forward marker from the sighting trail / direction text | user research | `index.triangulate` (bearing/cone) + danger heatmap toggle | ✅ | browser: NE trail → "north-east" cone | PASS |
+| **Bluetooth crowd-relay (AirTag model)** — register a beacon; any phone that hears it → a sighting → tighter search; offline store-and-forward | user "Bluetooth mesh" | `api` `/api/beacon-relay` + `db.beacon_id` | ✅ backend (native BLE scanner = native-app milestone) | gate: relay→sighting on SQLite+PG | PASS |
 | Case states (active/located/recovered) | DeySafe add | `api.case-status` | ✅ | `POST /api/case-status` | PASS |
 | Shareable flyer · map trail | DeySafe add | `index.shareFlyer/drawMarkers` | ✅ | manual | PASS |
 | Type ANY last-seen / sighting place (real coords, not centroid) | user CAPA #1 | `api.coords_for` (gazetteer→OSM) + index inputs | ✅ | gate: off-centroid pin | PASS |
@@ -84,7 +86,8 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Feature | Source | Where it lives | Status | Result |
 |---|---|---|---|---|
 | In-app alert + reach estimate | Doc P3.3 | `api.alerts` | ✅ | PASS |
-| Push / WhatsApp / SMS-USSD (live send) | Doc P2/P3.7 | — | ☐ 🔑 | needs OneSignal/Meta/Africa's-Talking |
+| **SMS + USSD reach** (Ushahidi-style) — inbound SMS report + full USSD menu work NOW; outbound send key-gated | Doc P2/P3.7 | `engine/sms.py` + `api` `/api/sms` `/api/ussd` | ✅ inbound+USSD; outbound needs AT key 🔑 | gate: sms inbound + ussd flow | PASS |
+| Push / WhatsApp (live send) | Doc P2/P3.7 | — | ☐ 🔑 | needs OneSignal / Meta |
 | Responder routing + acknowledgement | DeySafe add | — | ☐ | — |
 
 ### G. Deploy / ops
@@ -120,7 +123,9 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 ## 3. NOT built yet (honest scope — ~a third of the master doc done)
 Production stack (Next.js + Supabase/PostGIS + Vercel) · **house-level GPS precision** (✅ typed places now resolve ANYWHERE in Nigeria via OSM/Nominatim — the 48-town wall is gone — but pins are town-centroid accurate, not house-number) · ✅ **report→incident now geocodes** (a typed report of ANY town creates a human-gated `candidate_unverified` map incident) · ✅ **live news → AI extraction wired** (when a Cerebras key is set, news the gazetteer can't place is AI-read → geocoded → mapped; capped 30/pull; **needs your key to prove**) · user accounts & auth · reputation system · live push/WhatsApp/SMS · satellite SAR/VIIRS pipeline · 72-hour risk forecast · NRT integration · scheduled cron scrapers · Telegram/Facebook/YouTube monitors · predictive model · evidentiary chain-of-custody.
 
-**Gated on YOU:** an AI key (turns on real AI) · production accounts (Supabase/Vercel) · channel keys (push/WhatsApp/SMS).
+**Recently completed (this session):** ✅ Strava movement-prediction + danger heatmap · ✅ SMS/USSD reach (receive now, send key-gated) · ✅ Bluetooth crowd-relay BACKEND (AirTag model) · ✅ SOS redesign · ✅ policing accountability · ✅ community channels.
+
+**Gated on YOU / native:** an AI key (verify live on Railway) · **Africa's Talking** acct → turns ON SMS/USSD *send* · OneSignal/Meta → push/WhatsApp · a **native app** → Bluetooth mesh scanner + real-time push-to-talk · production accounts (Supabase/Vercel).
 
 ---
 
