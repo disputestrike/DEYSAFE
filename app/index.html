@@ -82,6 +82,17 @@
   .prowarn{margin:10px 0;padding:12px 14px;border-radius:12px;font-size:13.5px;font-weight:600;line-height:1.4}
   .ai-intake{background:#f4f7ff;border:1px solid #dce6ff;border-radius:14px;padding:12px;margin:0 0 16px}
   .ai-intake textarea{width:100%;min-height:62px;box-sizing:border-box}
+  .sosbig{width:100%;border:none;border-radius:16px;padding:22px 16px;margin:0 0 12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:#fff;font-size:14px;text-align:center}
+  .sosbig b{font-size:20px;letter-spacing:.02em}
+  .sosbig small{opacity:.92;font-weight:500}
+  .sosbig .bigemoji{font-size:30px;line-height:1.1}
+  .sosbig.auto{background:#d92d20}
+  .sosbig.voice{background:#b45309}
+  .sosbig:active{transform:translateY(1px)}
+  .sosactive{background:#fff1f0;border:2px solid #d92d20;border-radius:16px;padding:16px;text-align:center}
+  .sosactive b{font-size:20px;color:#d92d20;display:block;margin-bottom:6px}
+  body.sos-flash::after{content:'';position:fixed;inset:0;border:10px solid #d92d20;pointer-events:none;z-index:1500;animation:sosflash .7s infinite}
+  @keyframes sosflash{0%,100%{opacity:1}50%{opacity:0}}
   .mm{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.3);border:2px solid #fff}
   .mm span{transform:rotate(45deg);font-size:13px}
   nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:600}
@@ -158,11 +169,13 @@
     </section>
 
     <section class="view pad" id="v-sos">
-      <h2 class="t">What is happening?</h2>
-      <div class="types" id="sosGrid"></div>
-      <button class="btn red" onclick="sendSOS()">Send alert to my circle</button>
-      <div class="ok" id="sosOk"></div>
-      <p class="note">Shared only with the trusted contacts you choose. DeySafe never auto-dispatches armed responders.</p>
+      <h2 class="t">Emergency SOS</h2>
+      <div id="sosHome">
+        <button class="sosbig auto" onclick="sosAuto()"><span class="bigemoji">🔴</span><b>AUTOMATIC</b><small>Alarm + share my live location now — no typing</small></button>
+        <button class="sosbig voice" onclick="sosVoice()"><span class="bigemoji">🎙️</span><b>HOLD &amp; SPEAK</b><small>Say what's happening — it auto-sends when you go quiet</small></button>
+        <p class="note">Shares only with people YOU choose. DeySafe never auto-dispatches armed responders.</p>
+      </div>
+      <div id="sosActive" style="display:none"></div>
     </section>
 
     <section class="view pad" id="v-findme">
@@ -339,10 +352,7 @@ async function loadPlaces(){const m=await fetch('/api/places').then(r=>r.json())
   $('#placelist').innerHTML=m.places.map(p=>`<option value="${p}">`).join('');
   $('#areaSelect').value='Kaduna';$('#wFrom').value='Abuja';$('#wTo').value='Kaduna';$('#mPlace').value='Kankara';
   $('#typeGrid').innerHTML=TYPES.map(t=>`<button onclick="pick(this,'RTYPE','${t}')">${t.replace(/_/g,' ')}</button>`).join('');
-  $('#typeGrid').firstChild.classList.add('on');window.RTYPE=TYPES[0];
-  const sos=['kidnapping','robbery','accident','medical','fire','suspicious','missing person','other'];
-  $('#sosGrid').innerHTML=sos.map(t=>`<button onclick="pick(this,'STYPE','${t}')">${t}</button>`).join('');
-  $('#sosGrid').firstChild.classList.add('on');}
+  $('#typeGrid').firstChild.classList.add('on');window.RTYPE=TYPES[0];}
 function pick(el,k,v){el.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));el.classList.add('on');
   if(k==='RTYPE')window.RTYPE=v;else SOS_TYPE=v;}
 async function geocodeClient(q){try{const r=await fetch('/api/geocode?q='+encodeURIComponent(q)).then(x=>x.json());return r.result;}catch(e){return null;}}
@@ -520,7 +530,41 @@ async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').
   const r=await fetch('/api/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:window.RTYPE,place:$('#rPlace').value,description:d})}).then(r=>r.json());
   const o=$('#okBox');o.style.display='block';o.innerHTML=r.ok?`✓ Report received. ${$('#rPlace').value} is now <b>${r.risk.level}</b>. Thank you.`:'⚠ '+(r.error||'failed');
   if(r.ok){$('#rDesc').value='';loadData();loadLevel();}}
-function sendSOS(){const o=$('#sosOk');o.style.display='block';o.innerHTML=`✓ <b>${SOS_TYPE}</b> alert prepared. In the full app this shares your live location with your trusted circle and opens an incident. <i>(Prototype.)</i>`;}
+// --- Emergency SOS: AUTOMATIC (alarm + share location) or HOLD & SPEAK (auto-send on dead air).
+let SOS_ON=false, sosWatch=null, sosSilence=null, sosCtx=null, sosBeepIv=null, sosMsg='';
+function _beep(){try{if(!sosCtx)return;var o=sosCtx.createOscillator(),g=sosCtx.createGain();o.type='square';o.frequency.value=880;o.connect(g);g.connect(sosCtx.destination);var t=sosCtx.currentTime;g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.35,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+0.4);o.start(t);o.stop(t+0.42);}catch(e){}}
+function startAlarm(){try{sosCtx=new (window.AudioContext||window.webkitAudioContext)();_beep();sosBeepIv=setInterval(_beep,650);}catch(e){}document.body.classList.add('sos-flash');}
+function stopAlarm(){if(sosBeepIv){clearInterval(sosBeepIv);sosBeepIv=null;}try{if(sosCtx)sosCtx.close();}catch(e){}sosCtx=null;document.body.classList.remove('sos-flash');}
+function sosLocationMsg(lat,lng,extra){var link='https://maps.google.com/?q='+lat.toFixed(5)+','+lng.toFixed(5);return '🆘 I NEED HELP'+(extra?(' — '+extra):'')+'. My location: '+link;}
+function sosActivate(extra){
+  if(SOS_ON)return; SOS_ON=true; startAlarm();
+  $('#sosHome').style.display='none';
+  var box=$('#sosActive'); box.style.display='block';
+  box.innerHTML='<div class="sosactive"><b>🆘 SOS ACTIVE</b>'+(extra?('<div class="mt">“'+extra+'”</div>'):'')
+    +'<div id="sosWhere" class="mt">Getting your location…</div><div id="sosMsgBox" class="mt" style="font-size:12px;color:var(--muted)"></div>'
+    +'<button class="btn red" onclick="sosShare()">📤 Share my SOS + location</button>'
+    +'<button class="btn sec" onclick="sosStop()">■ I am safe — stop</button></div>';
+  sosMsg='🆘 I NEED HELP'+(extra?(' — '+extra):'')+'.';
+  if(navigator.geolocation){
+    sosWatch=navigator.geolocation.watchPosition(function(p){var lat=p.coords.latitude,lng=p.coords.longitude;sosMsg=sosLocationMsg(lat,lng,extra);var w=$('#sosWhere'),m=$('#sosMsgBox');if(w)w.textContent='📍 '+lat.toFixed(4)+', '+lng.toFixed(4)+' — live';if(m)m.textContent=sosMsg;},
+      function(){var w=$('#sosWhere');if(w)w.textContent='Turn on location so people can find you.';},{enableHighAccuracy:true,maximumAge:4000,timeout:15000});
+  }
+  speak('S O S activated.'+(extra?(' '+extra+'.'):' ')+'Sharing your location.');
+}
+function sosAuto(){sosActivate('');}
+function sosShare(){var msg=sosMsg||'🆘 I NEED HELP';if(navigator.share){navigator.share({title:'SOS — I need help',text:msg}).catch(function(){});}else{try{navigator.clipboard.writeText(msg);}catch(e){}toast('Copied — paste to your people');try{window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');}catch(e){}}}
+function sosStop(){SOS_ON=false;stopAlarm();if(sosWatch!=null){try{navigator.geolocation.clearWatch(sosWatch);}catch(e){}sosWatch=null;}if(sosSilence){clearTimeout(sosSilence);sosSilence=null;}$('#sosActive').style.display='none';$('#sosHome').style.display='block';toast('SOS stopped — glad you are safe');}
+function sosVoice(){
+  if(!voiceSupported()){toast('Voice not available — starting Automatic');sosAuto();return;}
+  toast('🎙️ Speak now — it sends automatically when you go quiet');
+  var SR=window.SpeechRecognition||window.webkitSpeechRecognition,rec=new SR();rec.lang='en-NG';rec.interimResults=true;rec.continuous=true;
+  var said='';
+  function arm(){if(sosSilence)clearTimeout(sosSilence);sosSilence=setTimeout(function(){try{rec.stop();}catch(e){}},6000);}
+  rec.onresult=function(e){var t='';for(var i=0;i<e.results.length;i++)t+=e.results[i][0].transcript+' ';said=t.trim();arm();};
+  rec.onerror=function(){};
+  rec.onend=function(){sosActivate(said);if(said){try{fetch('/api/intake',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:said,mode:'report'})});}catch(e){}}};
+  try{rec.start();arm();}catch(e){sosAuto();}
+}
 async function sendMissing(){const n=$('#mName').value.trim();if(!n){$('#mName').focus();return;}
   const r=await fetch('/api/missing',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({name:n,age:$('#mAge').value.trim(),place:$('#mPlace').value,exact_place:$('#mExact').value.trim(),count:$('#mCount').value,hours_ago:$('#mHours').value,
