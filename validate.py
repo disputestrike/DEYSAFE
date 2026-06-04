@@ -10,21 +10,34 @@ Sections: A) every endpoint (click-through)  B) chaos / negative inputs
 Exit 0 if all pass, 1 if any fail.
 """
 import sys
+import os
 import json
 import urllib.request
 import urllib.error
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:4500"
+# Operator token so the functional gate can drive the now-auth-locked operator
+# endpoints (the server is launched with the same OPERATOR_TOKEN). Public
+# endpoints get no token and are unaffected.
+OPTOKEN = os.environ.get("OPERATOR_TOKEN", "")
+OP_PATHS = ("/api/verify", "/api/queue", "/api/ingest-live", "/api/case-status", "/review")
 P = [0]
 F = [0]
 FAILS = []
 LEVELS = ["GREEN", "YELLOW", "ORANGE", "RED"]
 
 
+def _hdrs(path):
+    h = {"Content-Type": "application/json"}
+    if OPTOKEN and any(path.split("?")[0].startswith(p) for p in OP_PATHS):
+        h["Authorization"] = "Bearer " + OPTOKEN
+    return h
+
+
 def call(method, path, body=None, timeout=25):
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(BASE + path, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
+                                 headers=_hdrs(path))
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read().decode("utf-8", "replace")
@@ -46,8 +59,11 @@ def call(method, path, body=None, timeout=25):
 
 def html(path):
     try:
-        with urllib.request.urlopen(BASE + path, timeout=15) as r:
+        req = urllib.request.Request(BASE + path, headers=_hdrs(path))
+        with urllib.request.urlopen(req, timeout=15) as r:
             return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
     except Exception as e:
         return 0, repr(e)
 

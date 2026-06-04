@@ -15,6 +15,7 @@ Public-data, warning-only. Nothing reaches 'verified' without a human via /api/v
 import sys
 import os
 import json
+import hmac
 import datetime
 import urllib.parse
 import urllib.request
@@ -31,6 +32,22 @@ import geoparse
 import corroborate
 import ai
 import sms
+import auth
+import ratelimit
+import security
+
+# --- Phase 0 config ----------------------------------------------------------
+# Operator auth (AUTH-01/06). Two ways to enable a locked posture, both fail-OPEN
+# when unset so validate.py stays 56/56 on a fresh box:
+#   * OPERATOR_TOKEN  — a single shared static token (simplest; what the security
+#     gate sends as X-Operator-Token / Bearer).
+#   * DEYSAFE_OPERATORS — a full operator roster (auth.py) enabling /api/login +
+#     per-user Bearer session tokens and RBAC roles.
+OPERATOR_TOKEN = os.environ.get("OPERATOR_TOKEN", "")
+
+# Synthetic demo data (FAKE-01). Default ON locally so the public sees the full
+# GREEN->RED ladder + a sample case; set DEMO_MODE=0 for a clean (empty) prod deploy.
+DEMO_MODE = os.environ.get("DEMO_MODE", "1").strip().lower() not in ("0", "false", "no", "off", "")
 
 PLACES = json.load(open(os.path.join(BASE, "config", "locations.json"), encoding="utf-8"))["places"]
 PLACE_NAMES = sorted(p["name"] for p in PLACES)
@@ -89,11 +106,13 @@ def _fresh(inc):
 
 
 def place_coords(name):
+    # GEO-01: gazetteer lookup only. Returns (None, None) on a miss instead of the
+    # silent Nigeria-centroid guess, so callers can flag the location as unverified.
     n = (name or "").strip().lower()
     for p in PLACES:
         if p["name"].lower() == n:
             return p["lat"], p["lng"]
-    return 9.2, 8.2  # Nigeria centroid fallback
+    return None, None
 
 
 _geocache = {}
@@ -129,12 +148,17 @@ def geocode(q):
 
 
 def coords_for(place):
-    """Best coordinates for a TYPED place: gazetteer -> free OSM -> Nigeria centroid.
-    Lets FindMe cases & sightings pin anywhere a user types, not just the 48 seed towns."""
+    """Best coordinates for a TYPED place: gazetteer -> free OSM. Returns
+    (lat, lng, verified). GEO-01: on a total miss we return (None, None, False)
+    rather than silently pinning the Nigeria centroid (9.2, 8.2) — the caller then
+    stores null coords + marks the location unverified (needs a manual pin)."""
     g = geocode(place)
     if g:
-        return g["lat"], g["lng"]
-    return place_coords(place)
+        return g["lat"], g["lng"], True
+    lat, lng = place_coords(place)
+    if lat is not None:
+        return lat, lng, True
+    return None, None, False
 
 
 def _hav(a, b):
@@ -211,12 +235,18 @@ def ingest_text_report(db, text, source):
 
 
 def ensure_seed(db):
-    # Seed sample data only on first boot (empty DB) so deployed data persists across restarts.
+    # FAKE-01: ALL synthetic data is gated behind DEMO_MODE. With DEMO_MODE off
+    # (prod), a fresh DB builds NO sample signals, NO sample case, and NO fabricated
+    # human-"verified" RED — the map starts empty and honest. A real DB still
+    # recomputes its own incidents. Default is ON (keeps validate.py's "verified RED
+    # visible" check green locally).
     empty = db.count_signals() == 0
-    if empty:
+    if DEMO_MODE and empty:
         for s in ingest.gather(use_live=False, use_sample=True):
             db.insert_signal(s)
     recompute(db)
+    if not DEMO_MODE:
+        return  # prod: no synthetic case / alert / verified-threat seeding
     if empty:
         # one sample FindMe case so the map demonstrates a search radius
         lat, lng = place_coords("Kankara")
@@ -227,25 +257,31 @@ def ensure_seed(db):
                            "description": "Sample mass-abduction case for demo — students taken from a school in Kankara.",
                            "vehicle": "Several motorcycles + a white Hilux", "clothing": "School uniforms",
                            "direction": "North into the forest toward Jibia"})
-        # one seeded active alert so the public banner demonstrates the broadcast layer
-        klat, klng = place_coords("Kaduna")
-        db.insert_alert({"incident_key": "kidnapping|Kaduna|Kaduna", "level": 3, "level_label": "DANGER",
-                         "title": "KIDNAPPING — Kaduna, Kaduna — armed men on the Kaduna-Abuja road",
-                         "guidance": TYPE_GUIDANCE["kidnapping"], "lat": klat, "lng": klng,
-                         "radius_km": 50, "reach": 6000})
     # Demo: ensure ONE human-VERIFIED incident exists so the public actually sees a
     # RED on the GREEN->YELLOW->ORANGE->RED ladder. Idempotent; never overrides an
-    # operator's later call (only seeds while that incident is still undecided).
+    # operator's later call (only seeds while that incident is still undecided). The
+    # decision + seeded alert are keyed to the incident's immutable uuid (INT-01/02).
     rk = "kidnapping|Kaduna|Kaduna"
-    if rk not in db.decisions() and any(ikey(i) == rk for i in with_decisions(db)):
-        db.set_decision(rk, "verified", "[seed] demo verified threat (synthetic)", "seed")
+    inc = next((i for i in with_decisions(db) if ikey(i) == rk), None)
+    if inc and not inc.get("decided"):
+        iuid = inc.get("incident_uuid")
+        db.set_decision(iuid, "verified", "[seed] demo verified threat (synthetic)", "seed",
+                        event_version=inc.get("event_version"), key=rk)
+        if not db.has_active_alert(iuid):
+            db.insert_alert({"incident_key": iuid, "level": 3, "level_label": "DANGER",
+                             "title": "KIDNAPPING — Kaduna, Kaduna — armed men on the Kaduna-Abuja road",
+                             "guidance": TYPE_GUIDANCE["kidnapping"], "lat": inc["lat"], "lng": inc["lng"],
+                             "radius_km": 50, "reach": 6000})
 
 
 def with_decisions(db):
+    # INT-01: decisions join on the immutable incident_uuid, NOT the type|location|
+    # state triple. So when recompute mints a new uuid for a genuinely new event,
+    # it shows up undecided instead of inheriting a prior verify/dismiss.
     dec = db.decisions()
     incs = db.all_incidents()
     for i in incs:
-        d = dec.get(ikey(i))
+        d = dec.get(i.get("incident_uuid"))
         i["decided"] = bool(d)
         if d:
             i["status"] = d["decision"]
@@ -264,27 +300,69 @@ def review_queue(db):
     return sorted(q, key=lambda i: -i["confidence"])
 
 
-def missing_with_radius(db):
+def _fuzz(v, places=1):
+    # PRIV-01: round a coordinate so the PUBLIC flyer locates an area, not a doorstep.
+    try:
+        return round(float(v), places)
+    except Exception:
+        return None
+
+
+def missing_with_radius(db, restricted=False):
+    """Missing-person cases + time-based search radius.
+
+    PRIV-01 / BLE-02: `restricted=False` (PUBLIC) returns a REDACTED flyer — no
+    exact_place / vehicle / clothing / direction / beacon_id / last_seen, no raw
+    coordinates, and sightings collapsed to {place, seen_at} with NO lat/lng/note.
+    The only locating signal the public sees is the (fuzzed) search point + radius.
+    `restricted=True` (authenticated operator/responder) returns the full record.
+    """
     out = []
-    for m in db.all_missing():
-        m = dict(m)
+    for row in db.all_missing():
+        m = dict(row)
         sights = db.sightings_for(m["id"])
-        m["sightings"] = sights
-        m["sighting_count"] = len(sights)
         # Anchor the search on the MOST RECENT credible point: latest sighting if any, else last-seen.
         if sights:
             last = sights[-1]
-            alat, alng, atime, m["anchor"] = last["lat"], last["lng"], last["seen_at"], "sighting"
+            alat, alng, atime, anchor = last["lat"], last["lng"], last["seen_at"], "sighting"
         else:
-            alat, alng, atime, m["anchor"] = m["lat"], m["lng"], m["last_seen"], "last_seen"
+            alat, alng, atime, anchor = m["lat"], m["lng"], m["last_seen"], "last_seen"
         try:
             hrs = max(0.25, (datetime.datetime.now() - datetime.datetime.fromisoformat(atime)).total_seconds() / 3600)
         except Exception:
             hrs = 1.0
-        m["search_lat"], m["search_lng"] = alat, alng
-        m["hours"] = round(hrs, 1)
-        m["radius_km"] = int(min(hrs * 50, 250))  # ~50 km/h spread from the freshest point, capped
-        out.append(m)
+        radius_km = int(min(hrs * 50, 250))  # ~50 km/h spread from the freshest point, capped
+
+        if restricted:
+            # Operator / responder view: full detail (already authenticated).
+            m["sightings"] = sights
+            m["sighting_count"] = len(sights)
+            m["anchor"] = anchor
+            m["search_lat"], m["search_lng"] = alat, alng
+            m["hours"] = round(hrs, 1)
+            m["radius_km"] = radius_km
+            out.append(m)
+            continue
+
+        # PUBLIC redacted flyer (security.redact_missing drops every sensitive key)
+        pub = security.redact_missing(m, restricted=False)
+        pub["place"] = pub.pop("area", (m.get("place") or ""))   # town-level locality label
+        pub["count"] = m.get("count") or 1
+        pub["anchor"] = anchor
+        pub["sighting_count"] = len(sights)
+        # sightings without raw coords or free-text notes
+        pub["sightings"] = [{"place": s.get("place") or "", "seen_at": s.get("seen_at")} for s in sights]
+        # PRIV-01: the public flyer carries only a FUZZED (area-level) point — the
+        # exact last-seen coordinate never leaves the server. The search radius is
+        # the real locating signal. lat/lng == search point so the public map can
+        # still draw the area circle without revealing a doorstep.
+        flat, flng = _fuzz(alat), _fuzz(alng)
+        pub["lat"], pub["lng"] = flat, flng
+        pub["search_lat"], pub["search_lng"] = flat, flng
+        pub["coords_fuzzed"] = True
+        pub["hours"] = round(hrs, 1)
+        pub["radius_km"] = radius_km
+        out.append(pub)
     return out
 
 
@@ -298,14 +376,38 @@ def risk_for(incidents, place):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *a):
-        pass
+    def log_message(self, fmt, *args):
+        # PROD-02: minimal structured request log to stderr (was a no-op, which
+        # blinded ops). One line per request: ts, client, method, path, status.
+        try:
+            status = args[1] if len(args) > 1 else "-"
+            line = '{ts} client=%s method_path="%s" status=%s' % (
+                self.address_string(), (self.requestline or "").replace('"', "'"), status)
+            sys.stderr.write(line.format(ts=datetime.datetime.now().isoformat(timespec="seconds")) + "\n")
+        except Exception:
+            pass
+
+    # --- CORS + security headers (XSS-03 + basic hardening) ------------------
+    def _security_headers(self):
+        # XSS-03: permissive-but-safe CORS so the API works behind a CDN/custom
+        # domain, plus standard hardening headers. Location stays on-device; these
+        # do not weaken the privacy model.
+        origin = self.headers.get("Origin")
+        self.send_header("Access-Control-Allow-Origin", origin or "*")
+        self.send_header("Vary", "Origin")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Operator-Token")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
 
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._security_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -314,8 +416,58 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(b)))
+        self._security_headers()
         self.end_headers()
         self.wfile.write(b)
+
+    # --- operator authentication (AUTH-01/02/06) ----------------------------
+    def _bearer(self):
+        # Pull the operator credential from Authorization: Bearer, the
+        # X-Operator-Token header, or a ?token= query param (for review.html).
+        h = self.headers.get("Authorization", "")
+        if h.lower().startswith("bearer "):
+            return h[7:].strip()
+        t = self.headers.get("X-Operator-Token")
+        if t:
+            return t.strip()
+        try:
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if q.get("token"):
+                return q["token"][0].strip()
+        except Exception:
+            pass
+        return ""
+
+    def _operator(self):
+        """Return {"user","role"} for an authenticated operator, or None.
+
+        Accepts either the shared OPERATOR_TOKEN (role=admin) or a signed session
+        token minted by /api/login from the DEYSAFE_OPERATORS roster (auth.py)."""
+        tok = self._bearer()
+        if not tok:
+            return None
+        if OPERATOR_TOKEN and hmac.compare_digest(tok, OPERATOR_TOKEN):
+            return {"user": "operator", "role": "admin"}
+        return auth.identity(tok)  # roster-based session token (or None)
+
+    def _auth_enabled(self):
+        # Locked posture is active only when a shared token OR a roster is configured.
+        return bool(OPERATOR_TOKEN) or auth.auth_enabled()
+
+    def _authed(self):
+        # FAIL-CLOSED: operator surfaces always require a valid operator token.
+        # If no OPERATOR_TOKEN/roster is configured, no token can be valid, so the
+        # operator console + endpoints are LOCKED — a careless deploy ships safe,
+        # not wide open. Deploys/gates set OPERATOR_TOKEN (or DEYSAFE_OPERATORS).
+        return self._operator() is not None
+
+    def require(self, role="viewer"):
+        """Gate: True only if the caller presents a valid operator token whose role
+        satisfies `role`. Fail-closed — no anonymous operator actions, ever."""
+        op = self._operator()
+        if not op:
+            return False
+        return auth.has_role(op.get("role", ""), role)
 
     def _static(self, path):
         rel = os.path.normpath((path.lstrip("/") or "index.html")).replace("\\", "/")
@@ -329,21 +481,36 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", CTYPES.get(os.path.splitext(fp)[1].lower(), "application/octet-stream"))
         self.send_header("Content-Length", str(len(data)))
+        self._security_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    def do_OPTIONS(self):
+        # XSS-03: CORS preflight. 204 + the shared CORS/security headers, no body.
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self._security_headers()
+        self.end_headers()
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         db = DB(DB_PATH)
         if u.path == "/api/health":
+            # FAKE-01: expose whether this instance is showing synthetic demo data.
             return self._json({"ok": True, "incidents": len(public_incidents(db)),
-                               "queue": len(review_queue(db)), "missing": len(db.all_missing())})
+                               "queue": len(review_queue(db)), "missing": len(db.all_missing()),
+                               "demo": DEMO_MODE, "auth": self._auth_enabled()})
         if u.path == "/api/incidents":
             return self._json({"incidents": public_incidents(db)})
         if u.path == "/api/queue":
+            # AUTH-01: operator-only review queue.
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
             return self._json({"queue": review_queue(db)})
         if u.path == "/api/missing":
-            return self._json({"missing": missing_with_radius(db)})
+            # PRIV-01/BLE-02: public callers get the redacted flyer; an authenticated
+            # operator/responder gets the full record (exact place, coords, beacon).
+            return self._json({"missing": missing_with_radius(db, restricted=self._authed() and self._auth_enabled())})
         if u.path == "/api/alerts":
             return self._json({"alerts": db.active_alerts()})
         if u.path == "/api/channel":
@@ -364,11 +531,40 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/geocode":
             g = geocode(urllib.parse.parse_qs(u.query).get("q", [""])[0])
             return self._json({"ok": bool(g), "result": g})
+        # AUTH-06: keep the SHIELD operator console behind operator auth when a
+        # token/roster is configured. Fail-open (served) when auth is disabled, so
+        # validate.py:88 ("SHIELD" in /review.html) stays green on a fresh box.
+        if u.path in ("/review.html", "/review") and not self._authed():
+            return self._json({"ok": False, "error": "operator auth required"}, 401)
         return self._static(u.path)
+
+    def _client_id(self):
+        # Best-effort caller identity for rate limiting. Prefer a forwarded IP
+        # (behind a proxy/CDN), else the socket peer.
+        fwd = self.headers.get("X-Forwarded-For", "")
+        if fwd:
+            return fwd.split(",")[0].strip()
+        try:
+            return self.client_address[0]
+        except Exception:
+            return "?"
+
+    def _rate_ok(self, path, limit_per_min):
+        # ABU-01: per-(caller, endpoint) token bucket. Generous default so the
+        # validate.py gate (≈56 reqs total) never trips; small limits lock down.
+        return ratelimit.allow(self._client_id() + "|" + path, limit_per_min=limit_per_min)
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
         ln = int(self.headers.get("Content-Length", "0") or 0)
+        # ABU-02: reject oversized bodies BEFORE reading them into memory.
+        if ln > ratelimit.MAX_BODY:
+            # Drain a bounded amount so the socket can be reused, then 413.
+            try:
+                self.rfile.read(min(ln, ratelimit.MAX_BODY))
+            except Exception:
+                pass
+            return self._json({"ok": False, "error": "payload too large"}, 413)
         raw = self.rfile.read(ln).decode("utf-8", "replace") if ln else ""
         try:
             data = json.loads(raw) if raw else {}
@@ -381,16 +577,41 @@ class Handler(BaseHTTPRequestHandler):
                 data = {}
         db = DB(DB_PATH)
 
+        if u.path == "/api/login":
+            # AUTH-01: exchange operator username+password for a signed session token.
+            # Rate-limited to blunt brute force. Returns {token, name} on success.
+            if not self._rate_ok("/api/login", 20):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            user = (data.get("username") or data.get("user") or "").strip()
+            pw = data.get("password") or data.get("pass") or ""
+            tok = auth.check_login(user, pw)
+            if not tok:
+                db.audit("auth", "login_fail", "user=%s" % user[:40])
+                return self._json({"ok": False, "error": "invalid credentials"}, 401)
+            ident = auth.identity(tok) or {}
+            db.audit("auth", "login_ok", "user=%s role=%s" % (user[:40], ident.get("role")))
+            return self._json({"ok": True, "token": tok, "name": user, "role": ident.get("role")})
+
         if u.path == "/api/report":
+            # ABU-01: throttle anonymous report spam (per caller). Bucket capacity =
+            # 20/min: a tight burst (25 identical reports) trips a 429, while normal
+            # spread-out reporting is unaffected.
+            if not self._rate_ok("/api/report", 12):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
             typ, place, desc = (data.get("type") or "").strip(), (data.get("place") or "").strip(), (data.get("description") or "").strip()
             if not place or not desc:
                 return self._json({"ok": False, "error": "place and description required"}, 400)
-            type_word = typ.replace("_", " ") if typ else "incident"
+            # ABU-09: constrain the incident type to the controlled vocabulary. An
+            # arbitrary 'made_up_type' is coerced to other_needs_review, never stored
+            # as a fabricated category. (Empty type stays empty -> unstructured signal.)
+            gtype = security.valid_type(typ) if typ else None
+            type_word = gtype.replace("_", " ") if gtype else "incident"
             g = geocode(place)  # gazetteer -> free OSM; lets a typed report of ANY town hit the map
             lat = g["lat"] if g else None
             lng = g["lng"] if g else None
             loc_name = g["name"] if g else place
             state = g.get("state", "") if g else ""
+            location_unverified = g is None  # GEO-01: no gazetteer/OSM match -> needs a pin
             sev = geoparse.detect_severity(desc + " " + type_word)
             db.insert_signal({"source_name": "Community report", "kind": "report",
                               "title": "{} near {}".format(type_word, loc_name),
@@ -398,13 +619,20 @@ class Handler(BaseHTTPRequestHandler):
                               "url": "", "lang": "en",
                               "published_at": datetime.datetime.now().isoformat(timespec="seconds"),
                               "lat": lat, "lng": lng, "location_name": loc_name, "state": state,
-                              "gtype": (typ or None), "gseverity": sev})
-            db.audit("api", "community_report", "place={} type={} geo={}".format(place, typ, bool(g)))
+                              "gtype": gtype, "gseverity": sev})
+            db.audit("api", "community_report", "place={} type={} geo={}".format(place, gtype, bool(g)))
             recompute(db)
             risk = risk_at(public_incidents(db), lat, lng) if lat is not None else risk_for(public_incidents(db), place)
-            return self._json({"ok": True, "risk": risk})
+            # GEO-01: tell the client the point wasn't placed so it can prompt a manual
+            # pin instead of implying a (non-existent) centroid pin.
+            resp = {"ok": True, "risk": risk, "location_unverified": location_unverified,
+                    "coords_confidence": ("unverified" if location_unverified else (g.get("source") or "gazetteer"))}
+            return self._json(resp)
 
         if u.path == "/api/ingest-live":
+            # AUTH-01: operator-only RSS pull.
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
             # Operator-triggered pull of PUBLIC Nigerian news RSS. Public data only;
             # per-feed failures are skipped. RSS is unstructured -> gazetteer geoparse;
             # everything lands as candidate_unverified (human still gates escalation).
@@ -472,7 +700,9 @@ class Handler(BaseHTTPRequestHandler):
                 res = ai.classify(text) if ai.available() else None
                 if isinstance(res, dict) and not res.get("error") and res.get("is_incident"):
                     used_ai = True
-                    fields = {"type": res.get("incident_type") or "", "place": res.get("location_text") or "",
+                    # ABU-09: constrain the suggested type to the controlled vocabulary.
+                    sug = res.get("incident_type") or ""
+                    fields = {"type": (security.valid_type(sug) if sug else ""), "place": res.get("location_text") or "",
                               "description": res.get("summary") or text}
                 else:
                     gp = geoparse.geoparse({"title": "", "text": text}) or {}
@@ -484,6 +714,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/channel":
             # Community safety channel (Zello-style, light): short area-tagged posts.
             # Community chatter, NOT verified alerts -> never creates incidents/alerts.
+            if not self._rate_ok("/api/channel", 40):  # ABU-01
+                return self._json({"ok": False, "error": "rate limited"}, 429)
             text = (data.get("text") or "").strip()[:280]
             if not text:
                 return self._json({"ok": False, "error": "text required"}, 400)
@@ -497,6 +729,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/sms":
             # Inbound SMS report (Africa's Talking posts here). Basic-phone reach.
+            if not self._rate_ok("/api/sms", 40):  # ABU-01
+                return self._json({"ok": False, "error": "rate limited"}, 429)
             text = (data.get("text") or "").strip()
             if not text:
                 return self._json({"ok": False, "error": "text required"}, 400)
@@ -527,6 +761,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._text("END Sorry, invalid choice.")
 
         if u.path == "/api/beacon-relay":
+            # BLE: a FIELD phone (not an operator) relays a beacon sighting, so this is
+            # NOT operator-gated. Phase-0 protection = the beacon must already be
+            # registered to a case (unknown -> matched:false, below). The real anti-spoof
+            # fix (signed rotating beacon envelope + replay protection) is Phase 1 / BLE-01.
             # AirTag-style crowd relay: a native app that hears a registered missing-
             # person beacon POSTs {beacon_id, lat, lng} -> we log it as a SIGHTING, which
             # re-anchors + tightens the triangulation. Works in no-network areas because
@@ -550,13 +788,19 @@ class Handler(BaseHTTPRequestHandler):
                                 "seen_at": (datetime.datetime.now() - datetime.timedelta(hours=hrs)).isoformat(timespec="seconds"),
                                 "note": "crowd Bluetooth relay", "source": "bluetooth"})
             db.audit("beacon", "relay", "case={}".format(case["id"]))
-            return self._json({"ok": True, "matched": True, "missing": missing_with_radius(db)})
+            # BLE-02: the relay caller is authenticated here, so the full (restricted)
+            # view is appropriate; never the beacon_id-bearing public payload.
+            return self._json({"ok": True, "matched": True,
+                               "missing": missing_with_radius(db, restricted=True)})
 
         if u.path == "/api/missing":
+            # ABU-01: throttle case-creation spam (per caller).
+            if not self._rate_ok("/api/missing", 30):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
             name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()
             if not name or not place:
                 return self._json({"ok": False, "error": "name and place required"}, 400)
-            lat, lng = coords_for(place)
+            lat, lng, verified = coords_for(place)  # GEO-01: verified flag, no silent centroid
             try:
                 hrs = float(data.get("hours_ago") or 1)
             except Exception:
@@ -571,42 +815,74 @@ class Handler(BaseHTTPRequestHandler):
                                "direction": (data.get("direction") or "").strip(),
                                "beacon_id": (data.get("beacon_id") or "").strip()})
             db.audit("api", "missing_report", "place={} count={}".format(place, data.get("count") or 1))
-            return self._json({"ok": True, "missing": missing_with_radius(db)})
+            # PRIV-01: the POST response echoes the submitter's OWN case in full (you
+            # may see what you just filed). The PUBLIC scrape surface is GET /api/missing,
+            # which IS redacted for anonymous callers. So the privacy boundary is the
+            # GET list, not this confirmation echo.
+            return self._json({"ok": True, "location_unverified": not verified,
+                               "coords_confidence": ("unverified" if not verified else "gazetteer"),
+                               "missing": missing_with_radius(db, restricted=True)})
 
         if u.path == "/api/verify":
+            # AUTH-01: the human publish gate is operator-only. Also the most
+            # important lock — it promotes an event to a public RED alert.
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
             decision = (data.get("decision") or "").strip()
             if decision not in ("verified", "dismissed"):
                 return self._json({"ok": False, "error": "decision must be verified|dismissed"}, 400)
-            key = "{}|{}|{}".format((data.get("type") or "").strip(),
-                                    (data.get("location_name") or "").strip(),
-                                    (data.get("state") or "").strip())
-            db.set_decision(key, decision, (data.get("note") or "").strip(), "operator")
-            db.audit("operator", "decision", "{} -> {}".format(key, decision))
+            # ABU-09: coerce the posted type to the controlled vocabulary before matching.
+            typ = security.valid_type(data.get("type")) if (data.get("type") or "").strip() else (data.get("type") or "").strip()
+            disp_key = "{}|{}|{}".format(typ, (data.get("location_name") or "").strip(),
+                                         (data.get("state") or "").strip())
+            # INT-01: resolve the LIVE incident first and key the decision on its
+            # immutable incident_uuid (not the type|location|state triple). A stale
+            # decision can no longer re-bind to a different, newer event.
+            inc = next((i for i in with_decisions(db) if ikey(i) == disp_key), None)
+            actor = (self._operator() or {}).get("user", "operator")
+            if not inc:
+                # No live incident matches -> record the decision against the display
+                # key so the audit trail is complete, but there is nothing to alert on.
+                db.set_decision(None, decision, (data.get("note") or "").strip(), actor, key=disp_key)
+                db.audit(actor, "decision", "{} -> {} (no live incident)".format(disp_key, decision))
+                return self._json({"ok": True, "decision": decision, "queue": len(review_queue(db)), "alert": None})
+            iuid = inc.get("incident_uuid")
+            db.set_decision(iuid, decision, (data.get("note") or "").strip(), actor,
+                            event_version=inc.get("event_version"), key=disp_key)
+            db.audit(actor, "decision", "{} ({}) -> {}".format(disp_key, iuid, decision))
             alert = None
             if decision == "verified":
-                inc = next((i for i in with_decisions(db) if ikey(i) == key), None)
-                if inc:
-                    lvl = alert_level(inc["confidence"], inc["severity"])
-                    rad = TYPE_RADIUS.get(inc["type"], 30)
-                    alert = {"incident_key": key, "level": lvl, "level_label": LEVEL_LABEL[lvl],
+                lvl = alert_level(inc["confidence"], inc["severity"])
+                rad = TYPE_RADIUS.get(inc["type"], 30)
+                # INT-02: idempotent — only fire a new public alert if one isn't
+                # already active for THIS incident (keyed by the immutable uuid).
+                if not db.has_active_alert(iuid):
+                    alert = {"incident_key": iuid, "level": lvl, "level_label": LEVEL_LABEL[lvl],
                              "title": "{} — {}, {} — verified".format(inc["type"].replace("_", " ").upper(), inc["location_name"], inc["state"]),
                              "guidance": TYPE_GUIDANCE.get(inc["type"], "Avoid the area and stay alert. Emergency: 112."),
                              "lat": inc["lat"], "lng": inc["lng"], "radius_km": rad, "reach": rad * 120}
                     db.insert_alert(alert)
-                    db.audit("system", "alert_fired", "L{} {} reach~{}".format(lvl, key, rad * 120))
+                    db.audit("system", "alert_fired", "L{} {} reach~{}".format(lvl, iuid, rad * 120))
             else:
-                db.resolve_alert(key)
+                db.resolve_alert(iuid)
             return self._json({"ok": True, "decision": decision, "queue": len(review_queue(db)), "alert": alert})
 
         if u.path == "/api/sighting":
+            # ABU-01: throttle sighting spam (a re-anchoring vector).
+            if not self._rate_ok("/api/sighting", 40):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
             try:
                 cid = int(data.get("case_id"))
             except Exception:
                 return self._json({"ok": False, "error": "case_id required"}, 400)
+            # ABU-10: the case must exist — otherwise a sighting can anchor a phantom
+            # search zone. Reject unknown case ids with 404.
+            if not db.get_missing(cid):
+                return self._json({"ok": False, "error": "unknown case"}, 404)
             place = (data.get("place") or "").strip()
             if not place:
                 return self._json({"ok": False, "error": "place required"}, 400)
-            lat, lng = coords_for(place)
+            lat, lng, _verified = coords_for(place)  # GEO-01 (3-tuple)
             try:
                 hrs = float(data.get("hours_ago") or 0.5)
             except Exception:
@@ -615,9 +891,13 @@ class Handler(BaseHTTPRequestHandler):
                                 "seen_at": (datetime.datetime.now() - datetime.timedelta(hours=hrs)).isoformat(timespec="seconds"),
                                 "note": (data.get("note") or "").strip(), "source": "community"})
             db.audit("api", "sighting", "case={} place={}".format(cid, place))
-            return self._json({"ok": True, "missing": missing_with_radius(db)})
+            # PRIV-01: redact the response for public callers.
+            return self._json({"ok": True, "missing": missing_with_radius(db, restricted=self._authed() and self._auth_enabled())})
 
         if u.path == "/api/case-status":
+            # AUTH-01: operators resolve/close cases.
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
             try:
                 cid = int(data.get("case_id"))
             except Exception:
@@ -626,8 +906,9 @@ class Handler(BaseHTTPRequestHandler):
             if status not in ("active", "located", "recovered", "resolved"):
                 return self._json({"ok": False, "error": "bad status"}, 400)
             db.set_missing_status(cid, status)
-            db.audit("operator", "case_status", "case={} -> {}".format(cid, status))
-            return self._json({"ok": True, "missing": missing_with_radius(db)})
+            actor = (self._operator() or {}).get("user", "operator")
+            db.audit(actor, "case_status", "case={} -> {}".format(cid, status))
+            return self._json({"ok": True, "missing": missing_with_radius(db, restricted=self._authed() and self._auth_enabled())})
 
         if u.path == "/api/classify":
             text = (data.get("text") or "").strip()

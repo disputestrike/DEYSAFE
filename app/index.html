@@ -25,6 +25,7 @@
   .abanner{display:flex;align-items:flex-start;gap:8px;padding:10px 14px;color:#fff;font-size:12.5px;line-height:1.4}
   .abanner.L1{background:var(--green)}.abanner.L2{background:var(--yellow);color:#3a2c00}.abanner.L3{background:var(--orange)}.abanner.L4{background:var(--red)}
   .abanner b{font-weight:800;white-space:nowrap}.abanner .x{margin-left:auto;cursor:pointer;opacity:.85;font-weight:700}
+  .demobanner{position:sticky;top:0;z-index:900;background:repeating-linear-gradient(45deg,#7a1d12,#7a1d12 14px,#922316 14px,#922316 28px);color:#fff;font-weight:800;font-size:12px;letter-spacing:.02em;text-align:center;padding:7px 12px;line-height:1.35;border-bottom:2px solid #ffd23f}
   main{flex:1;overflow:auto;padding-bottom:74px}
   .view{display:none}.view.active{display:block}
   .pad{padding:14px 16px}
@@ -117,6 +118,7 @@
 </head>
 <body>
 <div class="app">
+  <div id="demoBanner" class="demobanner" style="display:none" role="alert">⚠ DEMO DATA — DO NOT USE FOR REAL SAFETY DECISIONS</div>
   <header class="top">
     <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z" fill="#fff"/></svg></div>
     <div class="brand"><b>DeySafe</b><span>Know before you waka</span></div>
@@ -146,12 +148,12 @@
     </section>
 
     <section class="view pad" id="v-waka">
-      <h2 class="t">WakaSafe — check your road</h2>
+      <h2 class="t">WakaSafe — corridor scan (not road routing)</h2>
       <label class="f">From (type any place)</label><input id="wFrom" list="placelist" autocomplete="off" placeholder="Where you are…" />
       <label class="f">To (type any place)</label><input id="wTo" list="placelist" autocomplete="off" placeholder="Where you're going…" />
       <button class="btn" onclick="checkRoute()">Check route</button>
       <div id="routeBox"></div>
-      <p class="note">Route status is the worst risk level along your endpoints. Plan before you move.</p>
+      <p class="note">Corridor scan (not road routing): shows the worst risk level near a straight line between your start and end. It does not follow actual roads or detect every danger between them. Plan before you move.</p>
     </section>
 
     <section class="view pad" id="v-report">
@@ -178,9 +180,9 @@
     <section class="view pad" id="v-sos">
       <h2 class="t">Emergency SOS</h2>
       <div id="sosHome">
-        <button class="sosbig auto" onclick="sosAuto()"><span class="bigemoji">🔴</span><b>AUTOMATIC</b><small>Alarm + share my live location now — no typing</small></button>
-        <button class="sosbig voice" onclick="sosVoice()"><span class="bigemoji">🎙️</span><b>HOLD &amp; SPEAK</b><small>Say what's happening — it auto-sends when you go quiet</small></button>
-        <p class="note">Shares only with people YOU choose. DeySafe never auto-dispatches armed responders.</p>
+        <button class="sosbig auto" onclick="sosAuto()"><span class="bigemoji">🔴</span><b>AUTOMATIC</b><small>Alarm + prepare your live location to share — no typing</small></button>
+        <button class="sosbig voice" onclick="sosVoice()"><span class="bigemoji">🎙️</span><b>HOLD &amp; SPEAK</b><small>Say what's happening — it's prepared to share when you go quiet</small></button>
+        <p class="note"><b>You must send it.</b> DeySafe prepares your SOS + location and shares only with the people YOU choose, only when you tap share. It does not auto-deliver to authorities and never auto-dispatches armed responders.</p>
       </div>
       <div id="sosActive" style="display:none"></div>
     </section>
@@ -251,22 +253,24 @@ function nearestPlace(lat,lng){var best=null,bd=1e18;for(var name in PLACE_COORD
 function onMapTap(e){var np=nearestPlace(e.latlng.lat,e.latlng.lng);if(!np)return;
   if(tapPin)map.removeLayer(tapPin);
   tapPin=L.marker(e.latlng,{icon:missIcon('!')}).addTo(map)
-    .bindPopup('Near <b>'+np+'</b><br><a href="#" onclick="go(\'report\');return false">⚠ Report danger here →</a>').openPopup();
+    .bindPopup('Near <b>'+esc(np)+'</b><br><a href="#" onclick="go(\'report\');return false">⚠ Report danger here →</a>').openPopup();
   $('#rPlace').value=np;}
 function drawMarkers(){
   incLayer.clearLayers();missLayer.clearLayers();
   INCS.forEach(i=>{const lv=LV[i.status]||'YELLOW';const fade=Math.max(.16,.5*(1-(i.age_hours||0)/120));
     L.circleMarker([i.lat,i.lng],{radius:9,color:COL[lv],weight:2,opacity:Math.max(.4,fade+.25),fillColor:COL[lv],fillOpacity:fade}).addTo(incLayer)
-     .bindPopup('<b>'+i.location_name+', '+i.state+'</b><br>'+lv+' · '+i.type.replace(/_/g,' ')+'<br>'+(i.status==='verified'?'Verified':'Developing')+(i.age_hours!=null?(' · '+Math.round(i.age_hours)+'h ago'):''));});
+     .bindPopup('<b>'+esc(i.location_name)+', '+esc(i.state)+'</b><br>'+lv+' · '+esc(i.type).replace(/_/g,' ')+'<br>'+(i.status==='verified'?'Verified':'Developing')+(i.age_hours!=null?(' · '+Math.round(i.age_hours)+'h ago'):''));});
   MISS.forEach(m=>{
+    if(m.search_lat==null||m.search_lng==null)return; // redacted/unverified case: no public pin
     L.circle([m.search_lat,m.search_lng],{radius:m.radius_km*1000,color:'#1d6fe0',weight:1,dashArray:'6',fillColor:'#1d6fe0',fillOpacity:.07}).addTo(missLayer);
-    const pts=[[m.lat,m.lng]];
-    L.marker([m.lat,m.lng],{icon:missIcon('📍')}).addTo(missLayer).bindPopup('Last seen: '+m.place);
-    (m.sightings||[]).forEach(s=>{pts.push([s.lat,s.lng]);
-      L.circleMarker([s.lat,s.lng],{radius:5,color:'#0ea5e9',weight:2,fillColor:'#0ea5e9',fillOpacity:.85}).addTo(missLayer).bindPopup('Sighting: '+s.place);});
+    const pts=[];
+    if(m.lat!=null&&m.lng!=null){pts.push([m.lat,m.lng]);
+      L.marker([m.lat,m.lng],{icon:missIcon('📍')}).addTo(missLayer).bindPopup('Last seen: '+esc(m.place));}
+    (m.sightings||[]).forEach(s=>{if(s.lat==null||s.lng==null)return;pts.push([s.lat,s.lng]);
+      L.circleMarker([s.lat,s.lng],{radius:5,color:'#0ea5e9',weight:2,fillColor:'#0ea5e9',fillOpacity:.85}).addTo(missLayer).bindPopup('Sighting: '+esc(s.place));});
     if(pts.length>1)L.polyline(pts,{color:'#1d6fe0',weight:2,dashArray:'4',opacity:.6}).addTo(missLayer);
     L.marker([m.search_lat,m.search_lng],{icon:missIcon('🔎')}).addTo(missLayer)
-     .bindPopup('<b>'+m.name+'</b> ('+(m.age||'?')+')<br>Search radius: '+m.radius_km+' km · '+m.sighting_count+' sighting(s)');});
+     .bindPopup('<b>'+esc(m.name)+'</b> ('+esc(m.age||'?')+')<br>Search radius: '+m.radius_km+' km · '+m.sighting_count+' sighting(s)');});
 }
 function hoursSince(iso){var t=Date.parse(iso);if(isNaN(t))return 1;return Math.max(0.1,(Date.now()-t)/3.6e6);}
 function reach(hrs){return Math.min(250,Math.max(2,hrs*50));}
@@ -285,8 +289,8 @@ function toggleHeat(){HEAT_ON=!HEAT_ON;heatLayer.clearLayers();if(HEAT_ON){INCS.
 function triangulate(cid){
   var m=MISS.find(function(x){return x.id===cid;});if(!m){LASTTRI=null;return null;}
   triLayer.clearLayers();
-  var rings=[{lat:m.lat,lng:m.lng,r:reach(hoursSince(m.last_seen)),label:'Last seen: '+m.place}];
-  (m.sightings||[]).forEach(function(s){rings.push({lat:s.lat,lng:s.lng,r:reach(hoursSince(s.seen_at)),label:'Sighting: '+s.place});});
+  var rings=[{lat:m.lat,lng:m.lng,r:reach(hoursSince(m.last_seen)),label:'Last seen: '+esc(m.place)}];
+  (m.sightings||[]).forEach(function(s){rings.push({lat:s.lat,lng:s.lng,r:reach(hoursSince(s.seen_at)),label:'Sighting: '+esc(s.place)});});
   var pal=['#ef6c12','#0ea5e9','#7c3aed','#0891b2','#e0a106','#1d6fe0'];
   rings.forEach(function(rg,i){L.circle([rg.lat,rg.lng],{radius:rg.r*1000,color:pal[i%pal.length],weight:1.5,opacity:.85,fillColor:pal[i%pal.length],fillOpacity:.07,dashArray:'5'}).addTo(triLayer).bindPopup(rg.label+' · reach '+Math.round(rg.r)+' km');});
   var res={sources:rings.length,overlap:rings.length,zoneKm:rings[0]?Math.round(rings[0].r):0,center:rings[0]?[rings[0].lat,rings[0].lng]:null};
@@ -305,7 +309,7 @@ function triangulate(cid){
       cells.forEach(function(c){spread=Math.max(spread,hav(cLa,cLo,c[0],c[1]));});
       spread=Math.max(2,Math.round(spread));
       L.circle([cLa,cLo],{radius:spread*1000,color:'#d92d20',weight:2,fillColor:'#d92d20',fillOpacity:.22}).addTo(triLayer);
-      L.marker([cLa,cLo],{icon:missIcon('🎯')}).addTo(triLayer).bindPopup('🎯 Most likely zone — '+best+' of '+rings.length+' sources overlap (~'+spread+' km across)');
+      L.marker([cLa,cLo],{icon:missIcon('🎯')}).addTo(triLayer).bindPopup('🎯 Preliminary search estimate — '+best+' of '+rings.length+' sources overlap (~'+spread+' km across)');
       res={sources:rings.length,overlap:best,zoneKm:spread,center:[cLa,cLo]};}
   }
   // Strava insight: use MOVEMENT direction to predict ahead + draw a heading cone.
@@ -320,20 +324,22 @@ function triangulate(cid){
   res.say='Triangulation: '+res.overlap+' of '+res.sources+' sources overlap. Most likely within '+res.zoneKm+' kilometres'+(m.place?(' near '+m.place):'')+(res.headingC?(', likely moving '+res.headingC):'')+'.';
   LASTTRI=res;return res;
 }
-function itemInc(i){const lv=LV[i.status]||'YELLOW';return `<div class="item ${lv}" onclick="focusPt(${i.lat},${i.lng})">
-  <div class="r1"><span class="pl">${i.location_name}, ${i.state}</span><span class="badge ${lv}">${lv}</span></div>
-  <div class="ds">${i.summary||''}</div><div class="mt">${i.status==='verified'?'● Verified':'● Developing'} · ${i.type.replace(/_/g,' ')}</div></div>`;}
-function itemMiss(m){var grp=(m.count>1)?` · GROUP of ${m.count}`:'';
-  return `<div class="item miss" onclick="openCase(${m.id})">
-  <div class="r1"><span class="pl">${m.name}</span><span class="badge miss">${(m.status||'active').toUpperCase()}</span></div>
-  <div class="ds">Last seen ${m.exact_place||m.place}, ${m.hours}h ago${grp} · ${m.sighting_count} sighting(s)</div>
-  <div class="mt">🔎 Search radius ${m.radius_km} km</div></div>`;}
+function itemInc(i){const lv=LV[i.status]||'YELLOW';return `<div class="item ${lv}" onclick="focusPt(${+i.lat},${+i.lng})">
+  <div class="r1"><span class="pl">${esc(i.location_name)}, ${esc(i.state)}</span><span class="badge ${lv}">${lv}</span></div>
+  <div class="ds">${esc(i.summary||'')}</div><div class="mt">${i.status==='verified'?'● Verified':'● Developing'} · ${esc(i.type).replace(/_/g,' ')}</div></div>`;}
+function itemMiss(m){var grp=(m.count>1)?` · GROUP of ${+m.count}`:'';
+  return `<div class="item miss" onclick="openCase(${+m.id})">
+  <div class="r1"><span class="pl">${esc(m.name)}</span><span class="badge miss">${esc((m.status||'active').toUpperCase())}</span></div>
+  <div class="ds">Last seen ${esc(m.exact_place||m.place)}, ${esc(m.hours)}h ago${grp} · ${+m.sighting_count} sighting(s)</div>
+  <div class="mt">🔎 Search radius ${esc(m.radius_km)} km</div></div>`;}
 function renderHome(){
   if(SEG==='channels'){renderChannels();return;}
   $('#homeList').innerHTML = SEG==='alerts'
   ? (INCS.length?INCS.slice().sort((a,b)=>ORD[LV[b.status]]-ORD[LV[a.status]]).map(itemInc).join(''):'<p class="note">No active alerts near you.</p>')
   : (MISS.length?MISS.map(itemMiss).join(''):'<p class="note">No active cases.</p>');}
-function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+// FAKE-01: surface an un-dismissible banner whenever the backend is serving demo/seed data.
+async function checkDemo(){try{var h=await fetch('/api/health').then(r=>r.json());var el=$('#demoBanner');if(el)el.style.display=(h&&h.demo===true)?'block':'none';}catch(e){}}
 function timeAgo(iso){var t=Date.parse(iso);if(isNaN(t))return '';var m=Math.floor((Date.now()-t)/60000);if(m<1)return 'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
 function renderChannels(){
   var area=$('#areaSelect').value.trim();
@@ -356,26 +362,26 @@ function renderMissList(){$('#missList').innerHTML=MISS.length?MISS.map(itemMiss
 function focusPt(lat,lng){go('home');setTimeout(()=>{map.invalidateSize();map.setView([lat,lng],10);},60);}
 
 function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('findme');var tri=triangulate(id);
-  const sights=(m.sightings||[]).map(x=>`<div class="sight"><span class="dot">🔵</span><span><b>${x.place}</b> — ${x.note||'sighting'}</span></div>`).join('')
+  const sights=(m.sightings||[]).map(x=>`<div class="sight"><span class="dot">🔵</span><span><b>${esc(x.place)}</b> — ${esc(x.note||'sighting')}</span></div>`).join('')
     ||'<div class="sight" style="border:none;color:var(--faint)">No sightings yet. Be the first to report one.</div>';
   $('#caseDetail').innerHTML=`
     <div class="case">
-      <b>${m.name}</b>${m.count>1?' · <span class="badge" style="background:#7c3aed">GROUP of '+m.count+'</span>':''} · <span class="badge miss">${(m.status||'active').toUpperCase()}</span>
-      <div class="kv"><b>Last seen:</b> ${m.exact_place||m.place} (${m.place}), ${m.hours}h ago · <b>search radius ${m.radius_km} km</b> · ${m.sighting_count} sighting(s)</div>
-      <div class="kv"><b>Age(s):</b> ${m.age||'—'} &nbsp; <b>Vehicle:</b> ${m.vehicle||'—'}</div>
-      <div class="kv"><b>Clothing:</b> ${m.clothing||'—'} &nbsp; <b>Direction:</b> ${m.direction||'—'}</div>
+      <b>${esc(m.name)}</b>${m.count>1?' · <span class="badge" style="background:#7c3aed">GROUP of '+(+m.count)+'</span>':''} · <span class="badge miss">${esc((m.status||'active').toUpperCase())}</span>
+      <div class="kv"><b>Last seen:</b> ${esc(m.exact_place||m.place)} (${esc(m.place)}), ${esc(m.hours)}h ago · <b>search radius ${esc(m.radius_km)} km</b> · ${+m.sighting_count} sighting(s)</div>
+      <div class="kv"><b>Age(s):</b> ${esc(m.age||'—')} &nbsp; <b>Vehicle:</b> ${esc(m.vehicle||'—')}</div>
+      <div class="kv"><b>Clothing:</b> ${esc(m.clothing||'—')} &nbsp; <b>Direction:</b> ${esc(m.direction||'—')}</div>
     </div>
-    ${tri&&tri.sources>1?`<div class="lvl ORANGE" style="margin-top:12px"><div class="r1"><b>🎯 Triangulation</b><button class="spk" onclick="sayTri()" title="Read aloud">🔊</button></div><div class="guide">${tri.overlap} of ${tri.sources} sources overlap — most likely within ~${tri.zoneKm} km. More sightings = tighter zone.</div></div>`:`<p class="note" style="margin-top:12px">Add a 2nd sighting to triangulate a most-likely zone.</p>`}
+    ${tri&&tri.sources>1?`<div class="lvl ORANGE" style="margin-top:12px"><div class="r1"><b>🎯 Preliminary search estimate</b><button class="spk" onclick="sayTri()" title="Read aloud">🔊</button></div><div class="guide">${+tri.overlap} of ${+tri.sources} sources overlap — preliminary estimate, search within ~${+tri.zoneKm} km. Not a confirmed location; more sightings = tighter estimate.</div></div>`:`<p class="note" style="margin-top:12px">Add a 2nd sighting for a preliminary search estimate.</p>`}
     <h2 class="t" style="margin-top:16px">Sighting trail</h2>${sights}
     <h2 class="t" style="margin-top:16px">Did you see them? Report a sighting</h2>
     <label class="f">Where (type any place)</label><input id="sPlace" list="placelist" autocomplete="off" placeholder="Where seen…" />
     <label class="f">How long ago (hours)</label><input id="sHours" type="number" value="0.5" min="0" step="0.5" />
     <label class="f">Note (vehicle, direction…)</label><input id="sNote" placeholder="e.g. White Hilux heading north" />
-    <button class="btn" id="sawBtn" onclick="addSighting(${m.id})">📍 I saw them — tighten the search</button>
+    <button class="btn" id="sawBtn" onclick="addSighting(${+m.id})">📍 I saw them — tighten the search</button>
     <div class="chips" style="margin-top:12px">
-      <button id="mapBtn" onclick="focusPt(${tri&&tri.center?tri.center[0]:m.search_lat},${tri&&tri.center?tri.center[1]:m.search_lng})">🗺 View triangulation on map</button>
-      <button id="shareBtn" onclick="shareFlyer(${m.id})">📤 Share flyer</button>
-      <button id="recoverBtn" onclick="setCaseStatus(${m.id},'recovered')">✓ Mark recovered</button>
+      <button id="mapBtn" onclick="focusPt(${tri&&tri.center?+tri.center[0]:+m.search_lat},${tri&&tri.center?+tri.center[1]:+m.search_lng})">🗺 View estimate on map</button>
+      <button id="shareBtn" onclick="shareFlyer(${+m.id})">📤 Share flyer</button>
+      <button id="recoverBtn" onclick="setCaseStatus(${+m.id},'recovered')">✓ Mark recovered</button>
     </div>`;
   $('#sPlace').value = (m.sightings&&m.sightings.length)?m.sightings[m.sightings.length-1].place:m.place;
   $('#caseDetail').scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -396,13 +402,21 @@ function shareFlyer(id){const m=MISS.find(x=>x.id===id);if(!m)return;
   else{try{navigator.clipboard.writeText(txt);}catch(e){}alert('Flyer copied:\n\n'+txt);}}
 
 async function loadPlaces(){const m=await fetch('/api/places').then(r=>r.json());TYPES=m.types;PLACES=m.places;PLACE_COORDS=m.coords||{};
-  $('#placelist').innerHTML=m.places.map(p=>`<option value="${p}">`).join('');
+  $('#placelist').innerHTML=m.places.map(p=>`<option value="${esc(p)}">`).join('');
   $('#areaSelect').value='Kaduna';$('#wFrom').value='Abuja';$('#wTo').value='Kaduna';$('#mPlace').value='Kankara';
-  $('#typeGrid').innerHTML=TYPES.map(t=>`<button onclick="pick(this,'RTYPE','${t}')">${t.replace(/_/g,' ')}</button>`).join('');
-  $('#typeGrid').firstChild.classList.add('on');window.RTYPE=TYPES[0];}
+  var tg=$('#typeGrid');tg.innerHTML='';TYPES.forEach(function(t){var b=document.createElement('button');b.textContent=String(t).replace(/_/g,' ');b.onclick=function(){pick(b,'RTYPE',t);};tg.appendChild(b);});
+  if(tg.firstChild)tg.firstChild.classList.add('on');window.RTYPE=TYPES[0];}
 function pick(el,k,v){el.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));el.classList.add('on');
   if(k==='RTYPE')window.RTYPE=v;else SOS_TYPE=v;}
 async function geocodeClient(q){try{const r=await fetch('/api/geocode?q='+encodeURIComponent(q)).then(x=>x.json());return r.result;}catch(e){return null;}}
+// GEO-01: detect a backend "location not verified" result (no real gazetteer/OSM match).
+// Honour either an explicit flag or a low/none confidence tag so we never plot a centroid as if it were the place.
+function geoUnverified(g){return !!g&&(g.unverified===true||g.location_unverified===true||g.verified===false||g.confidence==='unverified'||g.confidence==='none'||g.coords_confidence==='unverified'||g.coords_confidence==='none');}
+// GEO-01: prompt the user to drop a pin instead of trusting an unverified/centroid coordinate.
+function showUnverifiedLocation(name){var rep=$('#areaReport');chip('—');var pill=$('#lvpill');if(pill){pill.textContent='—';pill.style.background='#8a97a822';pill.style.color='#5d6b7e';}
+  if($('#guide'))$('#guide').textContent='';
+  if(rep)rep.innerHTML='<div class="lvl YELLOW"><b>📍 Location not verified</b><div class="guide" style="margin-top:6px">We couldn\'t confirm “'+esc(name)+'” on the map, so we won\'t guess a spot. Tap the exact place on the map to drop a pin, or type a nearby known town.</div></div>';
+  if(areaLayer)areaLayer.clearLayers();}
 function toast(t){var e=$('#toast');if(!e)return;e.textContent=t;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(function(){e.classList.remove('show');},2600);}
 function hav(la1,lo1,la2,lo2){var R=6371,p1=la1*Math.PI/180,p2=la2*Math.PI/180,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180;var x=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2);return 2*R*Math.asin(Math.sqrt(x));}
 const GUIDE={GREEN:"No verified danger nearby. Remain alert.",YELLOW:"Unconfirmed report nearby. Exercise caution.",ORANGE:"Active danger reported nearby. Avoid the area if you can.",RED:"Critical verified threat. Do not travel; follow official guidance."};
@@ -424,17 +438,18 @@ function showArea(name,r,lat,lng,isMe,recenter){
   chip(lvl);const pill=$('#lvpill');pill.textContent=lvl;pill.style.background=COL[lvl]+'22';pill.style.color=COL[lvl];
   $('#guide').textContent=r.guidance||'';
   const list=(r.incidents||[]).map(function(i){var lv=LV[i.status]||'YELLOW';
-    return '<div class="alert '+lv+'" onclick="focusPt('+i.lat+','+i.lng+')"><div class="r1"><span class="pl">'+i.location_name+', '+i.state+'</span><span class="badge '+lv+'">'+lv+'</span></div><div class="mt">'+i.type.replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+(i.distance_km!=null?(' · '+i.distance_km+' km away'):'')+'</div></div>';}).join('');
-  if(rep)rep.innerHTML='<div class="lvl '+lvl+'"><div class="r1"><b>'+lvl+' · '+name+'</b><button class="spk" onclick="sayLast()" title="Read aloud">🔊</button></div><div class="guide">'+(r.guidance||'')+'</div><div class="mt" style="margin-top:6px">'+n+' incident(s) within '+rad+' km'+(isMe?' · 📍 stays on your device':'')+'</div></div>'
-    +(list?('<h2 class="t" style="margin-top:14px">In your area ('+rad+' km)</h2>'+list):'<p class="note">No incidents reported within '+rad+' km right now. Stay alert.</p>');
+    return '<div class="alert '+lv+'" onclick="focusPt('+(+i.lat)+','+(+i.lng)+')"><div class="r1"><span class="pl">'+esc(i.location_name)+', '+esc(i.state)+'</span><span class="badge '+lv+'">'+lv+'</span></div><div class="mt">'+esc(i.type).replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+(i.distance_km!=null?(' · '+esc(i.distance_km)+' km away'):'')+'</div></div>';}).join('');
+  if(rep)rep.innerHTML='<div class="lvl '+lvl+'"><div class="r1"><b>'+lvl+' · '+esc(name)+'</b><button class="spk" onclick="sayLast()" title="Read aloud">🔊</button></div><div class="guide">'+esc(r.guidance||'')+'</div><div class="mt" style="margin-top:6px">'+(+n)+' incident(s) within '+(+rad)+' km'+(isMe?' · 📍 stays on your device':'')+'</div></div>'
+    +(list?('<h2 class="t" style="margin-top:14px">In your area ('+(+rad)+' km)</h2>'+list):'<p class="note">No incidents reported within '+(+rad)+' km right now. Stay alert.</p>');
   if(lat!=null&&map&&areaLayer){areaLayer.clearLayers();
     L.circle([lat,lng],{radius:rad*1000,color:COL[lvl],weight:2,fillColor:COL[lvl],fillOpacity:.08}).addTo(areaLayer);
-    L.marker([lat,lng],{icon:missIcon(isMe?'📍':'🏠')}).addTo(areaLayer).bindPopup(isMe?'You are here · private to your device':('Your area: '+name));
+    L.marker([lat,lng],{icon:missIcon(isMe?'📍':'🏠')}).addTo(areaLayer).bindPopup(isMe?'You are here · private to your device':('Your area: '+esc(name)));
     if(recenter!==false){try{map.setView([lat,lng],isMe?11:8);}catch(e){}}}}
 async function loadLevel(recenter){recenter=(recenter!==false);const p=$('#areaSelect').value.trim();if(!p)return;
   const rep=$('#areaReport');if(rep)rep.innerHTML='<p class="note">Building area report…</p>';
   let r,g=await geocodeClient(p);
-  if(g){r=await fetch('/api/risk?lat='+g.lat+'&lng='+g.lng).then(x=>x.json());showArea(g.name||p,r,g.lat,g.lng,false,recenter);}
+  if(geoUnverified(g)){showUnverifiedLocation(g.name||p);return;}
+  if(g&&g.lat!=null&&g.lng!=null){r=await fetch('/api/risk?lat='+g.lat+'&lng='+g.lng).then(x=>x.json());showArea(g.name||p,r,g.lat,g.lng,false,recenter);}
   else{r=await fetch('/api/risk?place='+encodeURIComponent(p)).then(x=>x.json());showArea(p,r,null,null,false,recenter);}}
 function locateMe(){
   if(!navigator.geolocation){toast('Location not supported — type your area');$('#areaSelect').focus();return;}
@@ -480,7 +495,7 @@ function proWarn(inc,dist){
   var lvl=LV[inc.status]||'YELLOW', el=$('#proWarn'); if(!el)return;
   el.style.display='block'; el.style.background=COL[lvl]; el.style.color='#fff';
   el.innerHTML='<button onclick="document.getElementById(\'proWarn\').style.display=\'none\'" style="float:right;background:transparent;border:none;color:#fff;font-size:16px;cursor:pointer">✕</button>'
-    +'<b>⚠ '+inc.type.replace(/_/g,' ').toUpperCase()+'</b> · '+Math.round(dist)+' km away · near '+inc.location_name+', '+inc.state;
+    +'<b>⚠ '+esc(inc.type).replace(/_/g,' ').toUpperCase()+'</b> · '+Math.round(dist)+' km away · near '+esc(inc.location_name)+', '+esc(inc.state);
   speak('Heads up. '+inc.type.replace(/_/g,' ')+' reported about '+Math.round(dist)+' kilometres away, near '+inc.location_name+'. '+(GUIDE[lvl]||''));
 }
 function checkProximity(lat,lng){
@@ -539,7 +554,7 @@ async function loadData(){const[a,b,al]=await Promise.all([fetch('/api/incidents
   INCS=a.incidents||[];MISS=b.missing||[];renderBanner(al.alerts||[]);drawMarkers();renderHome();renderMissList();}
 function renderBanner(alerts){const el=$('#alertBanner');const a=alerts[0];
   if(a){el.className='abanner L'+a.level;el.style.display='flex';
-    el.innerHTML='<b>⚠ '+a.level_label+'</b><span>'+a.title+' — '+a.guidance+'</span><span class="x" onclick="document.getElementById(\'alertBanner\').style.display=\'none\'">✕</span>';}
+    el.innerHTML='<b>⚠ '+esc(a.level_label)+'</b><span>'+esc(a.title)+' — '+esc(a.guidance)+'</span><span class="x" onclick="document.getElementById(\'alertBanner\').style.display=\'none\'">✕</span>';}
   else{el.style.display='none';}}
 
 function distToSeg(p,a,b){var s=Math.cos(Math.PI/180*((a[0]+b[0])/2));
@@ -552,6 +567,7 @@ async function checkRoute(){const a=$('#wFrom').value.trim(),b=$('#wTo').value.t
   $('#routeBox').innerHTML='<p class="note">Finding your route…</p>';
   const[ga,gb]=await Promise.all([geocodeClient(a),geocodeClient(b)]);
   if(!ga||!gb){$('#routeBox').innerHTML='<p class="note">Couldn\'t find one of those places — try a nearby town name.</p>';return;}
+  if(geoUnverified(ga)||geoUnverified(gb)){$('#routeBox').innerHTML='<div class="lvl YELLOW"><b>📍 Location not verified</b><div class="guide" style="margin-top:6px">We couldn\'t confirm '+(geoUnverified(ga)?('“'+esc(ga.name||a)+'”'):('“'+esc(gb.name||b)+'”'))+' on the map, so we won\'t guess a spot. Use a nearby known town, or drop a pin on the map.</div></div>';return;}
   const aName=ga.name,bName=gb.name,A=[ga.lat,ga.lng],B=[gb.lat,gb.lng];
   const[ra,rb]=await Promise.all([fetch('/api/risk?lat='+ga.lat+'&lng='+ga.lng).then(r=>r.json()),fetch('/api/risk?lat='+gb.lat+'&lng='+gb.lng).then(r=>r.json())]);
   let onRoute=INCS.filter(function(i){return distToSeg([i.lat,i.lng],A,B)<55;});
@@ -563,19 +579,21 @@ async function checkRoute(){const a=$('#wFrom').value.trim(),b=$('#wTo').value.t
   var sayR=worst+'. '+guide+' '+onRoute.length+' incident'+(onRoute.length===1?'':'s')+' on the corridor from '+aName+' to '+bName+'.';
   if(rNear){sayR+=' Nearest: '+rNear.type.replace(/_/g,' ')+', about '+Math.round(rND)+' kilometres ahead, near '+rNear.location_name+'.';}
   LASTROUTE={say:sayR};
-  const list=onRoute.length?onRoute.map(function(i){var l=LV[i.status];return '<div class="alert '+l+'"><div class="r1"><span class="pl">'+i.location_name+', '+i.state+'</span><span class="badge '+l+'">'+l+'</span></div><div class="mt">'+i.type.replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+'</div></div>';}).join(''):'<p class="note">No incidents reported along this route right now.</p>';
-  $('#routeBox').innerHTML='<div class="lvl '+worst+'"><div class="r1"><b>'+worst+' · '+aName+' → '+bName+'</b><button class="spk" onclick="sayRoute()" title="Read aloud">🔊</button></div><div class="guide">'+guide+'</div><div class="mt" style="margin-top:6px">'+onRoute.length+' incident(s) on this corridor</div></div>'
+  const list=onRoute.length?onRoute.map(function(i){var l=LV[i.status];return '<div class="alert '+l+'"><div class="r1"><span class="pl">'+esc(i.location_name)+', '+esc(i.state)+'</span><span class="badge '+l+'">'+l+'</span></div><div class="mt">'+esc(i.type).replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+'</div></div>';}).join(''):'<p class="note">No incidents reported along this route right now.</p>';
+  $('#routeBox').innerHTML='<div class="lvl '+worst+'"><div class="r1"><b>'+worst+' · '+esc(aName)+' → '+esc(bName)+'</b><button class="spk" onclick="sayRoute()" title="Read aloud">🔊</button></div><div class="guide">'+esc(guide)+'</div><div class="mt" style="margin-top:6px">'+onRoute.length+' incident(s) on this corridor · corridor scan (not road routing)</div></div>'
     +'<button class="btn sec" onclick="go(\'home\')">🗺 View route on map</button>'
     +'<h2 class="t" style="margin-top:16px">On your route</h2>'+list;
   sayRoute();
   if(A&&B){routeLayer.clearLayers();
     L.polyline([A,B],{color:COL[worst],weight:6,opacity:.85}).addTo(routeLayer);
-    L.marker(A,{icon:missIcon('A')}).addTo(routeLayer).bindPopup(a);
-    L.marker(B,{icon:missIcon('B')}).addTo(routeLayer).bindPopup(b);
+    L.marker(A,{icon:missIcon('A')}).addTo(routeLayer).bindPopup(esc(a));
+    L.marker(B,{icon:missIcon('B')}).addTo(routeLayer).bindPopup(esc(b));
     try{map.fitBounds([A,B],{padding:[60,60]});}catch(e){}}}
 async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').focus();return;}
   const r=await fetch('/api/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:window.RTYPE,place:$('#rPlace').value,description:d})}).then(r=>r.json());
-  const o=$('#okBox');o.style.display='block';o.innerHTML=r.ok?`✓ Report received. ${$('#rPlace').value} is now <b>${r.risk.level}</b>. Thank you.`:'⚠ '+(r.error||'failed');
+  const o=$('#okBox');o.style.display='block';
+  var unver=r.ok&&(r.location_unverified===true||(r.risk&&r.risk.location_unverified===true)||r.coords_confidence==='unverified');
+  o.innerHTML=r.ok?(unver?`✓ Report received, but we couldn't verify “${esc($('#rPlace').value)}” on the map — it isn't placed yet. Open the map and drop a pin on the exact spot. Thank you.`:`✓ Report received. ${esc($('#rPlace').value)} is now <b>${esc(r.risk&&r.risk.level)}</b>. Thank you.`):'⚠ '+esc(r.error||'failed');
   if(r.ok){$('#rDesc').value='';loadData();loadLevel();}}
 // --- Emergency SOS: AUTOMATIC (alarm + share location) or HOLD & SPEAK (auto-send on dead air).
 let SOS_ON=false, sosWatch=null, sosSilence=null, sosCtx=null, sosBeepIv=null, sosMsg='';
@@ -587,9 +605,10 @@ function sosActivate(extra){
   if(SOS_ON)return; SOS_ON=true; startAlarm();
   $('#sosHome').style.display='none';
   var box=$('#sosActive'); box.style.display='block';
-  box.innerHTML='<div class="sosactive"><b>🆘 SOS ACTIVE</b>'+(extra?('<div class="mt">“'+extra+'”</div>'):'')
+  box.innerHTML='<div class="sosactive"><b>🆘 SOS ACTIVE</b>'+(extra?('<div class="mt">“'+esc(extra)+'”</div>'):'')
     +'<div id="sosWhere" class="mt">Getting your location…</div><div id="sosMsgBox" class="mt" style="font-size:12px;color:var(--muted)"></div>'
-    +'<button class="btn red" onclick="sosShare()">📤 Share my SOS + location</button>'
+    +'<div class="mt" style="color:var(--red);font-weight:700">Not sent yet — tap below to share it yourself.</div>'
+    +'<button class="btn red" onclick="sosShare()">📤 Send my SOS + location (you must send it)</button>'
     +'<button class="btn sec" onclick="sosStop()">■ I am safe — stop</button></div>';
   sosMsg='🆘 I NEED HELP'+(extra?(' — '+extra):'')+'.';
   if(navigator.geolocation){
@@ -618,7 +637,7 @@ async function sendMissing(){const n=$('#mName').value.trim();if(!n){$('#mName')
       vehicle:$('#mVeh').value.trim(),clothing:$('#mClo').value.trim(),direction:$('#mDir').value.trim(),beacon_id:($('#mBeacon')?$('#mBeacon').value.trim():'')})}).then(r=>r.json());
   const o=$('#mOk');o.style.display='block';
   if(r.ok){o.innerHTML='✓ Search case opened. See it on the map with its search area.';['#mName','#mExact','#mVeh','#mClo','#mDir'].forEach(s=>$(s).value='');MISS=r.missing||[];drawMarkers();renderHome();renderMissList();}
-  else o.innerHTML='⚠ '+(r.error||'failed');}
+  else o.innerHTML='⚠ '+esc(r.error||'failed');}
 
 function go(v){switchTab(v);document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));}
 function switchTab(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));$('#v-'+v).classList.add('active');
@@ -627,7 +646,7 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.v)
 document.querySelectorAll('.seg').forEach(b=>b.onclick=()=>{document.querySelectorAll('.seg').forEach(x=>x.classList.remove('on'));b.classList.add('on');SEG=b.dataset.seg;renderHome();});
 $('#areaSelect').onchange=function(){loadLevel(true);};
 
-(async function(){initMap();await loadPlaces();await loadLevel();await loadData();
+(async function(){initMap();checkDemo();await loadPlaces();await loadLevel();await loadData();
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   setTimeout(()=>map.invalidateSize(),120);
   // Unregister any stale service worker so the app is never served from a cache.

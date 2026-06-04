@@ -14,6 +14,11 @@ import sqlite3
 import hashlib
 import datetime
 
+try:
+    import security  # uuid / audit-hash helpers (stdlib-only sibling module)
+except Exception:  # pragma: no cover - keep db importable even if security.py absent
+    security = None
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # SQLite schema — kept byte-identical to the original so existing local DBs are
@@ -26,17 +31,25 @@ CREATE TABLE IF NOT EXISTS signals (
 );
 CREATE TABLE IF NOT EXISTS incidents (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  incident_uuid TEXT, event_version INTEGER,
   type TEXT, location_name TEXT, state TEXT, lat REAL, lng REAL,
   window_start TEXT, window_end TEXT,
   source_count INTEGER, source_diversity INTEGER, severity INTEGER,
   confidence INTEGER, status TEXT, summary TEXT, updated_at TEXT
 );
 CREATE TABLE IF NOT EXISTS incident_signals ( incident_id INTEGER, signal_id INTEGER );
+-- INT-01 / PRIV-05: decisions are keyed to an immutable incident_uuid (so a NEW
+-- incident never inherits an OLD decision) and append-only with a tamper-evident
+-- hash chain. The latest row per incident_uuid is the live decision.
 CREATE TABLE IF NOT EXISTS decisions (
-  key TEXT PRIMARY KEY, decision TEXT, note TEXT, actor TEXT, ts TEXT
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  incident_uuid TEXT, event_version INTEGER, key TEXT,
+  decision TEXT, note TEXT, actor TEXT, ts TEXT,
+  prev_hash TEXT, hash TEXT
 );
 CREATE TABLE IF NOT EXISTS audit (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT, action TEXT, detail TEXT
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT, action TEXT, detail TEXT,
+  prev_hash TEXT, hash TEXT
 );
 CREATE TABLE IF NOT EXISTS alerts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,6 +84,7 @@ CREATE TABLE IF NOT EXISTS signals (
 );
 CREATE TABLE IF NOT EXISTS incidents (
   id SERIAL PRIMARY KEY,
+  incident_uuid TEXT, event_version INTEGER,
   type TEXT, location_name TEXT, state TEXT, lat DOUBLE PRECISION, lng DOUBLE PRECISION,
   window_start TEXT, window_end TEXT,
   source_count INTEGER, source_diversity INTEGER, severity INTEGER,
@@ -78,10 +92,14 @@ CREATE TABLE IF NOT EXISTS incidents (
 );
 CREATE TABLE IF NOT EXISTS incident_signals ( incident_id INTEGER, signal_id INTEGER );
 CREATE TABLE IF NOT EXISTS decisions (
-  key TEXT PRIMARY KEY, decision TEXT, note TEXT, actor TEXT, ts TEXT
+  id SERIAL PRIMARY KEY,
+  incident_uuid TEXT, event_version INTEGER, key TEXT,
+  decision TEXT, note TEXT, actor TEXT, ts TEXT,
+  prev_hash TEXT, hash TEXT
 );
 CREATE TABLE IF NOT EXISTS audit (
-  id SERIAL PRIMARY KEY, ts TEXT, actor TEXT, action TEXT, detail TEXT
+  id SERIAL PRIMARY KEY, ts TEXT, actor TEXT, action TEXT, detail TEXT,
+  prev_hash TEXT, hash TEXT
 );
 CREATE TABLE IF NOT EXISTS alerts (
   id SERIAL PRIMARY KEY,
@@ -110,6 +128,17 @@ CREATE TABLE IF NOT EXISTS channel (
 
 def now_iso():
     return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def _fallback_uuid():
+    import uuid as _uuid
+    return _uuid.uuid4().hex
+
+
+def _fallback_hash(prev_hash, row_dict):
+    import json as _json
+    canon = _json.dumps(row_dict, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(((prev_hash or "") + canon).encode("utf-8")).hexdigest()
 
 
 class DB:
@@ -210,7 +239,66 @@ class DB:
                 self.conn.execute("ALTER TABLE missing ADD COLUMN beacon_id TEXT")
         except Exception:
             pass
+        # INT-01: immutable incident identity on legacy `incidents`.
+        for col, sdecl, pdecl in (("incident_uuid", "TEXT", "TEXT"), ("event_version", "INTEGER", "INTEGER")):
+            try:
+                if self.pg:
+                    cur = self.conn.cursor()
+                    cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS %s %s" % (col, pdecl))
+                    cur.close()
+                else:
+                    self.conn.execute("ALTER TABLE incidents ADD COLUMN " + col + " " + sdecl)
+            except Exception:
+                pass
+        # PRIV-05: tamper-evident hash columns on `audit`.
+        for col in ("prev_hash", "hash"):
+            try:
+                if self.pg:
+                    cur = self.conn.cursor()
+                    cur.execute("ALTER TABLE audit ADD COLUMN IF NOT EXISTS %s TEXT" % col)
+                    cur.close()
+                else:
+                    self.conn.execute("ALTER TABLE audit ADD COLUMN " + col + " TEXT")
+            except Exception:
+                pass
+        # INT-01 / PRIV-05: legacy `decisions` was keyed by `key TEXT PRIMARY KEY`
+        # (single upsertable row). Rebuild it as the append-only, uuid-keyed,
+        # hash-chained table when the new columns are absent. Old rows are dropped
+        # (they were keyed by the colliding type|location|state triple anyway).
+        try:
+            self._migrate_decisions_table()
+        except Exception:
+            pass
         if not self.pg:
+            self.conn.commit()
+
+    def _decisions_has_uuid(self):
+        if self.pg:
+            cur = self.conn.cursor()
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='decisions'")
+            cols = {r[0] for r in cur.fetchall()}
+            cur.close()
+        else:
+            cols = {r[1] for r in self.conn.execute("PRAGMA table_info(decisions)")}
+        return "incident_uuid" in cols and "hash" in cols
+
+    def _migrate_decisions_table(self):
+        if self._decisions_has_uuid():
+            return  # already the new shape (fresh DB or already migrated)
+        if self.pg:
+            cur = self.conn.cursor()
+            cur.execute("DROP TABLE IF EXISTS decisions")
+            cur.execute(
+                "CREATE TABLE decisions ("
+                " id SERIAL PRIMARY KEY, incident_uuid TEXT, event_version INTEGER, key TEXT,"
+                " decision TEXT, note TEXT, actor TEXT, ts TEXT, prev_hash TEXT, hash TEXT)")
+            cur.close()
+        else:
+            self.conn.execute("DROP TABLE IF EXISTS decisions")
+            self.conn.execute(
+                "CREATE TABLE decisions ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT, incident_uuid TEXT, event_version INTEGER, key TEXT,"
+                " decision TEXT, note TEXT, actor TEXT, ts TEXT, prev_hash TEXT, hash TEXT)")
             self.conn.commit()
 
     def close(self):
@@ -242,29 +330,87 @@ class DB:
             (geo.get("lat"), geo.get("lng"), geo.get("location_name"), geo.get("state"),
              geo.get("gtype"), geo.get("gseverity"), sid))
 
+    @staticmethod
+    def _stable_key(inc):
+        # Display/matching key (NOT the decision key). Maps a returning cluster to
+        # its prior immutable incident_uuid so identity + decisions survive recompute.
+        return "{}|{}|{}".format(inc.get("type"), inc.get("location_name"), inc.get("state"))
+
+    @staticmethod
+    def _content_fingerprint(member_ids, status, source_count):
+        # Material content of a cluster. When this changes for the same stable_key,
+        # the event has moved on -> bump event_version (lineage), keeping the uuid.
+        return "{}|{}|{}".format(sorted(member_ids or []), status, source_count)
+
     def replace_incidents(self, incidents):
+        # INT-01: preserve immutable identity across the delete+reinsert. Load the
+        # prior (stable_key -> uuid, version, fingerprint) so a returning event keeps
+        # its uuid (and therefore its operator decision); genuinely new clusters mint
+        # a fresh uuid; a changed cluster keeps its uuid but bumps event_version.
+        members = {}  # incident_uuid -> [signal_id,...] from the prior generation
+        for r in self._all("SELECT i.incident_uuid AS u, s.signal_id AS sid FROM incidents i"
+                           " JOIN incident_signals s ON s.incident_id=i.id"):
+            members.setdefault(r["u"], []).append(r["sid"])
+        prior = {}
+        for r in self._all("SELECT incident_uuid, event_version, type, location_name, state,"
+                           " source_count, status FROM incidents"):
+            sk = self._stable_key(r)
+            fp = self._content_fingerprint(members.get(r.get("incident_uuid"), []),
+                                           r.get("status"), r.get("source_count"))
+            prior[sk] = {"uuid": r.get("incident_uuid"), "version": r.get("event_version") or 1, "fp": fp}
+
         self._run("DELETE FROM incidents")
         self._run("DELETE FROM incident_signals")
         for inc in incidents:
+            sk = self._stable_key(inc)
+            fp_new = self._content_fingerprint(inc.get("signal_ids"), inc.get("status"), inc.get("source_count"))
+            p = prior.get(sk)
+            if p and p.get("uuid"):
+                uuid_val = p["uuid"]
+                version = p["version"] + 1 if fp_new != p.get("fp") else p["version"]
+            else:
+                uuid_val = security.new_uuid() if security else _fallback_uuid()
+                version = 1
             iid = self._insert(
-                "INSERT INTO incidents (type, location_name, state, lat, lng, window_start, window_end,"
-                " source_count, source_diversity, severity, confidence, status, summary, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (inc["type"], inc["location_name"], inc["state"], inc["lat"], inc["lng"],
+                "INSERT INTO incidents (incident_uuid, event_version, type, location_name, state, lat, lng,"
+                " window_start, window_end, source_count, source_diversity, severity, confidence, status,"
+                " summary, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (uuid_val, version, inc["type"], inc["location_name"], inc["state"], inc["lat"], inc["lng"],
                  inc["window_start"], inc["window_end"], inc["source_count"], inc["source_diversity"],
                  inc["severity"], inc["confidence"], inc["status"], inc["summary"], now_iso()))
             for sid in inc["signal_ids"]:
                 self._run("INSERT INTO incident_signals (incident_id, signal_id) VALUES (?,?)", (iid, sid))
 
-    def set_decision(self, key, decision, note, actor):
+    def _last_decision_hash(self):
+        r = self._one("SELECT hash FROM decisions ORDER BY id DESC LIMIT 1")
+        return (r.get("hash") if r else "") or ""
+
+    def set_decision(self, incident_uuid, decision, note, actor, event_version=None, key=None):
+        # INT-01 + PRIV-05: append-only, keyed to the immutable incident_uuid, with a
+        # tamper-evident hash chain (prev_hash -> hash). The latest row per uuid wins.
+        ts = now_iso()
+        prev = self._last_decision_hash()
+        row = {"incident_uuid": incident_uuid, "event_version": event_version,
+               "decision": decision, "note": note, "actor": actor, "ts": ts}
+        h = security.audit_hash(prev, row) if security else _fallback_hash(prev, row)
         self._run(
-            "INSERT INTO decisions (key, decision, note, actor, ts) VALUES (?,?,?,?,?)"
-            " ON CONFLICT(key) DO UPDATE SET decision=excluded.decision, note=excluded.note,"
-            " actor=excluded.actor, ts=excluded.ts",
-            (key, decision, note, actor, now_iso()))
+            "INSERT INTO decisions (incident_uuid, event_version, key, decision, note, actor, ts, prev_hash, hash)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (incident_uuid, event_version, key, decision, note, actor, ts, prev, h))
+        return h
 
     def decisions(self):
-        return {r["key"]: r for r in self._all("SELECT * FROM decisions")}
+        # Latest decision per incident_uuid (append-only history -> live view).
+        out = {}
+        for r in self._all("SELECT * FROM decisions ORDER BY id ASC"):
+            if r.get("incident_uuid"):
+                out[r["incident_uuid"]] = r
+        return out
+
+    def decision_log(self):
+        # Full append-only chain (for tamper-evident export / audit; PRIV-05).
+        return self._all("SELECT * FROM decisions ORDER BY id ASC")
 
     def insert_missing(self, m):
         return self._insert(
@@ -284,6 +430,14 @@ class DB:
         return self._all(
             "SELECT * FROM missing WHERE status IN ('active','located','recovered') ORDER BY id DESC")
 
+    def get_missing(self, case_id):
+        # ABU-10: existence check so a sighting can't be bound to a phantom case.
+        try:
+            cid = int(case_id)
+        except Exception:
+            return None
+        return self._one("SELECT * FROM missing WHERE id=?", (cid,))
+
     def insert_sighting(self, s):
         self._run(
             "INSERT INTO sightings (case_id, place, lat, lng, seen_at, note, source, created_at)"
@@ -298,9 +452,31 @@ class DB:
         self._run("UPDATE missing SET status=?, found_at=? WHERE id=?",
                   (status, now_iso() if status in ("located", "recovered") else None, case_id))
 
+    def _last_audit_hash(self):
+        r = self._one("SELECT hash FROM audit ORDER BY id DESC LIMIT 1")
+        return (r.get("hash") if r else "") or ""
+
     def audit(self, actor, action, detail):
-        self._run("INSERT INTO audit (ts, actor, action, detail) VALUES (?,?,?,?)",
-                  (now_iso(), actor, action, detail))
+        # PRIV-05: tamper-evident, append-only audit log. Each row links to the
+        # previous via prev_hash -> hash so any retroactive edit breaks the chain.
+        ts = now_iso()
+        prev = self._last_audit_hash()
+        row = {"ts": ts, "actor": actor, "action": action, "detail": detail}
+        h = security.audit_hash(prev, row) if security else _fallback_hash(prev, row)
+        self._run("INSERT INTO audit (ts, actor, action, detail, prev_hash, hash) VALUES (?,?,?,?,?,?)",
+                  (ts, actor, action, detail, prev, h))
+        return h
+
+    def verify_audit_chain(self):
+        # Recompute the chain and report the first broken link (None if intact).
+        prev = ""
+        for r in self._all("SELECT * FROM audit ORDER BY id ASC"):
+            row = {"ts": r.get("ts"), "actor": r.get("actor"), "action": r.get("action"), "detail": r.get("detail")}
+            expect = security.audit_hash(prev, row) if security else _fallback_hash(prev, row)
+            if expect != (r.get("hash") or ""):
+                return r.get("id")
+            prev = r.get("hash") or ""
+        return None
 
     def all_incidents(self):
         return self._all("SELECT * FROM incidents ORDER BY confidence DESC")
@@ -321,6 +497,11 @@ class DB:
 
     def active_alerts(self):
         return self._all("SELECT * FROM alerts WHERE status='active' ORDER BY level DESC, id DESC")
+
+    def has_active_alert(self, key):
+        # INT-02: is there already a live alert for this incident? Used to make
+        # re-verifying the same incident idempotent (no duplicate active alerts).
+        return self._one("SELECT id FROM alerts WHERE incident_key=? AND status='active'", (key,)) is not None
 
     def resolve_alert(self, key):
         self._run("UPDATE alerts SET status='resolved' WHERE incident_key=? AND status='active'", (key,))

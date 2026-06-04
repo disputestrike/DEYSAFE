@@ -37,6 +37,27 @@
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#16203a;border:1px solid var(--line);
     padding:11px 18px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none}
   .toast.show{opacity:1}
+  /* operator identity strip */
+  .who{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:12.5px;color:var(--muted)}
+  .who b{color:var(--text);font-weight:700}
+  .signout{flex:0 0 auto;padding:6px 12px;font-size:12px;font-weight:600;background:transparent;
+    border:1px solid var(--line);color:var(--muted);border-radius:8px;cursor:pointer}
+  /* login gate — dark situation-room overlay */
+  .login{position:fixed;inset:0;background:rgba(4,7,14,.92);backdrop-filter:blur(3px);
+    display:none;align-items:center;justify-content:center;padding:24px;z-index:50}
+  .login.show{display:flex}
+  .lbox{width:100%;max-width:380px;background:var(--card);border:1px solid var(--line);
+    border-radius:16px;padding:26px 24px;box-shadow:0 20px 60px rgba(0,0,0,.55)}
+  .lhead{display:flex;align-items:center;gap:11px;margin-bottom:6px}
+  .lbox h2{font-size:17px;letter-spacing:-.01em}
+  .lbox .sub{margin-bottom:18px}
+  .lbox label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:12px 0 5px;text-transform:uppercase;letter-spacing:.04em}
+  .lbox input{width:100%;padding:11px 13px;background:#0d1626;border:1px solid var(--line);
+    border-radius:10px;color:var(--text);font:inherit;outline:none}
+  .lbox input:focus{border-color:var(--brand)}
+  .lbox .go{width:100%;margin-top:20px;background:var(--brand);color:#fff}
+  .lerr{color:#f87171;font-size:13px;min-height:18px;margin-top:10px}
+  .lnote{color:var(--faint);font-size:11.5px;margin-top:14px;line-height:1.45}
 </style>
 </head>
 <body>
@@ -44,6 +65,8 @@
   <header>
     <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z" fill="#fff" opacity=".95"/></svg></div>
     <div><h1>SHIELD · Situation Room</h1><div class="sub">Operator review — the human gate · powers DeySafe</div></div>
+    <div class="who" id="who" style="display:none"><span>Operator <b id="whoName">—</b></span>
+      <button class="signout" id="signout" onclick="signOut()">Sign out</button></div>
   </header>
   <div class="gate">⚖️ Nothing warns the public as <b>verified</b> until a person approves it here. <b>Verify</b> confirms and raises a public alert. <b>Dismiss</b> removes it. Every action is written to the audit log.</div>
   <div style="display:flex;gap:10px;align-items:center;margin:14px 0;flex-wrap:wrap">
@@ -53,40 +76,170 @@
   <div class="count"><b id="n">0</b><span>incidents awaiting review</span></div>
   <div id="list"></div>
 </div>
+
+<!-- Operator login gate. Appears only when the server requires auth (a fetch 401s).
+     When the server runs OPEN (OPERATOR_TOKEN unset) operator fetches succeed without a
+     token and this overlay never shows, preserving the demo/open posture. -->
+<div class="login" id="login">
+  <form class="lbox" id="loginForm" onsubmit="return doLogin(event)">
+    <div class="lhead">
+      <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z" fill="#fff" opacity=".95"/></svg></div>
+      <div><h2>SHIELD operator sign-in</h2></div>
+    </div>
+    <div class="sub">Restricted console. Operator credentials required to review and verify incidents.</div>
+    <label for="lu">Username</label>
+    <input id="lu" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+    <label for="lp">Password</label>
+    <input id="lp" type="password" autocomplete="current-password" required />
+    <button type="submit" class="go" id="loginBtn">Sign in</button>
+    <div class="lerr" id="lerr"></div>
+    <div class="lnote">Your session token is stored only on this device and sent on every operator action for the audit log.</div>
+  </form>
+</div>
+
 <div class="toast" id="toast"></div>
 <script>
 const $ = (s)=>document.querySelector(s);
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
 
+// Escape EVERY untrusted value before it touches innerHTML. RSS titles, AI-extracted
+// place/state/type and report text are attacker-influenceable -> stored XSS otherwise.
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+// ---- Operator auth (AUTH-01/06) -------------------------------------------------
+const TOK_KEY = 'shield_op_token';
+const NAME_KEY = 'shield_op_name';
+function token(){ try{ return localStorage.getItem(TOK_KEY) || ''; }catch(e){ return ''; } }
+function setSession(tok, name){
+  try{ localStorage.setItem(TOK_KEY, tok); if(name) localStorage.setItem(NAME_KEY, name); }catch(e){}
+  renderWho();
+}
+function clearSession(){
+  try{ localStorage.removeItem(TOK_KEY); localStorage.removeItem(NAME_KEY); }catch(e){}
+  renderWho();
+}
+function renderWho(){
+  const t = token(); const w = $('#who');
+  if(t){ $('#whoName').textContent = (function(){try{return localStorage.getItem(NAME_KEY)||'signed in';}catch(e){return 'signed in';}})(); w.style.display='flex'; }
+  else { w.style.display='none'; }
+}
+// Attach the operator bearer token to a fetch when we have one. Fail-open: when no
+// token is stored (server OPEN) the header is simply omitted and the request still works.
+function authHeaders(extra){
+  const h = Object.assign({}, extra||{});
+  const t = token();
+  if(t) h['Authorization'] = 'Bearer ' + t;
+  return h;
+}
+function showLogin(){ $('#login').classList.add('show'); setTimeout(()=>{ const u=$('#lu'); if(u) u.focus(); }, 30); }
+function hideLogin(){ $('#login').classList.remove('show'); $('#lerr').textContent=''; }
+
+async function doLogin(ev){
+  ev.preventDefault();
+  const btn=$('#loginBtn'); const err=$('#lerr');
+  const username=$('#lu').value.trim(); const password=$('#lp').value;
+  if(!username || !password){ err.textContent='Enter username and password.'; return false; }
+  btn.disabled=true; const old=btn.textContent; btn.textContent='Signing in…'; err.textContent='';
+  try{
+    const r = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username, password})});
+    let j={}; try{ j = await r.json(); }catch(e){ j={}; }
+    if(r.ok && j && j.token){
+      setSession(j.token, j.name || j.username || username);
+      $('#lp').value='';
+      hideLogin();
+      toast('✓ Signed in as '+(j.name || username));
+      load();
+    } else {
+      err.textContent = (j && j.error) ? j.error : 'Sign-in failed. Check your credentials.';
+    }
+  }catch(e){
+    err.textContent='Network error — could not reach the sign-in service.';
+  }
+  btn.disabled=false; btn.textContent=old;
+  return false;
+}
+function signOut(){
+  clearSession();
+  $('#list').innerHTML='';
+  $('#n').textContent='0';
+  toast('Signed out');
+  showLogin();
+}
+
+// ---- Queue ----------------------------------------------------------------------
+let QUEUE = [];   // keep the raw items so action buttons can reference by index (no untrusted strings in attributes)
+
 async function load(){
-  const d = await fetch('/api/queue').then(r=>r.json());
+  let r;
+  try{
+    r = await fetch('/api/queue',{headers:authHeaders()});
+  }catch(e){
+    $('#list').innerHTML='<div class="empty">⚠ Could not reach the server.</div>'; return;
+  }
+  if(r.status===401 || r.status===403){
+    // Server requires operator auth and we are not authenticated -> show the gate.
+    clearSession();
+    $('#list').innerHTML='<div class="empty">Operator sign-in required.</div>';
+    $('#n').textContent='0';
+    showLogin();
+    return;
+  }
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
   const q = d.queue||[];
+  QUEUE = q;
   $('#n').textContent = q.length;
   if(!q.length){ $('#list').innerHTML='<div class="empty">✓ Queue clear. No incidents awaiting review.</div>'; return; }
-  $('#list').innerHTML = q.map(i=>`
-    <div class="card ${i.status}">
-      <div class="r1"><span class="place">${i.location_name}, ${i.state}</span>
-        <span class="st ${i.status}">${i.status.replace(/_/g,' ')}</span></div>
-      <div class="desc">${i.summary||''}</div>
-      <div class="meta">${i.type.replace(/_/g,' ')} · ${i.source_count} source(s) · severity ${i.severity} · confidence ${i.confidence}</div>
+  // Build with escaped values only. status is used as a CSS class too -> keep it to a
+  // safe slug so it can never break out of the class attribute or the markup.
+  $('#list').innerHTML = q.map((i, idx)=>{
+    const statusRaw = String(i.status||'');
+    const statusSlug = statusRaw.replace(/[^a-z_]/gi,'');
+    const statusLabel = esc(statusRaw.replace(/_/g,' '));
+    const typeLabel = esc(String(i.type||'').replace(/_/g,' '));
+    return `
+    <div class="card ${statusSlug}">
+      <div class="r1"><span class="place">${esc(i.location_name)}, ${esc(i.state)}</span>
+        <span class="st ${statusSlug}">${statusLabel}</span></div>
+      <div class="desc">${esc(i.summary||'')}</div>
+      <div class="meta">${typeLabel} · ${esc(i.source_count)} source(s) · severity ${esc(i.severity)} · confidence ${esc(i.confidence)}</div>
       <div class="acts">
-        <button class="verify" onclick='decide(${JSON.stringify(JSON.stringify(i))}, "verified")'>✓ Verify & warn public</button>
-        <button class="dismiss" onclick='decide(${JSON.stringify(JSON.stringify(i))}, "dismissed")'>Dismiss</button>
+        <button class="verify" data-i="${idx}" data-d="verified">✓ Verify &amp; warn public</button>
+        <button class="dismiss" data-i="${idx}" data-d="dismissed">Dismiss</button>
       </div>
-    </div>`).join('');
+    </div>`;}).join('');
+  // Wire actions via listeners (untrusted incident data never enters an inline handler attribute).
+  $('#list').querySelectorAll('button[data-i]').forEach(function(b){
+    b.addEventListener('click', function(){ decide(QUEUE[+b.getAttribute('data-i')], b.getAttribute('data-d')); });
+  });
 }
-async function decide(raw, decision){
-  const i = JSON.parse(raw);
-  const res = await fetch('/api/verify',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({type:i.type,location_name:i.location_name,state:i.state,decision})}).then(r=>r.json());
-  if(res.ok){ toast(decision==='verified'?('✓ '+i.location_name+' verified — public alert raised'):('Dismissed '+i.location_name)); load(); }
-  else toast('⚠ '+(res.error||'failed'));
+
+async function decide(i, decision){
+  if(!i) return;
+  // INT-01: bind the decision to the immutable event identity when the queue exposes it;
+  // keep the legacy type|location|state fields so the round-trip works either way.
+  const payload = {type:i.type, location_name:i.location_name, state:i.state, decision};
+  if(i.incident_uuid) payload.incident_uuid = i.incident_uuid;
+  if(i.event_version!=null) payload.event_version = i.event_version;
+  let res;
+  try{
+    res = await fetch('/api/verify',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),
+      body:JSON.stringify(payload)});
+  }catch(e){ toast('⚠ Network error'); return; }
+  if(res.status===401 || res.status===403){ clearSession(); toast('⚠ Operator sign-in required'); showLogin(); return; }
+  let j={}; try{ j = await res.json(); }catch(e){ j={}; }
+  if(j.ok){ toast(decision==='verified'?('✓ '+i.location_name+' verified — public alert raised'):('Dismissed '+i.location_name)); load(); }
+  else toast('⚠ '+(j.error||'failed'));
 }
+
 async function pullLive(){
   const b=$('#pull'); b.disabled=true; const old=b.textContent; b.textContent='⟳ Pulling…';
   $('#pullMsg').textContent='Fetching public news feeds…';
   try{
-    const r=await fetch('/api/ingest-live',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(x=>x.json());
+    const x=await fetch('/api/ingest-live',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:'{}'});
+    if(x.status===401 || x.status===403){ clearSession(); $('#pullMsg').textContent='Operator sign-in required.'; toast('⚠ Operator sign-in required'); showLogin(); b.disabled=false; b.textContent=old; return; }
+    let r={}; try{ r = await x.json(); }catch(e){ r={}; }
     const aimsg = r.ai_on ? (' · 🤖 AI-extracted '+r.ai_used) : ' · AI off (set CEREBRAS key)';
     $('#pullMsg').textContent = r.ok
       ? ('Fetched '+r.fetched+' · '+r.added+' new · '+r.incidents+' incidents · '+r.queue+' to review'+aimsg)
@@ -96,6 +249,8 @@ async function pullLive(){
   }catch(e){ $('#pullMsg').textContent='Live pull failed (network).'; toast('⚠ Live pull failed'); }
   b.disabled=false; b.textContent=old;
 }
+
+renderWho();
 load();
 </script>
 </body>

@@ -60,6 +60,8 @@ def main():
     ap.add_argument("--live", action="store_true", help="also pull live Nigerian news RSS feeds")
     args = ap.parse_args()
 
+    # PROD-04: ensure the data dir exists so a clean checkout doesn't fail on first run.
+    os.makedirs(os.path.join(BASE, "data"), exist_ok=True)
     db = DB(os.path.join(BASE, "data", "guardian.db"))
     db.audit("pipeline", "run_start", "live=%s" % args.live)
 
