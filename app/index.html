@@ -361,7 +361,7 @@ let LASTAREA=null;
 function speak(t){if(!('speechSynthesis'in window))return;try{window.speechSynthesis.cancel();var u=new SpeechSynthesisUtterance(t);u.rate=1;u.pitch=1;u.lang='en-NG';window.speechSynthesis.speak(u);}catch(e){}}
 function sayArea(name,r){var s=(r.level||'GREEN')+'. '+(r.guidance||'')+' '+(r.count||0)+' incident'+((r.count||0)===1?'':'s')+' within '+(r.radius_km||60)+' kilometres'+(name?(' of '+name):'')+'.';var top=(r.incidents||[])[0];if(top){s+=' Nearest: '+top.type.replace(/_/g,' ')+(top.distance_km!=null?(', about '+Math.round(top.distance_km)+' kilometres away'):'')+', near '+top.location_name+'.';}speak(s);}
 function sayLast(){if(LASTAREA)sayArea(LASTAREA.name,LASTAREA.r);}
-function showArea(name,r,lat,lng,isMe){
+function showArea(name,r,lat,lng,isMe,recenter){
   LASTAREA={name:name,r:r};
   const lvl=r.level||'GREEN',rad=r.radius_km||60,n=r.count||0,rep=$('#areaReport');
   chip(lvl);const pill=$('#lvpill');pill.textContent=lvl;pill.style.background=COL[lvl]+'22';pill.style.color=COL[lvl];
@@ -373,18 +373,18 @@ function showArea(name,r,lat,lng,isMe){
   if(lat!=null&&map&&areaLayer){areaLayer.clearLayers();
     L.circle([lat,lng],{radius:rad*1000,color:COL[lvl],weight:2,fillColor:COL[lvl],fillOpacity:.08}).addTo(areaLayer);
     L.marker([lat,lng],{icon:missIcon(isMe?'📍':'🏠')}).addTo(areaLayer).bindPopup(isMe?'You are here · private to your device':('Your area: '+name));
-    try{map.setView([lat,lng],isMe?11:8);}catch(e){}}}
-async function loadLevel(){const p=$('#areaSelect').value.trim();if(!p)return;
+    if(recenter!==false){try{map.setView([lat,lng],isMe?11:8);}catch(e){}}}}
+async function loadLevel(recenter){recenter=(recenter!==false);const p=$('#areaSelect').value.trim();if(!p)return;
   const rep=$('#areaReport');if(rep)rep.innerHTML='<p class="note">Building area report…</p>';
   let r,g=await geocodeClient(p);
-  if(g){r=await fetch('/api/risk?lat='+g.lat+'&lng='+g.lng).then(x=>x.json());showArea(g.name||p,r,g.lat,g.lng,false);}
-  else{r=await fetch('/api/risk?place='+encodeURIComponent(p)).then(x=>x.json());showArea(p,r,null,null,false);}}
+  if(g){r=await fetch('/api/risk?lat='+g.lat+'&lng='+g.lng).then(x=>x.json());showArea(g.name||p,r,g.lat,g.lng,false,recenter);}
+  else{r=await fetch('/api/risk?place='+encodeURIComponent(p)).then(x=>x.json());showArea(p,r,null,null,false,recenter);}}
 function locateMe(){
   if(!navigator.geolocation){toast('Location not supported — type your area');$('#areaSelect').focus();return;}
   toast('📍 Finding you — stays on your device…');
   navigator.geolocation.getCurrentPosition(function(pos){
     var lat=pos.coords.latitude,lng=pos.coords.longitude,r=riskAtClient(lat,lng,60);
-    showArea('Your location',r,lat,lng,true);sayArea('your location',r);
+    showArea('Your location',r,lat,lng,true,true);sayArea('your location',r);
   },function(err){toast('Location off — type your area instead');$('#areaSelect').focus();},
   {enableHighAccuracy:true,timeout:8000,maximumAge:30000});}
 function resetView(){if(map){try{map.setView([9.2,8.2],6);}catch(e){}}}
@@ -531,10 +531,10 @@ async function sendMissing(){const n=$('#mName').value.trim();if(!n){$('#mName')
 
 function go(v){switchTab(v);document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));}
 function switchTab(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));$('#v-'+v).classList.add('active');
-  if(v==='home'){loadLevel();setTimeout(()=>map&&map.invalidateSize(),60);}}
+  if(v==='home'){loadLevel(false);setTimeout(()=>map&&map.invalidateSize(),60);}}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.v));
 document.querySelectorAll('.seg').forEach(b=>b.onclick=()=>{document.querySelectorAll('.seg').forEach(x=>x.classList.remove('on'));b.classList.add('on');SEG=b.dataset.seg;renderHome();});
-$('#areaSelect').onchange=loadLevel;
+$('#areaSelect').onchange=function(){loadLevel(true);};
 
 (async function(){initMap();await loadPlaces();await loadLevel();await loadData();
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
