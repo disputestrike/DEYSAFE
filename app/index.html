@@ -182,7 +182,7 @@ const $=(s)=>document.querySelector(s);
 const COL={RED:'#d92d20',ORANGE:'#ef6c12',YELLOW:'#e0a106',GREEN:'#1aa260'};
 const LV={verified:'RED',needs_human_review:'ORANGE',corroborated:'ORANGE',candidate_unverified:'YELLOW'};
 const ORD={GREEN:0,YELLOW:1,ORANGE:2,RED:3};
-let map,incLayer,missLayer,routeLayer,areaLayer,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
+let map,incLayer,missLayer,routeLayer,areaLayer,triLayer,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
 
 function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
 function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>'+e+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});}
@@ -190,7 +190,7 @@ function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>
 function initMap(){
   map=L.map('map',{zoomControl:true,attributionControl:false}).setView([9.2,8.2],6);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd'}).addTo(map);
-  incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);areaLayer=L.layerGroup().addTo(map);
+  incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);areaLayer=L.layerGroup().addTo(map);triLayer=L.layerGroup().addTo(map);
   var Ctrl=L.Control.extend({options:{position:'bottomright'},onAdd:function(){
     var d=L.DomUtil.create('div','locctrl');
     var b1=L.DomUtil.create('button','',d);b1.innerHTML='📍';b1.title='Center on my location (private)';
@@ -223,6 +223,42 @@ function drawMarkers(){
     L.marker([m.search_lat,m.search_lng],{icon:missIcon('🔎')}).addTo(missLayer)
      .bindPopup('<b>'+m.name+'</b> ('+(m.age||'?')+')<br>Search radius: '+m.radius_km+' km · '+m.sighting_count+' sighting(s)');});
 }
+function hoursSince(iso){var t=Date.parse(iso);if(isNaN(t))return 1;return Math.max(0.1,(Date.now()-t)/3.6e6);}
+function reach(hrs){return Math.min(250,Math.max(2,hrs*50));}
+let LASTTRI=null;
+function sayTri(){if(LASTTRI&&LASTTRI.say)speak(LASTTRI.say);}
+// Venn-diagram triangulation: each source (last-seen point + every sighting) is a
+// reachability RING — how far the person could have moved since. They must be in
+// the INTERSECTION of all rings; the densest overlap = most-likely zone.
+function triangulate(cid){
+  var m=MISS.find(function(x){return x.id===cid;});if(!m){LASTTRI=null;return null;}
+  triLayer.clearLayers();
+  var rings=[{lat:m.lat,lng:m.lng,r:reach(hoursSince(m.last_seen)),label:'Last seen: '+m.place}];
+  (m.sightings||[]).forEach(function(s){rings.push({lat:s.lat,lng:s.lng,r:reach(hoursSince(s.seen_at)),label:'Sighting: '+s.place});});
+  var pal=['#ef6c12','#0ea5e9','#7c3aed','#0891b2','#e0a106','#1d6fe0'];
+  rings.forEach(function(rg,i){L.circle([rg.lat,rg.lng],{radius:rg.r*1000,color:pal[i%pal.length],weight:1.5,opacity:.85,fillColor:pal[i%pal.length],fillOpacity:.07,dashArray:'5'}).addTo(triLayer).bindPopup(rg.label+' · reach '+Math.round(rg.r)+' km');});
+  var res={sources:rings.length,overlap:rings.length,zoneKm:rings[0]?Math.round(rings[0].r):0,center:rings[0]?[rings[0].lat,rings[0].lng]:null};
+  if(rings.length>=2){
+    var minLa=99,maxLa=-99,minLo=199,maxLo=-199;
+    rings.forEach(function(rg){var dLa=rg.r/111,dLo=rg.r/((111*Math.cos(rg.lat*Math.PI/180))||1);
+      minLa=Math.min(minLa,rg.lat-dLa);maxLa=Math.max(maxLa,rg.lat+dLa);minLo=Math.min(minLo,rg.lng-dLo);maxLo=Math.max(maxLo,rg.lng+dLo);});
+    var N=40,best=0,cells=[];
+    for(var i=0;i<=N;i++){for(var j=0;j<=N;j++){
+      var la=minLa+(maxLa-minLa)*i/N,lo=minLo+(maxLo-minLo)*j/N,c=0;
+      for(var k=0;k<rings.length;k++){if(hav(la,lo,rings[k].lat,rings[k].lng)<=rings[k].r)c++;}
+      if(c>best){best=c;cells=[[la,lo]];}else if(c===best&&c>0){cells.push([la,lo]);}
+    }}
+    if(cells.length){var sLa=0,sLo=0;cells.forEach(function(c){sLa+=c[0];sLo+=c[1];});
+      var cLa=sLa/cells.length,cLo=sLo/cells.length,spread=2;
+      cells.forEach(function(c){spread=Math.max(spread,hav(cLa,cLo,c[0],c[1]));});
+      spread=Math.max(2,Math.round(spread));
+      L.circle([cLa,cLo],{radius:spread*1000,color:'#d92d20',weight:2,fillColor:'#d92d20',fillOpacity:.22}).addTo(triLayer);
+      L.marker([cLa,cLo],{icon:missIcon('🎯')}).addTo(triLayer).bindPopup('🎯 Most likely zone — '+best+' of '+rings.length+' sources overlap (~'+spread+' km across)');
+      res={sources:rings.length,overlap:best,zoneKm:spread,center:[cLa,cLo]};}
+  }
+  res.say='Triangulation: '+res.overlap+' of '+res.sources+' sources overlap. Most likely within '+res.zoneKm+' kilometres'+(m.place?(' near '+m.place):'')+'.';
+  LASTTRI=res;return res;
+}
 function itemInc(i){const lv=LV[i.status]||'YELLOW';return `<div class="item ${lv}" onclick="focusPt(${i.lat},${i.lng})">
   <div class="r1"><span class="pl">${i.location_name}, ${i.state}</span><span class="badge ${lv}">${lv}</span></div>
   <div class="ds">${i.summary||''}</div><div class="mt">${i.status==='verified'?'● Verified':'● Developing'} · ${i.type.replace(/_/g,' ')}</div></div>`;}
@@ -237,7 +273,7 @@ function renderHome(){$('#homeList').innerHTML = SEG==='alerts'
 function renderMissList(){$('#missList').innerHTML=MISS.length?MISS.map(itemMiss).join(''):'<p class="note">No active cases.</p>';}
 function focusPt(lat,lng){go('home');setTimeout(()=>{map.invalidateSize();map.setView([lat,lng],10);},60);}
 
-function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('findme');
+function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('findme');var tri=triangulate(id);
   const sights=(m.sightings||[]).map(x=>`<div class="sight"><span class="dot">🔵</span><span><b>${x.place}</b> — ${x.note||'sighting'}</span></div>`).join('')
     ||'<div class="sight" style="border:none;color:var(--faint)">No sightings yet. Be the first to report one.</div>';
   $('#caseDetail').innerHTML=`
@@ -247,6 +283,7 @@ function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('f
       <div class="kv"><b>Age(s):</b> ${m.age||'—'} &nbsp; <b>Vehicle:</b> ${m.vehicle||'—'}</div>
       <div class="kv"><b>Clothing:</b> ${m.clothing||'—'} &nbsp; <b>Direction:</b> ${m.direction||'—'}</div>
     </div>
+    ${tri&&tri.sources>1?`<div class="lvl ORANGE" style="margin-top:12px"><div class="r1"><b>🎯 Triangulation</b><button class="spk" onclick="sayTri()" title="Read aloud">🔊</button></div><div class="guide">${tri.overlap} of ${tri.sources} sources overlap — most likely within ~${tri.zoneKm} km. More sightings = tighter zone.</div></div>`:`<p class="note" style="margin-top:12px">Add a 2nd sighting to triangulate a most-likely zone.</p>`}
     <h2 class="t" style="margin-top:16px">Sighting trail</h2>${sights}
     <h2 class="t" style="margin-top:16px">Did you see them? Report a sighting</h2>
     <label class="f">Where (type any place)</label><input id="sPlace" list="placelist" autocomplete="off" placeholder="Where seen…" />
@@ -254,7 +291,7 @@ function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('f
     <label class="f">Note (vehicle, direction…)</label><input id="sNote" placeholder="e.g. White Hilux heading north" />
     <button class="btn" id="sawBtn" onclick="addSighting(${m.id})">📍 I saw them — tighten the search</button>
     <div class="chips" style="margin-top:12px">
-      <button id="mapBtn" onclick="focusPt(${m.search_lat},${m.search_lng})">🗺 View on map</button>
+      <button id="mapBtn" onclick="focusPt(${tri&&tri.center?tri.center[0]:m.search_lat},${tri&&tri.center?tri.center[1]:m.search_lng})">🗺 View triangulation on map</button>
       <button id="shareBtn" onclick="shareFlyer(${m.id})">📤 Share flyer</button>
       <button id="recoverBtn" onclick="setCaseStatus(${m.id},'recovered')">✓ Mark recovered</button>
     </div>`;

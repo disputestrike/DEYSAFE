@@ -49,7 +49,8 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Missing-person case (name/age/place/exact/vehicle/clothing/direction) | DeySafe add | `db.missing` + `api` + index | ✅ | `POST /api/missing` | PASS |
 | GROUP / mass-abduction headcount | user feedback | `db.count` + index | ✅ | missing `count` | PASS |
 | Crowdsourced sightings (re-anchor + tighten) | DeySafe add | `db.sightings` + `api` + index | ✅ | sighting tightens radius | PASS |
-| Time-based search radius ("triangulation") | DeySafe add | `api.missing_with_radius` | ✅ | flow C | PASS |
+| Time-based search radius (single circle) | DeySafe add | `api.missing_with_radius` | ✅ | flow C | PASS |
+| **Venn-diagram triangulation** — last-seen + every sighting = a reachability ring; intersection (densest overlap) = most-likely zone + 🎯 marker + spoken stat; more sightings → tighter | user "triangulation shape" / Venn | `index.triangulate` (client-side) | ✅ | browser: 3/3 sources → ~24 km zone, 0 errors | PASS |
 | Case states (active/located/recovered) | DeySafe add | `api.case-status` | ✅ | `POST /api/case-status` | PASS |
 | Shareable flyer · map trail | DeySafe add | `index.shareFlyer/drawMarkers` | ✅ | manual | PASS |
 | Type ANY last-seen / sighting place (real coords, not centroid) | user CAPA #1 | `api.coords_for` (gazetteer→OSM) + index inputs | ✅ | gate: off-centroid pin | PASS |
