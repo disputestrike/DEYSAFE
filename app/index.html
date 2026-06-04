@@ -224,7 +224,7 @@ const $=(s)=>document.querySelector(s);
 const COL={RED:'#d92d20',ORANGE:'#ef6c12',YELLOW:'#e0a106',GREEN:'#1aa260'};
 const LV={verified:'RED',needs_human_review:'ORANGE',corroborated:'ORANGE',candidate_unverified:'YELLOW'};
 const ORD={GREEN:0,YELLOW:1,ORANGE:2,RED:3};
-let map,incLayer,missLayer,routeLayer,areaLayer,triLayer,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
+let map,incLayer,missLayer,routeLayer,areaLayer,triLayer,heatLayer,HEAT_ON=false,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
 
 function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
 function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>'+e+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});}
@@ -232,13 +232,15 @@ function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>
 function initMap(){
   map=L.map('map',{zoomControl:true,attributionControl:false}).setView([9.2,8.2],6);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd'}).addTo(map);
-  incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);areaLayer=L.layerGroup().addTo(map);triLayer=L.layerGroup().addTo(map);
+  incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);areaLayer=L.layerGroup().addTo(map);triLayer=L.layerGroup().addTo(map);heatLayer=L.layerGroup().addTo(map);
   var Ctrl=L.Control.extend({options:{position:'bottomright'},onAdd:function(){
     var d=L.DomUtil.create('div','locctrl');
     var b1=L.DomUtil.create('button','',d);b1.innerHTML='📍';b1.title='Center on my location (private)';
     var b2=L.DomUtil.create('button','',d);b2.innerHTML='⤢';b2.title='Reset map view';
+    var b3=L.DomUtil.create('button','',d);b3.innerHTML='🔥';b3.title='Toggle danger heatmap';
     L.DomEvent.on(b1,'click',function(e){L.DomEvent.stop(e);locateMe();});
     L.DomEvent.on(b2,'click',function(e){L.DomEvent.stop(e);resetView();});
+    L.DomEvent.on(b3,'click',function(e){L.DomEvent.stop(e);toggleHeat();});
     L.DomEvent.disableClickPropagation(d);return d;}});
   map.addControl(new Ctrl());
   map.on('click',onMapTap);
@@ -269,6 +271,13 @@ function hoursSince(iso){var t=Date.parse(iso);if(isNaN(t))return 1;return Math.
 function reach(hrs){return Math.min(250,Math.max(2,hrs*50));}
 let LASTTRI=null;
 function sayTri(){if(LASTTRI&&LASTTRI.say)speak(LASTTRI.say);}
+function bearing(la1,lo1,la2,lo2){var y=Math.sin((lo2-lo1)*Math.PI/180)*Math.cos(la2*Math.PI/180);var x=Math.cos(la1*Math.PI/180)*Math.sin(la2*Math.PI/180)-Math.sin(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.cos((lo2-lo1)*Math.PI/180);return (Math.atan2(y,x)*180/Math.PI+360)%360;}
+function dest(lat,lng,brg,km){var R=6371,d=km/R,b=brg*Math.PI/180,la1=lat*Math.PI/180,lo1=lng*Math.PI/180;var la2=Math.asin(Math.sin(la1)*Math.cos(d)+Math.cos(la1)*Math.sin(d)*Math.cos(b));var lo2=lo1+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(la1),Math.cos(d)-Math.sin(la1)*Math.sin(la2));return [la2*180/Math.PI,lo2*180/Math.PI];}
+function conePts(aLat,aLng,b,r,half){var pts=[[aLat,aLng]];for(var a=-half;a<=half;a+=8){pts.push(dest(aLat,aLng,b+a,r));}pts.push([aLat,aLng]);return pts;}
+function dirToBearing(t){t=(t||'').toLowerCase();var m=[['north east',45],['northeast',45],['north west',315],['northwest',315],['south east',135],['southeast',135],['south west',225],['southwest',225],['north',0],['south',180],['east',90],['west',270]];for(var i=0;i<m.length;i++){if(t.indexOf(m[i][0])>=0)return m[i][1];}return null;}
+function compass(b){var d=['north','north-east','east','south-east','south','south-west','west','north-west'];return d[Math.round(((b%360)/45))%8];}
+// Strava-style danger heatmap: graduated overlapping circles -> hotter where incidents cluster.
+function toggleHeat(){HEAT_ON=!HEAT_ON;heatLayer.clearLayers();if(HEAT_ON){INCS.forEach(function(i){var lv=LV[i.status]||'YELLOW';for(var k=0;k<3;k++){L.circle([i.lat,i.lng],{radius:(30-k*9)*1000,stroke:false,fillColor:COL[lv],fillOpacity:.06}).addTo(heatLayer);}});toast('🔥 Danger heatmap ON');}else toast('Heatmap off');}
 // Venn-diagram triangulation: each source (last-seen point + every sighting) is a
 // reachability RING — how far the person could have moved since. They must be in
 // the INTERSECTION of all rings; the densest overlap = most-likely zone.
@@ -298,7 +307,16 @@ function triangulate(cid){
       L.marker([cLa,cLo],{icon:missIcon('🎯')}).addTo(triLayer).bindPopup('🎯 Most likely zone — '+best+' of '+rings.length+' sources overlap (~'+spread+' km across)');
       res={sources:rings.length,overlap:best,zoneKm:spread,center:[cLa,cLo]};}
   }
-  res.say='Triangulation: '+res.overlap+' of '+res.sources+' sources overlap. Most likely within '+res.zoneKm+' kilometres'+(m.place?(' near '+m.place):'')+'.';
+  // Strava insight: use MOVEMENT direction to predict ahead + draw a heading cone.
+  var sg=m.sightings||[],brg=null,anchor=null,ar=reach(hoursSince(m.last_seen));
+  if(sg.length>=2){anchor=[sg[sg.length-1].lat,sg[sg.length-1].lng];brg=bearing(sg[sg.length-2].lat,sg[sg.length-2].lng,sg[sg.length-1].lat,sg[sg.length-1].lng);ar=reach(hoursSince(sg[sg.length-1].seen_at));}
+  else if(sg.length===1){anchor=[sg[0].lat,sg[0].lng];brg=bearing(m.lat,m.lng,sg[0].lat,sg[0].lng);ar=reach(hoursSince(sg[0].seen_at));}
+  else{anchor=[m.lat,m.lng];brg=dirToBearing(m.direction);}
+  if(brg!=null&&anchor){
+    L.polygon(conePts(anchor[0],anchor[1],brg,Math.min(ar,120),34),{color:'#d92d20',weight:1,opacity:.7,fillColor:'#d92d20',fillOpacity:.12}).addTo(triLayer).bindPopup('Likely heading '+compass(brg)+' (~'+Math.round(brg)+'°)');
+    if(res.center){var fwd=dest(res.center[0],res.center[1],brg,Math.min(ar*0.4,(res.zoneKm||5)+6));L.marker(fwd,{icon:missIcon('➡️')}).addTo(triLayer).bindPopup('Predicted ahead — search this way');res.heading=Math.round(brg);res.headingC=compass(brg);}
+  }
+  res.say='Triangulation: '+res.overlap+' of '+res.sources+' sources overlap. Most likely within '+res.zoneKm+' kilometres'+(m.place?(' near '+m.place):'')+(res.headingC?(', likely moving '+res.headingC):'')+'.';
   LASTTRI=res;return res;
 }
 function itemInc(i){const lv=LV[i.status]||'YELLOW';return `<div class="item ${lv}" onclick="focusPt(${i.lat},${i.lng})">
