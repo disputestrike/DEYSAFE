@@ -169,7 +169,7 @@ def public_level(top):
 
 def recompute(db):
     detections = []
-    for r in db.conn.execute("SELECT * FROM signals"):
+    for r in db.all_signals():
         s = dict(r)
         # Structured report: place was already geocoded + type chosen, so build the
         # detection directly. Works for ANY place, not only the gazetteer towns.
@@ -194,7 +194,7 @@ def recompute(db):
 
 def ensure_seed(db):
     # Seed sample data only on first boot (empty DB) so deployed data persists across restarts.
-    empty = db.conn.execute("SELECT COUNT(*) AS c FROM signals").fetchone()["c"] == 0
+    empty = db.count_signals() == 0
     if empty:
         for s in ingest.gather(use_live=False, use_sample=True):
             db.insert_signal(s)
