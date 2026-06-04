@@ -33,7 +33,7 @@ import ai
 
 PLACES = json.load(open(os.path.join(BASE, "config", "locations.json"), encoding="utf-8"))["places"]
 PLACE_NAMES = sorted(p["name"] for p in PLACES)
-TYPES = ["kidnapping", "banditry_attack", "missing_person", "armed_robbery"]
+TYPES = ["kidnapping", "banditry_attack", "missing_person", "armed_robbery", "police_misconduct"]
 RISK = {"verified": 4, "needs_human_review": 3, "corroborated": 2, "candidate_unverified": 1, "dismissed": 0}
 REVIEW = ("needs_human_review", "corroborated")
 CTYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -45,12 +45,13 @@ PUBLIC_GUIDANCE = {
     "ORANGE": "Active danger reported nearby. Avoid the area if you can.",
     "RED": "Critical verified threat. Do not travel; follow official guidance.",
 }
-TYPE_RADIUS = {"kidnapping": 50, "banditry_attack": 100, "armed_robbery": 30, "missing_person": 30}
+TYPE_RADIUS = {"kidnapping": 50, "banditry_attack": 100, "armed_robbery": 30, "missing_person": 30, "police_misconduct": 20}
 TYPE_GUIDANCE = {
     "kidnapping": "Avoid the area. Do NOT attempt a rescue. Share your live location with family. Emergency: 112.",
     "banditry_attack": "Avoid this route. Travel by day and in convoy. Report movements you see. Emergency: 112.",
     "armed_robbery": "Avoid the area. Secure valuables. Report to the nearest police. Emergency: 112.",
     "missing_person": "If you see the person or vehicle, report a sighting on DeySafe. Do not approach. Emergency: 112.",
+    "police_misconduct": "Stay calm and safe. Note the time, location, and any badge / vehicle number. Record only if it's safe. You can report anonymously here. Emergency / legal aid: 112.",
 }
 LEVEL_LABEL = {1: "ADVISORY", 2: "WARNING", 3: "DANGER", 4: "CRITICAL"}
 
@@ -320,6 +321,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"missing": missing_with_radius(db)})
         if u.path == "/api/alerts":
             return self._json({"alerts": db.active_alerts()})
+        if u.path == "/api/channel":
+            return self._json({"posts": db.recent_channel()})
         if u.path == "/api/places":
             coords = {p["name"]: [p["lat"], p["lng"]] for p in PLACES}
             return self._json({"places": PLACE_NAMES, "types": TYPES, "coords": coords})
@@ -446,6 +449,20 @@ class Handler(BaseHTTPRequestHandler):
                               "description": text}
             db.audit("api", "ai_intake", "mode={} ai={}".format(mode, used_ai))
             return self._json({"ok": True, "mode": mode, "ai": used_ai, "ai_on": ai.available(), "fields": fields})
+
+        if u.path == "/api/channel":
+            # Community safety channel (Zello-style, light): short area-tagged posts.
+            # Community chatter, NOT verified alerts -> never creates incidents/alerts.
+            text = (data.get("text") or "").strip()[:280]
+            if not text:
+                return self._json({"ok": False, "error": "text required"}, 400)
+            area = (data.get("area") or "").strip()
+            g = geocode(area) if area else None
+            db.insert_channel({"area": (g["name"] if g else area), "text": text,
+                               "lat": (g["lat"] if g else None), "lng": (g["lng"] if g else None),
+                               "source": "community"})
+            db.audit("api", "channel_post", "area={}".format(area))
+            return self._json({"ok": True, "posts": db.recent_channel()})
 
         if u.path == "/api/missing":
             name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()

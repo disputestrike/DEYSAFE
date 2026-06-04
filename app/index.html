@@ -93,6 +93,9 @@
   .sosactive b{font-size:20px;color:#d92d20;display:block;margin-bottom:6px}
   body.sos-flash::after{content:'';position:fixed;inset:0;border:10px solid #d92d20;pointer-events:none;z-index:1500;animation:sosflash .7s infinite}
   @keyframes sosflash{0%,100%{opacity:1}50%{opacity:0}}
+  .rights{background:#f4f7ff;border:1px solid #dce6ff;border-radius:12px;padding:10px 12px;margin:4px 0 14px;font-size:13px}
+  .rights summary{cursor:pointer;font-weight:700}
+  .rights ul{margin:8px 0 4px 18px;padding:0}.rights li{margin:3px 0}
   .mm{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.3);border:2px solid #fff}
   .mm span{transform:rotate(45deg);font-size:13px}
   nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:600}
@@ -137,7 +140,7 @@
           <button onclick="go('waka')">🛣 Check road</button>
           <button onclick="go('findme')">🔎 Missing</button>
         </div>
-        <div class="segtabs"><button class="seg on" data-seg="alerts">Nearby alerts</button><button class="seg" data-seg="missing">Missing persons</button></div>
+        <div class="segtabs"><button class="seg on" data-seg="alerts">Nearby alerts</button><button class="seg" data-seg="missing">Missing persons</button><button class="seg" data-seg="channels">Channels</button></div>
         <div id="homeList"></div>
       </div>
     </section>
@@ -161,6 +164,10 @@
         <div class="note" id="rNLnote" style="text-align:left;margin:8px 2px 0"></div>
       </div>
       <div class="types" id="typeGrid"></div>
+      <details class="rights"><summary>🛡 Know your rights (if you're stopped by police)</summary>
+        <ul><li>Stay calm; keep your hands visible.</li><li>You may ask the officer's name and why you're stopped.</li><li>You can stay silent beyond identifying yourself.</li><li>You are not required to pay a bribe.</li><li>Record the encounter only if it's safe.</li><li>Note the time, place, and any badge / vehicle number.</li></ul>
+        <p style="margin:6px 0 0">Report it above — choose <b>police misconduct</b>. It's anonymous.</p>
+      </details>
       <label class="f">Nearest town / area</label><input id="rPlace" list="placelist" autocomplete="off" placeholder="Type the place…" />
       <label class="f">What's happening? (no names — what &amp; where)</label>
       <textarea id="rDesc" placeholder="e.g. Armed men on motorbikes stopping vehicles"></textarea>
@@ -302,9 +309,30 @@ function itemMiss(m){var grp=(m.count>1)?` · GROUP of ${m.count}`:'';
   <div class="r1"><span class="pl">${m.name}</span><span class="badge miss">${(m.status||'active').toUpperCase()}</span></div>
   <div class="ds">Last seen ${m.exact_place||m.place}, ${m.hours}h ago${grp} · ${m.sighting_count} sighting(s)</div>
   <div class="mt">🔎 Search radius ${m.radius_km} km</div></div>`;}
-function renderHome(){$('#homeList').innerHTML = SEG==='alerts'
+function renderHome(){
+  if(SEG==='channels'){renderChannels();return;}
+  $('#homeList').innerHTML = SEG==='alerts'
   ? (INCS.length?INCS.slice().sort((a,b)=>ORD[LV[b.status]]-ORD[LV[a.status]]).map(itemInc).join(''):'<p class="note">No active alerts near you.</p>')
   : (MISS.length?MISS.map(itemMiss).join(''):'<p class="note">No active cases.</p>');}
+function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function timeAgo(iso){var t=Date.parse(iso);if(isNaN(t))return '';var m=Math.floor((Date.now()-t)/60000);if(m<1)return 'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
+function renderChannels(){
+  var area=$('#areaSelect').value.trim();
+  $('#homeList').innerHTML='<div class="ai-intake" style="margin-top:8px"><label class="f" style="margin-top:0">📣 Post to your area channel'+(area?(' ('+esc(area)+')'):'')+'</label>'
+    +'<textarea id="chMsg" maxlength="280" placeholder="e.g. Checkpoint clear on the Kaduna road, all calm"></textarea>'
+    +'<div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic(\'chMsg\')">🎤 Speak</button><button class="btn" onclick="postChannel()">Post</button></div></div>'
+    +'<div id="chFeed"><p class="note">Loading channel…</p></div>';
+  loadChannel();
+}
+async function loadChannel(){
+  try{var d=await fetch('/api/channel').then(r=>r.json());var posts=d.posts||[],fe=$('#chFeed');if(!fe)return;
+    fe.innerHTML=posts.length?posts.map(function(p){return '<div class="item"><div class="r1"><span class="pl">📣 '+esc(p.area||'area')+'</span><span class="mt">'+timeAgo(p.created_at)+'</span></div><div class="ds">'+esc(p.text)+'</div></div>';}).join(''):'<p class="note">No posts yet — be the first to share what you see.</p>';
+  }catch(e){var fe=$('#chFeed');if(fe)fe.innerHTML='<p class="note">Could not load the channel.</p>';}
+}
+async function postChannel(){
+  var el=$('#chMsg');if(!el)return;var t=(el.value||'').trim();if(!t)return;
+  try{await fetch('/api/channel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({area:$('#areaSelect').value.trim(),text:t})});el.value='';loadChannel();toast('Posted to your area channel');}catch(e){toast('Could not post');}
+}
 function renderMissList(){$('#missList').innerHTML=MISS.length?MISS.map(itemMiss).join(''):'<p class="note">No active cases.</p>';}
 function focusPt(lat,lng){go('home');setTimeout(()=>{map.invalidateSize();map.setView([lat,lng],10);},60);}
 

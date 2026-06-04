@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS sightings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   case_id INTEGER, place TEXT, lat REAL, lng REAL, seen_at TEXT, note TEXT, source TEXT, created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS channel (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  area TEXT, text TEXT, lat REAL, lng REAL, source TEXT, created_at TEXT
+);
 """
 
 # PostgreSQL schema — SERIAL ids, DOUBLE PRECISION coords; the structured-signal
@@ -96,6 +100,10 @@ CREATE TABLE IF NOT EXISTS sightings (
   id SERIAL PRIMARY KEY,
   case_id INTEGER, place TEXT, lat DOUBLE PRECISION, lng DOUBLE PRECISION,
   seen_at TEXT, note TEXT, source TEXT, created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS channel (
+  id SERIAL PRIMARY KEY,
+  area TEXT, text TEXT, lat DOUBLE PRECISION, lng DOUBLE PRECISION, source TEXT, created_at TEXT
 );
 """
 
@@ -303,3 +311,12 @@ class DB:
 
     def resolve_alert(self, key):
         self._run("UPDATE alerts SET status='resolved' WHERE incident_key=? AND status='active'", (key,))
+
+    def insert_channel(self, c):
+        self._run(
+            "INSERT INTO channel (area, text, lat, lng, source, created_at) VALUES (?,?,?,?,?,?)",
+            (c.get("area", ""), c.get("text", ""), c.get("lat"), c.get("lng"),
+             c.get("source", "community"), now_iso()))
+
+    def recent_channel(self, limit=40):
+        return self._all("SELECT * FROM channel ORDER BY id DESC LIMIT %d" % int(limit))
