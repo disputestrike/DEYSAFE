@@ -203,6 +203,13 @@ class DB:
                     self.conn.execute("ALTER TABLE signals ADD COLUMN " + col + " " + sdecl)
             except Exception:
                 pass  # column already exists
+        try:  # beacon id on missing cases (Bluetooth crowd-relay / AirTag model)
+            if self.pg:
+                cur = self.conn.cursor(); cur.execute("ALTER TABLE missing ADD COLUMN IF NOT EXISTS beacon_id TEXT"); cur.close()
+            else:
+                self.conn.execute("ALTER TABLE missing ADD COLUMN beacon_id TEXT")
+        except Exception:
+            pass
         if not self.pg:
             self.conn.commit()
 
@@ -261,11 +268,17 @@ class DB:
 
     def insert_missing(self, m):
         return self._insert(
-            "INSERT INTO missing (name, age, place, exact_place, lat, lng, count, last_seen, description, vehicle, clothing, direction, status, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO missing (name, age, place, exact_place, lat, lng, count, last_seen, description, vehicle, clothing, direction, status, created_at, beacon_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (m["name"], m.get("age", ""), m["place"], m.get("exact_place", ""), m["lat"], m["lng"],
              int(m.get("count", 1) or 1), m["last_seen"], m.get("description", ""),
-             m.get("vehicle", ""), m.get("clothing", ""), m.get("direction", ""), "active", now_iso()))
+             m.get("vehicle", ""), m.get("clothing", ""), m.get("direction", ""), "active", now_iso(),
+             m.get("beacon_id", "")))
+
+    def find_missing_by_beacon(self, beacon_id):
+        if not beacon_id:
+            return None
+        return self._one("SELECT * FROM missing WHERE beacon_id=? AND status IN ('active','located') ORDER BY id DESC", (beacon_id,))
 
     def all_missing(self):
         return self._all(

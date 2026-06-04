@@ -526,6 +526,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self._text("END Noted near {}. Please add details on the DeySafe app.".format(parts[1].title()))
             return self._text("END Sorry, invalid choice.")
 
+        if u.path == "/api/beacon-relay":
+            # AirTag-style crowd relay: a native app that hears a registered missing-
+            # person beacon POSTs {beacon_id, lat, lng} -> we log it as a SIGHTING, which
+            # re-anchors + tightens the triangulation. Works in no-network areas because
+            # the FINDER's phone (not the beacon) carries the report out (store-and-forward).
+            bid = (data.get("beacon_id") or "").strip()
+            if not bid:
+                return self._json({"ok": False, "error": "beacon_id, lat, lng required"}, 400)
+            try:
+                lat = float(data.get("lat"))
+                lng = float(data.get("lng"))
+            except Exception:
+                return self._json({"ok": False, "error": "beacon_id, lat, lng required"}, 400)
+            case = db.find_missing_by_beacon(bid)
+            if not case:
+                return self._json({"ok": True, "matched": False})  # unknown beacon -> reveal nothing
+            try:
+                hrs = float(data.get("hours_ago") or 0.1)
+            except Exception:
+                hrs = 0.1
+            db.insert_sighting({"case_id": case["id"], "place": "Bluetooth relay", "lat": lat, "lng": lng,
+                                "seen_at": (datetime.datetime.now() - datetime.timedelta(hours=hrs)).isoformat(timespec="seconds"),
+                                "note": "crowd Bluetooth relay", "source": "bluetooth"})
+            db.audit("beacon", "relay", "case={}".format(case["id"]))
+            return self._json({"ok": True, "matched": True, "missing": missing_with_radius(db)})
+
         if u.path == "/api/missing":
             name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()
             if not name or not place:
@@ -542,7 +568,8 @@ class Handler(BaseHTTPRequestHandler):
                                "description": (data.get("description") or "").strip(),
                                "vehicle": (data.get("vehicle") or "").strip(),
                                "clothing": (data.get("clothing") or "").strip(),
-                               "direction": (data.get("direction") or "").strip()})
+                               "direction": (data.get("direction") or "").strip(),
+                               "beacon_id": (data.get("beacon_id") or "").strip()})
             db.audit("api", "missing_report", "place={} count={}".format(place, data.get("count") or 1))
             return self._json({"ok": True, "missing": missing_with_radius(db)})
 

@@ -202,6 +202,7 @@
       <label class="f">Vehicle</label><input id="mVeh" placeholder="e.g. White Hilux, no plate" />
       <label class="f">Clothing</label><input id="mClo" placeholder="e.g. Blue school uniform" />
       <label class="f">Direction last headed</label><input id="mDir" placeholder="e.g. North toward Jibia" />
+      <label class="f">Bluetooth tag ID (optional — AirTag/Tile)</label><input id="mBeacon" placeholder="tag serial — nearby phones can detect it, even offline" />
       <button class="btn" id="caseBtn" onclick="sendMissing()">Open search case</button>
       <div class="ok" id="mOk"></div>
       <h2 class="t" style="margin-top:20px">Active cases — tap to open</h2>
@@ -614,7 +615,7 @@ function sosVoice(){
 async function sendMissing(){const n=$('#mName').value.trim();if(!n){$('#mName').focus();return;}
   const r=await fetch('/api/missing',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({name:n,age:$('#mAge').value.trim(),place:$('#mPlace').value,exact_place:$('#mExact').value.trim(),count:$('#mCount').value,hours_ago:$('#mHours').value,
-      vehicle:$('#mVeh').value.trim(),clothing:$('#mClo').value.trim(),direction:$('#mDir').value.trim()})}).then(r=>r.json());
+      vehicle:$('#mVeh').value.trim(),clothing:$('#mClo').value.trim(),direction:$('#mDir').value.trim(),beacon_id:($('#mBeacon')?$('#mBeacon').value.trim():'')})}).then(r=>r.json());
   const o=$('#mOk');o.style.display='block';
   if(r.ok){o.innerHTML='✓ Search case opened. See it on the map with its search area.';['#mName','#mExact','#mVeh','#mClo','#mDir'].forEach(s=>$(s).value='');MISS=r.missing||[];drawMarkers();renderHome();renderMissList();}
   else o.innerHTML='⚠ '+(r.error||'failed');}

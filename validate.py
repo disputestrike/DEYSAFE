@@ -104,6 +104,9 @@ s, j, raw = call("POST", "/api/ussd", {"text": "1*Kaduna"}); check("POST /api/us
 s, j, _ = call("POST", "/api/missing", {"name": "Geo Test Case", "place": "Gwoza", "hours_ago": 1, "count": 1})
 gcase = next((x for x in (j.get("missing") or []) if x.get("name") == "Geo Test Case"), {})
 check("typed non-dropdown place gets real coords (FindMe pin off-centroid)", s == 200 and 4 < (gcase.get("lat") or 0) < 14 and not (abs((gcase.get("lat") or 0) - 9.2) < 0.05 and abs((gcase.get("lng") or 0) - 8.2) < 0.05), gcase.get("lat"))
+call("POST", "/api/missing", {"name": "Beacon Kid", "place": "Kaduna", "beacon_id": "TAG-XYZ-1", "hours_ago": 2})
+s, j, _ = call("POST", "/api/beacon-relay", {"beacon_id": "TAG-XYZ-1", "lat": 10.6, "lng": 7.5, "hours_ago": 0.2}); check("Bluetooth beacon relay -> sighting (AirTag crowd-find)", s == 200 and j.get("matched") and isinstance(j.get("missing"), list), j)
+s, j, _ = call("POST", "/api/beacon-relay", {"beacon_id": "NO-SUCH-TAG", "lat": 9, "lng": 8}); check("unknown beacon -> matched:false (privacy)", s == 200 and j.get("matched") is False, j)
 
 print("\n-- B. Chaos / negative inputs (validate, never crash, no injection) --")
 s, j, _ = call("POST", "/api/report", {}); check("report empty -> 400 (not 500)", s == 400, s)
@@ -115,6 +118,7 @@ s, j, _ = call("POST", "/api/case-status", {"case_id": "abc", "status": "located
 s, j, _ = call("POST", "/api/intake", {}); check("intake empty text -> 400", s == 400, s)
 s, j, _ = call("POST", "/api/channel", {}); check("channel empty text -> 400", s == 400, s)
 s, j, _ = call("POST", "/api/sms", {}); check("sms empty text -> 400", s == 400, s)
+s, j, _ = call("POST", "/api/beacon-relay", {}); check("beacon-relay missing fields -> 400", s == 400, s)
 s, j, _ = call("GET", "/api/risk?place=Nowhereville"); check("risk unknown place -> GREEN", s == 200 and j.get("level") == "GREEN", j)
 s, j, _ = call("GET", "/api/risk"); check("risk no place -> graceful 200", s == 200, s)
 s, j, _ = call("GET", "/api/geocode?q="); check("geocode empty q -> ok:false (no crash)", s == 200 and j.get("ok") is False, j)
