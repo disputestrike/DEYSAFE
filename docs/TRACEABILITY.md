@@ -8,7 +8,7 @@ against this document.
 MEASURE (pass rate) → ADJUST. Nothing is "done" until it's in the matrix AND passes its gate.
 
 **Run the automated gate:** `python validate.py` (against the live server).
-**Last run: 2026-06-03 → 40 passed / 0 failed** (20 endpoint + 16 chaos + 4 functional).
+**Last run: 2026-06-03 → 42 passed / 0 failed** (22 endpoint + 16 chaos + 4 functional).
 
 Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your account/key · ⛔ excluded by a safety bright-line
 
@@ -25,6 +25,8 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Human-gate (nothing auto-verifies) | Doc P3.3 / P4(human ctrl) | `corroborate.py` + `api.verify` | ✅ | verify required to confirm | PASS |
 | Append-only audit | Doc P3.9 | `db.audit` | ◑ (data only, no UI) | table writes | PARTIAL |
 | Storage | Doc P2 | `engine/db.py` (SQLite) | ✅ (Postgres ☐) | all endpoints + injection test | PASS |
+| **Auto drop-off / decay** — incidents age out by status TTL (unverified 48h → verified 240h), read-time, NO cron; each carries `age_hours` | user "how do things drop off" | `api._fresh`/`_age_hours` in `public_incidents`+`review_queue` | ✅ | gate: all incidents within TTL | PASS |
+| **Full severity ladder visible** — a seeded human-verified RED so GREEN→RED all show | user "why no red?" | `ensure_seed` idempotent verify (respects operator) | ✅ | gate: a verified incident is present | PASS |
 
 ### B. Public app — DeySafe PWA
 | Feature | Source | Where it lives | Status | Validation | Result |

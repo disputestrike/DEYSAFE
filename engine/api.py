@@ -69,6 +69,23 @@ def ikey(i):
     return "{}|{}|{}".format(i["type"], i["location_name"], i["state"])
 
 
+# Auto drop-off: an incident stays on the public map only while fresh. After its
+# status-based TTL it ages out by itself — computed at read-time, no cron needed.
+DECAY_TTL_H = {"verified": 240, "needs_human_review": 96, "corroborated": 72, "candidate_unverified": 48}
+
+
+def _age_hours(inc):
+    ts = inc.get("window_end") or inc.get("window_start")
+    try:
+        return max(0.0, (datetime.datetime.now() - datetime.datetime.fromisoformat(ts)).total_seconds() / 3600.0)
+    except Exception:
+        return 0.0
+
+
+def _fresh(inc):
+    return _age_hours(inc) <= DECAY_TTL_H.get(inc.get("status"), 48)
+
+
 def place_coords(name):
     n = (name or "").strip().lower()
     for p in PLACES:
@@ -177,27 +194,33 @@ def recompute(db):
 
 def ensure_seed(db):
     # Seed sample data only on first boot (empty DB) so deployed data persists across restarts.
-    if db.conn.execute("SELECT COUNT(*) AS c FROM signals").fetchone()["c"] > 0:
-        recompute(db)
-        return
-    for s in ingest.gather(use_live=False, use_sample=True):
-        db.insert_signal(s)
+    empty = db.conn.execute("SELECT COUNT(*) AS c FROM signals").fetchone()["c"] == 0
+    if empty:
+        for s in ingest.gather(use_live=False, use_sample=True):
+            db.insert_signal(s)
     recompute(db)
-    # one sample FindMe case so the map demonstrates a search radius
-    lat, lng = place_coords("Kankara")
-    db.insert_missing({"name": "[SAMPLE] Abducted students (group)", "age": "13-17", "place": "Kankara",
-                       "exact_place": "Government Science School, Kankara", "count": 20,
-                       "lat": lat, "lng": lng,
-                       "last_seen": (datetime.datetime.now() - datetime.timedelta(hours=3)).isoformat(timespec="seconds"),
-                       "description": "Sample mass-abduction case for demo — students taken from a school in Kankara.",
-                       "vehicle": "Several motorcycles + a white Hilux", "clothing": "School uniforms",
-                       "direction": "North into the forest toward Jibia"})
-    # one seeded active alert so the public banner demonstrates the broadcast layer
-    klat, klng = place_coords("Kaduna")
-    db.insert_alert({"incident_key": "kidnapping|Kaduna|Kaduna", "level": 3, "level_label": "DANGER",
-                     "title": "KIDNAPPING — Kaduna, Kaduna — armed men on the Kaduna-Abuja road",
-                     "guidance": TYPE_GUIDANCE["kidnapping"], "lat": klat, "lng": klng,
-                     "radius_km": 50, "reach": 6000})
+    if empty:
+        # one sample FindMe case so the map demonstrates a search radius
+        lat, lng = place_coords("Kankara")
+        db.insert_missing({"name": "[SAMPLE] Abducted students (group)", "age": "13-17", "place": "Kankara",
+                           "exact_place": "Government Science School, Kankara", "count": 20,
+                           "lat": lat, "lng": lng,
+                           "last_seen": (datetime.datetime.now() - datetime.timedelta(hours=3)).isoformat(timespec="seconds"),
+                           "description": "Sample mass-abduction case for demo — students taken from a school in Kankara.",
+                           "vehicle": "Several motorcycles + a white Hilux", "clothing": "School uniforms",
+                           "direction": "North into the forest toward Jibia"})
+        # one seeded active alert so the public banner demonstrates the broadcast layer
+        klat, klng = place_coords("Kaduna")
+        db.insert_alert({"incident_key": "kidnapping|Kaduna|Kaduna", "level": 3, "level_label": "DANGER",
+                         "title": "KIDNAPPING — Kaduna, Kaduna — armed men on the Kaduna-Abuja road",
+                         "guidance": TYPE_GUIDANCE["kidnapping"], "lat": klat, "lng": klng,
+                         "radius_km": 50, "reach": 6000})
+    # Demo: ensure ONE human-VERIFIED incident exists so the public actually sees a
+    # RED on the GREEN->YELLOW->ORANGE->RED ladder. Idempotent; never overrides an
+    # operator's later call (only seeds while that incident is still undecided).
+    rk = "kidnapping|Kaduna|Kaduna"
+    if rk not in db.decisions() and any(ikey(i) == rk for i in with_decisions(db)):
+        db.set_decision(rk, "verified", "[seed] demo verified threat (synthetic)", "seed")
 
 
 def with_decisions(db):
@@ -209,15 +232,17 @@ def with_decisions(db):
         if d:
             i["status"] = d["decision"]
             i["decision_note"] = d.get("note") or ""
+        i["age_hours"] = round(_age_hours(i), 1)
     return incs
 
 
 def public_incidents(db):
-    return [i for i in with_decisions(db) if i["status"] != "dismissed"]
+    # dismissed by a human OR aged-out by decay -> off the public map automatically.
+    return [i for i in with_decisions(db) if i["status"] != "dismissed" and _fresh(i)]
 
 
 def review_queue(db):
-    q = [i for i in with_decisions(db) if not i["decided"] and i["status"] in REVIEW]
+    q = [i for i in with_decisions(db) if not i["decided"] and i["status"] in REVIEW and _fresh(i)]
     return sorted(q, key=lambda i: -i["confidence"])
 
 
