@@ -120,9 +120,9 @@ Production stack (Next.js + Supabase/PostGIS + Vercel) · **house-level GPS prec
 ---
 
 ## 4. Pre-release gates (run before every release)
-1. **Click-through** — every endpoint returns correctly (`validate.py` section A). ✅ 16/16
-2. **Chaos** — bad/empty/huge/malformed/injection inputs validate, never crash (section B). ✅ 14/14
-3. **Functional** — corroboration raises level, sighting tightens search, verify fires alert (section C). ✅ 3/3
+1. **Click-through** — every endpoint returns correctly (`validate.py` section A). ✅ 22/22
+2. **Chaos** — bad/empty/huge/malformed/injection inputs validate, never crash (section B). ✅ 16/16
+3. **Functional** — corroboration raises level, sighting tightens search, verify fires alert, typed off-gazetteer report maps (section C). ✅ 4/4
 4. **Visual/manual** — open `http://localhost:4500`; the in-tool screenshot can't capture the live Leaflet map (tool limitation), verified via served HTML + DOM.
 
 **To accept a new feature:** add its row here, give it a validation in `validate.py`, and it must PASS.
