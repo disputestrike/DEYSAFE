@@ -70,11 +70,13 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Pattern intel · 72h forecast · source health · satellite review | Doc P3.5/P3.8 | — | ☐ / 🔑 | — | N/A |
 
 ### E. AI (real LLM)
+**(see also: AI natural-language intake below)**
 | Feature | Source | Where it lives | Status | Validation | Result |
 |---|---|---|---|---|---|
 | LLM classifier — Cerebras **round-robin 5 keys** + failover (Gemini/Groq alt) | Doc P5 | `engine/ai.py` | ✅ built, **OFF (no key)** 🔑 | `/api/ai-status` + `/api/classify` | PASS (off→rule-based) |
 | **Live news → AI extraction** (AI reads news geoparse can't place → type+place → geocode → structured incident; capped 30/pull, key-gated) | Doc P5 | `api` `/api/ingest-live` (`ai.classify`+`coords_for`+`db.update_signal_geo`) | ◑ built, **needs key to prove** 🔑 | gate: no-key path green; `ai_on`/`ai_used` in response | PASS (off→rule-based) |
 | Multi-language extraction (EN/HA/YO/Pidgin) | Doc P5 | `ai.SYSTEM` | ◑ built, unproven w/o key | — | needs key |
+| **AI natural-language intake** — speak/type plain words → AI fills Report & FindMe forms (de-manualizes). Rule-based fallback w/o key | user "too manual, AI chat" | `api` `/api/intake` (`ai.classify`/`extract_missing`) + index `nlIntake`/`nlMic` + 🎤 | ✅ (AI path needs key) | gate: report+auto-missing+empty; browser: Gusau/Kankara pre-fill, 0 errors | PASS |
 
 ### F. Broadcast / channels
 | Feature | Source | Where it lives | Status | Result |

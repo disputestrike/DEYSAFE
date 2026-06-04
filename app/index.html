@@ -80,6 +80,8 @@
   .watch{width:100%;margin:10px 0 2px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#1f2a44}
   .watch.on{background:#0b6b4f;color:#fff;border-color:#0b6b4f}
   .prowarn{margin:10px 0;padding:12px 14px;border-radius:12px;font-size:13.5px;font-weight:600;line-height:1.4}
+  .ai-intake{background:#f4f7ff;border:1px solid #dce6ff;border-radius:14px;padding:12px;margin:0 0 16px}
+  .ai-intake textarea{width:100%;min-height:62px;box-sizing:border-box}
   .mm{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.3);border:2px solid #fff}
   .mm span{transform:rotate(45deg);font-size:13px}
   nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:600}
@@ -141,6 +143,12 @@
     <section class="view pad" id="v-report">
       <h2 class="t">Report danger</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Anonymous. We never ask who you are. <b>Tip:</b> tap the map to set the spot.</p>
+      <div class="ai-intake">
+        <label class="f" style="margin-top:0">🗣️ Just say or type what's happening — AI fills the form</label>
+        <textarea id="rNL" placeholder="e.g. Armed men on motorbikes stopping vehicles near Gusau"></textarea>
+        <div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic('rNL')">🎤 Speak</button><button class="btn" onclick="nlIntake('report')">✨ Fill for me</button></div>
+        <div class="note" id="rNLnote" style="text-align:left;margin:8px 2px 0"></div>
+      </div>
       <div class="types" id="typeGrid"></div>
       <label class="f">Nearest town / area</label><input id="rPlace" list="placelist" autocomplete="off" placeholder="Type the place…" />
       <label class="f">What's happening? (no names — what &amp; where)</label>
@@ -159,6 +167,12 @@
 
     <section class="view pad" id="v-findme">
       <h2 class="t">FindMe — report a missing person</h2>
+      <div class="ai-intake">
+        <label class="f" style="margin-top:0">🗣️ Just say or type what happened — AI fills the case</label>
+        <textarea id="mNL" placeholder="e.g. My son David, 14, missing near Kankara this morning, white Hilux heading north, blue school uniform"></textarea>
+        <div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic('mNL')">🎤 Speak</button><button class="btn" onclick="nlIntake('missing')">✨ Fill the case</button></div>
+        <div class="note" id="mNLnote" style="text-align:left;margin:8px 2px 0"></div>
+      </div>
       <label class="f">Name / group</label><input id="mName" placeholder="Full name, or e.g. '20 schoolgirls'" />
       <div style="display:flex;gap:10px"><div style="flex:1"><label class="f">How many people</label><input id="mCount" type="number" value="1" min="1" /></div>
         <div style="flex:1"><label class="f">Age(s)</label><input id="mAge" placeholder="16" /></div></div>
@@ -432,6 +446,37 @@ function toggleWatch(){
     {enableHighAccuracy:true,maximumAge:15000,timeout:20000});
   if(btn){btn.classList.add('on');btn.textContent='🛡 Watching '+WATCH_KM+' km — alerts ON';}
   toast('🛡 Proactive alerts ON — I\'ll warn you of danger within '+WATCH_KM+' km as you move. Your location stays on your device.');
+}
+// --- AI intake: speak/type plain language -> /api/intake -> pre-fill the form.
+function nlMic(targetId){
+  if(!voiceSupported()){toast('Voice input needs Chrome or Android');return;}
+  try{var SR=window.SpeechRecognition||window.webkitSpeechRecognition;var rec=new SR();rec.lang='en-NG';rec.interimResults=false;rec.maxAlternatives=1;
+    rec.onstart=function(){toast('🎤 Listening… describe what happened');};
+    rec.onerror=function(){toast('Didn\'t catch that — try again');};
+    rec.onresult=function(e){var t=e.results[0][0].transcript;var el=$('#'+targetId);if(el)el.value=t;toast('Heard: '+t);};
+    rec.start();
+  }catch(err){toast('Voice unavailable here');}
+}
+function setRType(t){if(!t)return;window.RTYPE=t;var g=$('#typeGrid');if(!g)return;for(var i=0;i<g.children.length;i++){g.children[i].classList.toggle('on',g.children[i].textContent.replace(/ /g,'_')===t);}}
+async function nlIntake(mode){
+  var src=mode==='missing'?'mNL':'rNL', noteId=mode==='missing'?'mNLnote':'rNLnote';
+  var text=($('#'+src).value||'').trim(); if(!text){$('#'+src).focus();return;}
+  $('#'+noteId).textContent='Reading…';
+  try{
+    var r=await fetch('/api/intake',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,mode:mode})}).then(x=>x.json());
+    if(!r||!r.ok){$('#'+noteId).textContent='Could not read that — just fill it in below.';return;}
+    var f=r.fields||{};
+    if(r.mode==='missing'){
+      if(f.name)$('#mName').value=f.name; if(f.count)$('#mCount').value=f.count; if(f.age)$('#mAge').value=f.age;
+      if(f.place)$('#mPlace').value=f.place; if(f.exact_place)$('#mExact').value=f.exact_place;
+      if(f.hours_ago!=null)$('#mHours').value=f.hours_ago; if(f.vehicle)$('#mVeh').value=f.vehicle;
+      if(f.clothing)$('#mClo').value=f.clothing; if(f.direction)$('#mDir').value=f.direction;
+      $('#mNLnote').textContent=(r.ai?'✨ AI filled the case':'Filled what I could (AI off — set key)')+' — check it, then tap "Open search case".';
+    }else{
+      setRType(f.type); if(f.place)$('#rPlace').value=f.place; if(f.description)$('#rDesc').value=f.description;
+      $('#rNLnote').textContent=(r.ai?'✨ AI filled the report':'Filled what I could (AI off — set key)')+' — check it, then tap Submit.';
+    }
+  }catch(e){$('#'+noteId).textContent='Network error — just fill it in below.';}
 }
 async function loadData(){const[a,b,al]=await Promise.all([fetch('/api/incidents').then(r=>r.json()),fetch('/api/missing').then(r=>r.json()),fetch('/api/alerts').then(r=>r.json())]);
   INCS=a.incidents||[];MISS=b.missing||[];renderBanner(al.alerts||[]);drawMarkers();renderHome();renderMissList();}

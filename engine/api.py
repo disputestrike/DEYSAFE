@@ -407,6 +407,46 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": ok, "fetched": fetched, "added": added, "ai_used": ai_used,
                                "ai_on": ai.available(), "incidents": inc, "queue": len(review_queue(db))})
 
+        if u.path == "/api/intake":
+            # AI intake: free text / speech in -> structured fields out, for the human
+            # to glance at + submit. Uses the LLM when a key is set; rule-based fallback.
+            text = (data.get("text") or "").strip()
+            mode = (data.get("mode") or "auto").strip().lower()
+            if not text:
+                return self._json({"ok": False, "error": "text required"}, 400)
+            if mode not in ("report", "missing"):
+                low = text.lower()
+                mode = "missing" if any(w in low for w in ("missing", "abducted", "kidnapp", "find my", "my son", "my daughter", "my child", "disappear", "last seen", "not seen")) else "report"
+            used_ai = False
+            if mode == "missing":
+                res = ai.extract_missing(text) if ai.available() else None
+                if isinstance(res, dict) and not res.get("error"):
+                    used_ai = True
+                    fields = {"name": res.get("name") or "", "age": str(res.get("age") or ""),
+                              "count": res.get("count") or 1, "place": res.get("place") or "",
+                              "exact_place": res.get("exact_place") or "",
+                              "hours_ago": res.get("hours_ago") if res.get("hours_ago") is not None else 1,
+                              "description": res.get("description") or text,
+                              "vehicle": res.get("vehicle") or "", "clothing": res.get("clothing") or "",
+                              "direction": res.get("direction") or ""}
+                else:
+                    gp = geoparse.geoparse({"title": "", "text": text}) or {}
+                    fields = {"name": "", "age": "", "count": 1, "place": gp.get("location_name", ""),
+                              "exact_place": "", "hours_ago": 1, "description": text,
+                              "vehicle": "", "clothing": "", "direction": ""}
+            else:
+                res = ai.classify(text) if ai.available() else None
+                if isinstance(res, dict) and not res.get("error") and res.get("is_incident"):
+                    used_ai = True
+                    fields = {"type": res.get("incident_type") or "", "place": res.get("location_text") or "",
+                              "description": res.get("summary") or text}
+                else:
+                    gp = geoparse.geoparse({"title": "", "text": text}) or {}
+                    fields = {"type": gp.get("type", ""), "place": gp.get("location_name", ""),
+                              "description": text}
+            db.audit("api", "ai_intake", "mode={} ai={}".format(mode, used_ai))
+            return self._json({"ok": True, "mode": mode, "ai": used_ai, "ai_on": ai.available(), "fields": fields})
+
         if u.path == "/api/missing":
             name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()
             if not name or not place:

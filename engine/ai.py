@@ -26,6 +26,17 @@ SYSTEM = (
     "incident_type one of: kidnapping, banditry_attack, armed_robbery, missing_person, other."
 )
 
+MISSING_SYSTEM = (
+    "You are an intake assistant for a Nigerian missing-person platform. From the "
+    "report (English, Hausa, Yoruba, or Nigerian Pidgin) extract the case. Respond "
+    "with ONLY valid JSON, no markdown, no preamble:\n"
+    '{"name": str or null, "age": str or null, "count": int, "place": str or null, '
+    '"exact_place": str or null, "hours_ago": number or null, "description": str, '
+    '"vehicle": str or null, "clothing": str or null, "direction": str or null}\n'
+    "place = nearest town/area; exact_place = the specific spot (school, market, road). "
+    "count > 1 for a group/mass abduction (default 1). hours_ago = time since last seen."
+)
+
 _rr = [0]  # round-robin cursor across requests
 
 
@@ -63,7 +74,7 @@ def _post(url, payload, headers):
         return json.loads(r.read().decode("utf-8"))
 
 
-def _cerebras(text):
+def _cerebras(text, system):
     keys = _cerebras_keys()
     if not keys:
         return None
@@ -77,7 +88,7 @@ def _cerebras(text):
         try:
             out = _post("https://api.cerebras.ai/v1/chat/completions", {
                 "model": model, "temperature": 0.1, "max_tokens": 600,
-                "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}],
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}],
             }, {"Authorization": "Bearer " + key})
             return json.loads(out["choices"][0]["message"]["content"])
         except urllib.error.HTTPError as e:
@@ -91,38 +102,43 @@ def _cerebras(text):
     return {"error": "all cerebras keys exhausted", "detail": last, "model": model}
 
 
-def _gemini(text):
+def _gemini(text, system):
     key = os.environ["GEMINI_API_KEY"]
     url = ("https://generativelanguage.googleapis.com/v1beta/models/"
            "gemini-1.5-flash:generateContent?key=" + key)
     out = _post(url, {
-        "contents": [{"parts": [{"text": SYSTEM + "\n\nTEXT:\n" + text}]}],
+        "contents": [{"parts": [{"text": system + "\n\nTEXT:\n" + text}]}],
         "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"},
     }, {})
     return json.loads(out["candidates"][0]["content"]["parts"][0]["text"])
 
 
-def _groq(text):
+def _groq(text, system):
     key = os.environ["GROQ_API_KEY"]
     out = _post("https://api.groq.com/openai/v1/chat/completions", {
         "model": "llama-3.3-70b-versatile", "temperature": 0.1,
         "response_format": {"type": "json_object"},
-        "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}],
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}],
     }, {"Authorization": "Bearer " + key})
     return json.loads(out["choices"][0]["message"]["content"])
 
 
-def classify(text):
-    """Extract a structured incident via a real LLM, or None if no key is set."""
+def classify(text, system=SYSTEM):
+    """Extract structured data via a real LLM, or None if no key is set."""
     p = provider()
     if not p:
         return None
     try:
         if p == "cerebras":
-            return _cerebras(text)
+            return _cerebras(text, system)
         if p == "gemini":
-            return _gemini(text)
+            return _gemini(text, system)
         if p == "groq":
-            return _groq(text)
+            return _groq(text, system)
     except Exception as e:
         return {"error": repr(e), "provider": p}
+
+
+def extract_missing(text):
+    """Extract a missing-person case from free text/speech, or None if no key."""
+    return classify(text, MISSING_SYSTEM)
