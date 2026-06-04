@@ -30,6 +30,7 @@ import ingest
 import geoparse
 import corroborate
 import ai
+import sms
 
 PLACES = json.load(open(os.path.join(BASE, "config", "locations.json"), encoding="utf-8"))["places"]
 PLACE_NAMES = sorted(p["name"] for p in PLACES)
@@ -193,6 +194,22 @@ def recompute(db):
     db.replace_incidents(corroborate.build_incidents(detections))
 
 
+def ingest_text_report(db, text, source):
+    """Turn a free-text SMS/USSD report into a structured, geocoded, human-gated signal."""
+    gp = geoparse.geoparse({"title": "", "text": text}) or {}
+    place = gp.get("location_name", "")
+    g = geocode(place) if place else None
+    db.insert_signal({"source_name": source, "kind": "sms",
+                      "title": (gp.get("type") or "report") + " near " + (place or "?"),
+                      "text": text, "url": "", "lang": "en",
+                      "published_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                      "lat": (g["lat"] if g else None), "lng": (g["lng"] if g else None),
+                      "location_name": (g["name"] if g else place), "state": (g.get("state", "") if g else ""),
+                      "gtype": (gp.get("type") or None), "gseverity": gp.get("severity", 0)})
+    recompute(db)
+    return {"place": (g["name"] if g else place), "type": gp.get("type", "")}
+
+
 def ensure_seed(db):
     # Seed sample data only on first boot (empty DB) so deployed data persists across restarts.
     empty = db.count_signals() == 0
@@ -292,6 +309,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _text(self, body, code=200):
+        b = body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
     def _static(self, path):
         rel = os.path.normpath((path.lstrip("/") or "index.html")).replace("\\", "/")
         if rel.startswith(".."):
@@ -327,7 +352,7 @@ class Handler(BaseHTTPRequestHandler):
             coords = {p["name"]: [p["lat"], p["lng"]] for p in PLACES}
             return self._json({"places": PLACE_NAMES, "types": TYPES, "coords": coords})
         if u.path == "/api/ai-status":
-            return self._json({"ai": ai.available(), "provider": ai.provider(), "keys": ai.key_count()})
+            return self._json({"ai": ai.available(), "provider": ai.provider(), "keys": ai.key_count(), "sms": sms.available()})
         if u.path == "/api/risk":
             q = urllib.parse.parse_qs(u.query)
             if q.get("lat") and q.get("lng"):
@@ -344,10 +369,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
         ln = int(self.headers.get("Content-Length", "0") or 0)
+        raw = self.rfile.read(ln).decode("utf-8", "replace") if ln else ""
         try:
-            data = json.loads(self.rfile.read(ln).decode("utf-8")) if ln else {}
+            data = json.loads(raw) if raw else {}
         except Exception:
             data = {}
+        if not data and raw and "=" in raw:  # form-encoded (e.g. Africa's Talking webhooks)
+            try:
+                data = {k: v[0] for k, v in urllib.parse.parse_qs(raw).items()}
+            except Exception:
+                data = {}
         db = DB(DB_PATH)
 
         if u.path == "/api/report":
@@ -463,6 +494,37 @@ class Handler(BaseHTTPRequestHandler):
                                "source": "community"})
             db.audit("api", "channel_post", "area={}".format(area))
             return self._json({"ok": True, "posts": db.recent_channel()})
+
+        if u.path == "/api/sms":
+            # Inbound SMS report (Africa's Talking posts here). Basic-phone reach.
+            text = (data.get("text") or "").strip()
+            if not text:
+                return self._json({"ok": False, "error": "text required"}, 400)
+            parsed = ingest_text_report(db, text, "SMS report")
+            db.audit("sms", "inbound", "from={} place={}".format((data.get("from") or "")[:6], parsed.get("place")))
+            return self._json({"ok": True, "parsed": parsed})
+
+        if u.path == "/api/ussd":
+            # USSD menu (Africa's Talking). `text` accumulates choices like "2*gunmen on road".
+            txt = (data.get("text") or "").strip()
+            parts = txt.split("*") if txt else []
+            if not parts:
+                return self._text("CON DeySafe - stay safe\n1. Check my area\n2. Report danger\n3. Missing person")
+            if parts[0] == "1":
+                if len(parts) < 2 or not parts[1]:
+                    return self._text("CON Enter your town or area:")
+                r = risk_for(public_incidents(db), parts[1])
+                return self._text("END {} - {}. {}".format(parts[1].title(), r["level"], r["guidance"]))
+            if parts[0] == "2":
+                if len(parts) < 2 or not parts[1]:
+                    return self._text("CON Describe the danger (what and where):")
+                ingest_text_report(db, parts[1], "USSD report")
+                return self._text("END Reported anonymously. Thank you - stay safe.")
+            if parts[0] == "3":
+                if len(parts) < 2 or not parts[1]:
+                    return self._text("CON Area the person was last seen:")
+                return self._text("END Noted near {}. Please add details on the DeySafe app.".format(parts[1].title()))
+            return self._text("END Sorry, invalid choice.")
 
         if u.path == "/api/missing":
             name, place = (data.get("name") or "").strip(), (data.get("place") or "").strip()
