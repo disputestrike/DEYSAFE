@@ -210,9 +210,9 @@ function onMapTap(e){var np=nearestPlace(e.latlng.lat,e.latlng.lng);if(!np)retur
   $('#rPlace').value=np;}
 function drawMarkers(){
   incLayer.clearLayers();missLayer.clearLayers();
-  INCS.forEach(i=>{const lv=LV[i.status]||'YELLOW';
-    L.circleMarker([i.lat,i.lng],{radius:9,color:COL[lv],weight:2,fillColor:COL[lv],fillOpacity:.45}).addTo(incLayer)
-     .bindPopup('<b>'+i.location_name+', '+i.state+'</b><br>'+lv+' · '+i.type.replace(/_/g,' ')+'<br>'+(i.status==='verified'?'Verified':'Developing'));});
+  INCS.forEach(i=>{const lv=LV[i.status]||'YELLOW';const fade=Math.max(.16,.5*(1-(i.age_hours||0)/120));
+    L.circleMarker([i.lat,i.lng],{radius:9,color:COL[lv],weight:2,opacity:Math.max(.4,fade+.25),fillColor:COL[lv],fillOpacity:fade}).addTo(incLayer)
+     .bindPopup('<b>'+i.location_name+', '+i.state+'</b><br>'+lv+' · '+i.type.replace(/_/g,' ')+'<br>'+(i.status==='verified'?'Verified':'Developing')+(i.age_hours!=null?(' · '+Math.round(i.age_hours)+'h ago'):''));});
   MISS.forEach(m=>{
     L.circle([m.search_lat,m.search_lng],{radius:m.radius_km*1000,color:'#1d6fe0',weight:1,dashArray:'6',fillColor:'#1d6fe0',fillOpacity:.07}).addTo(missLayer);
     const pts=[[m.lat,m.lng]];
