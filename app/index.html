@@ -74,6 +74,9 @@
   .toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);background:#10233f;color:#eaf0fb;border:1px solid #25406b;padding:10px 16px;border-radius:999px;font-size:13.5px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:1200;max-width:90%;text-align:center}
   .toast.show{opacity:1}
   .spk{border:none;background:transparent;font-size:17px;cursor:pointer;padding:2px 6px;line-height:1}
+  .mic{border:none;background:#eef3ff;color:#1f2a44;font-size:16px;cursor:pointer;border-radius:10px;width:38px;height:38px;flex:0 0 auto;display:grid;place-items:center}
+  .mic.live{background:#d92d20;color:#fff;animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
   .mm{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.3);border:2px solid #fff}
   .mm span{transform:rotate(45deg);font-size:13px}
   nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:600}
@@ -107,7 +110,7 @@
     <section class="view active" id="v-home">
       <div id="map"></div>
       <div class="panel">
-        <div class="srow"><input id="areaSelect" list="placelist" autocomplete="off" placeholder="Type your town or area…" aria-label="Your area" /><span class="pill" id="lvpill">—</span></div>
+        <div class="srow"><input id="areaSelect" list="placelist" autocomplete="off" placeholder="Type your town or area…" aria-label="Your area" /><button id="micBtn" class="mic" onclick="startVoice()" title="Speak a place" aria-label="Voice input">🎤</button><span class="pill" id="lvpill">—</span></div>
         <div class="guide" id="guide"></div>
         <div id="areaReport"></div>
         <div class="chips">
@@ -366,6 +369,34 @@ function locateMe(){
   },function(err){toast('Location off — type your area instead');$('#areaSelect').focus();},
   {enableHighAccuracy:true,timeout:8000,maximumAge:30000});}
 function resetView(){if(map){try{map.setView([9.2,8.2],6);}catch(e){}}}
+// --- Voice INPUT (speech-to-text). Chrome/Edge/Android only; progressive enhancement.
+let RECOG=null;
+function voiceSupported(){return ('webkitSpeechRecognition' in window)||('SpeechRecognition' in window);}
+function titleCaseWords(s){return (s||'').replace(/\b\w/g,function(c){return c.toUpperCase();}).trim();}
+// Intent routing is split out so it can be unit-tested without a microphone.
+function handleVoice(text){
+  if(!text)return;
+  var t=text.trim().toLowerCase().replace(/[?.!,]/g,'');
+  var m=t.match(/(?:from\s+)?(.+?)\s+to\s+(.+)/);
+  if(m&&m[1]&&m[2]){$('#wFrom').value=titleCaseWords(m[1]);$('#wTo').value=titleCaseWords(m[2]);go('waka');checkRoute();return;}
+  var place=t.replace(/^(am i safe in|is it safe in|how safe is|safe in|am i safe|check road in|check road|check|how is|what about|in|at|near|my area|area)\s+/,'').trim();
+  if(!place)place=t;
+  $('#areaSelect').value=titleCaseWords(place);
+  var p=loadLevel();if(p&&p.then)p.then(function(){sayLast();});else sayLast();
+}
+function startVoice(){
+  if(!voiceSupported()){toast('Voice input needs Chrome or Android');return;}
+  try{
+    var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    RECOG=new SR();RECOG.lang='en-NG';RECOG.interimResults=false;RECOG.maxAlternatives=1;
+    var mb=$('#micBtn');
+    RECOG.onstart=function(){if(mb)mb.classList.add('live');toast('🎤 Listening… say a town, or "Lagos to Kano"');};
+    RECOG.onend=function(){if(mb)mb.classList.remove('live');};
+    RECOG.onerror=function(){if(mb)mb.classList.remove('live');toast('Didn\'t catch that — tap 🎤 and try again');};
+    RECOG.onresult=function(e){var t=e.results[0][0].transcript;toast('Heard: '+t);handleVoice(t);};
+    RECOG.start();
+  }catch(err){toast('Voice input unavailable here');}
+}
 async function loadData(){const[a,b,al]=await Promise.all([fetch('/api/incidents').then(r=>r.json()),fetch('/api/missing').then(r=>r.json()),fetch('/api/alerts').then(r=>r.json())]);
   INCS=a.incidents||[];MISS=b.missing||[];renderBanner(al.alerts||[]);drawMarkers();renderHome();renderMissList();}
 function renderBanner(alerts){const el=$('#alertBanner');const a=alerts[0];
@@ -425,6 +456,7 @@ document.querySelectorAll('.seg').forEach(b=>b.onclick=()=>{document.querySelect
 $('#areaSelect').onchange=loadLevel;
 
 (async function(){initMap();await loadPlaces();await loadLevel();await loadData();
+  if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   setTimeout(()=>map.invalidateSize(),120);
   // Unregister any stale service worker so the app is never served from a cache.
   if('serviceWorker'in navigator){try{var rs=await navigator.serviceWorker.getRegistrations();rs.forEach(function(r){r.unregister();});}catch(e){}}})();
