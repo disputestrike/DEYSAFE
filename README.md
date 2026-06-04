@@ -1,48 +1,102 @@
-# Guardian-NG — Protective Warning Engine (prototype foundation)
+# DeySafe — *Know before you waka*
 
-A civilian, rights-preserving early-warning system for Nigeria's kidnapping/banditry crisis.
-**A warning system, not a targeting system.** It detects, locates, corroborates, and warns —
-it never tracks individuals, never auto-acts, and never cues force.
+A civilian, **rights-preserving early-warning + find-people platform** for Nigeria's
+kidnapping / banditry crisis. **A warning system, not a targeting system.** It detects,
+locates, corroborates, warns, and helps find missing people — it never tracks individuals
+without consent, never auto-acts, and never cues force.
 
-> **Day-1 foundation:** public signals → geo-located, confidence-scored incidents → live map.
-> This is the detection slice. Reporting intake, broadcast, and risk-forecast layers come next.
+- **DeySafe** — the public app (calm, light, map-first).
+- **WakaSafe** — road / route safety.
+- **FindMe** — missing-person triangulation.
+- **SHIELD** — the operator "situation room" + human-verification console (`/review.html`).
 
-## The bright lines (encoded in the design, not just docs)
-- **Event-centric, not person-centric.** We detect *events at places*, never score people.
-- **Nothing is auto-"verified."** The maximum automatic status is `needs_human_review`. A human decides.
-- **Public data only** in this layer. No private communications, telecom, financial, or biometric ingestion.
-- **Corroboration raises confidence.** A single unverified source is capped low on purpose.
-- **Append-only audit** of every pipeline action.
+> Status: working, deployed **prototype**. Pre-release gate: **56 / 56 passing** on
+> **both SQLite and PostgreSQL**. Not yet proven with real users/data — see *Honest scope*.
 
-## How it works (this slice)
-1. `engine/ingest.py` — gathers signals: synthetic **samples** by default; live Nigerian news **RSS** with `--live`.
-2. `engine/geoparse.py` — extracts incident **type** + **location** (Nigerian gazetteer) + language. *Abstains* if either is missing.
-3. `engine/corroborate.py` — clusters signals by type/place/time, scores calibrated confidence, applies the human-gate decision policy.
-4. `engine/pipeline.py` — runs one pass, stores to SQLite, exports `console/incidents.json`.
-5. `console/` — a Leaflet map that plots incidents by status.
+---
 
-## Run
+## Bright lines (encoded in the code, not just docs)
+- **Event-centric, not person-centric** — we warn about *events at places*; we never score people.
+- **Nothing is auto-verified** — the max automatic status is `needs_human_review`; a **human** confirms before any public RED alert.
+- **Your location stays on your device** — "locate me" and proactive warnings are computed **on-device**; your GPS is never sent to or stored on the server.
+- **Public data only** — no telecom / financial / RF / biometric ingestion.
+- **No auto-dispatch to armed responders.** SOS shares only with people *you* choose.
+- **Opt-in only** for any person-locating (a family registers a missing relative's beacon); unknown beacons are ignored.
+- **Anonymous** reporting, no PII; parameterised queries; user content escaped.
+
+---
+
+## What it does
+
+**Public app (DeySafe PWA)**
+- Map-first home (Leaflet) with GREEN / YELLOW / ORANGE / RED severity.
+- **Geofenced area report** — type *any* town/village (free-text geocoding via OpenStreetMap, no key) → a written report of incidents within range + a "drill-fence" circle.
+- **WakaSafe** — type any *from → to*; risk along the corridor + spoken summary.
+- **📍 Locate-me** (Google-Maps style, on-device) + **🛡 proactive proximity warnings** (Waze-style: warns of danger near you as you move).
+- **Voice in & out** — speak "am I safe in Kaduna" / "Lagos to Kano"; it reads the report back.
+- **🆘 SOS** — *Automatic* (alarm + on-device location + shareable link) or *Hold-&-Speak* (auto-sends after dead air).
+- **Report danger** (any town → geocoded, human-gated incident), **police-misconduct** category + **know-your-rights** card, **community channels** (area-tagged posts).
+
+**FindMe — missing persons**
+- Cases (incl. group / mass-abduction), crowdsourced **sightings** that re-anchor the search.
+- **★ Venn-diagram triangulation** — each sighting is a reachability ring; the densest overlap = most-likely zone.
+- **Movement prediction (Strava-style)** — heading cones + forward marker from the sighting trail.
+- **Bluetooth crowd-relay (AirTag model, backend)** — register a beacon; any phone that hears it logs a sighting (the offline reach; the BLE scanner itself is the native-app milestone).
+
+**Intelligence engine + SHIELD console**
+- Ingest (samples + **live Nigerian news RSS**) → geo-parse → corroborate → **human gate** → tiered alerts.
+- Operator triage queue, one-click **live scrape**, Verify / Dismiss, auto **decay** (stale incidents age off the map).
+- **Real AI** (Cerebras round-robin, key-gated) extracts incidents from news + powers natural-language intake. Falls back to rule-based with no key.
+
+**Reach**
+- In-app alerts + **SMS inbound + USSD menu** (Ushahidi-style basic-phone access). Outbound SMS is key-gated (Africa's Talking).
+
+---
+
+## Run it
+
+```bash
+python engine/api.py
 ```
-python engine/pipeline.py            # synthetic sample data (deterministic)
-python engine/pipeline.py --live     # also pull live Nigerian news feeds
-```
-Then view the map:
-```
-node console/server.js               # serves the console at http://localhost:4333
+- Public app:      http://localhost:4500
+- SHIELD console:  http://localhost:4500/review.html
+
+Run the pre-release gate against the live server:
+```bash
+python validate.py            # 56 checks: endpoints + chaos + functional
 ```
 
-## Status ladder
-`candidate_unverified` → `corroborated` → `needs_human_review` → **(human)** `verified`
+(Original Day-1 CLI detection pass still works: `python engine/pipeline.py [--live]`.)
 
-## Honest limitations (prototype)
-- The gazetteer and multi-language keywords are **starter sets** — they must be reviewed/expanded by
-  native Hausa / Yoruba / Igbo / Pidgin speakers and a full LGA dataset before any real use.
-- Sample data is **synthetic** and clearly labeled; it is not real events.
-- Storage is local SQLite; the production target is Postgres/PostGIS (Supabase) per the architecture doc.
-- No alerting/broadcast is wired yet — this is detection only.
+## Configuration (all via environment variables — never in code)
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Use PostgreSQL (else SQLite). Falls back to SQLite if unreachable. |
+| `CEREBRAS_API_KEY_1..5` (or `CEREBRAS_API_KEY`) | Turns on real AI extraction + intake. |
+| `CEREBRAS_MODEL` | Override the model name (default `llama-3.3-70b`). |
+| `AT_USERNAME`, `AT_API_KEY` | Africa's Talking — turns on **outbound** SMS. |
+| `PORT` | Server port (default 4500). |
 
-## Next
-- Public reporting intake (PWA + WhatsApp/USSD) with **reporter anonymity by design**.
-- Tiered broadcast (push / WhatsApp / SMS-USSD) gated by confidence + human review.
-- Place/time **risk forecast** (the "weather for danger" layer).
-- NDPA (Nigeria Data Protection Act) data-handling controls + reporter threat model.
+---
+
+## Architecture
+- **Backend:** Python **standard library only** (`http.server`, `sqlite3`, `urllib`) — one optional dep, `psycopg2-binary`, used only in Postgres mode.
+- **Storage:** dual-mode **SQLite ↔ PostgreSQL** (auto-selects on `DATABASE_URL`).
+- **Frontend:** vanilla JS PWA + Leaflet (no build step).
+- **Deploy:** Railway-ready (`Procfile`, binds `0.0.0.0:$PORT`, seed-if-empty). Connect the repo → it auto-deploys; add a Postgres plugin for persistence.
+
+## Validation
+`docs/TRACEABILITY.md` is the North Star matrix (every feature → where it lives → status → how it's validated). The gate (`validate.py`) must pass before any release. **Last run: 56/56 on SQLite + Postgres.**
+
+---
+
+## Honest scope (where we really are)
+**✅ Built & working:** everything above (web + server stack), gated 56/56, deployed.
+**◑ Partial:** AI (built; needs a key — verify on the deployment) · SMS/USSD *send* (needs Africa's Talking) · audit log (data only, no UI) · NDPA retention schedule.
+**☐ Not built / native:** the native app (background **Bluetooth mesh** scanner + real-time **push-to-talk**) · push/WhatsApp send · user accounts/reputation · satellite + 72-h forecast · the production Next.js/Supabase stack · NRT integration.
+
+We've out-*designed* the incumbents (Ushahidi / Zello / Govia ideas folded in); we have **not** yet out-*proven* them — that needs real deployment, verified data, operators, and the native client.
+
+---
+
+*Local working folder is `guardian-ng/` for historical reasons; the product and repo are **DeySafe**.*
