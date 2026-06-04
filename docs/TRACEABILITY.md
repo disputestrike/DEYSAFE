@@ -8,7 +8,7 @@ against this document.
 MEASURE (pass rate) → ADJUST. Nothing is "done" until it's in the matrix AND passes its gate.
 
 **Run the automated gate:** `python validate.py` (against the live server).
-**Last run: 2026-06-03 → 42 passed / 0 failed** (22 endpoint + 16 chaos + 4 functional) — verified on **BOTH SQLite and PostgreSQL**.
+**Last run: 2026-06-04 → 49 passed / 0 failed** (27 endpoint + 18 chaos + 4 functional) — verified on **BOTH SQLite and PostgreSQL**.
 
 Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your account/key · ⛔ excluded by a safety bright-line
 
@@ -46,7 +46,9 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Responsive desktop (no page-scroll) | user feedback | `index @media` (`#v-home.active`) | ✅ | manual | PASS |
 | Installable PWA (manifest) | Doc P7 | `app/manifest.json` | ✅ | served | PASS |
 | Service worker (kill-switch, no stale cache) | bugfix | `app/sw.js` | ✅ | manual | PASS |
-| SOS / Help one-tap | DeySafe add | `index` | ◑ STUB (no real dispatch ⛔) | manual | PARTIAL (honest stub) |
+| **SOS** — Automatic (alarm + on-device location + share link) / Hold-&-Speak (dead-air auto-send + AI) | DeySafe add + user | `index` `sosAuto`/`sosVoice`/`sosActivate` | ✅ (send-to-stored-circle needs a channel ⛔ no armed auto-dispatch) | browser: alarm+location+share, 0 errors | PASS |
+| **Policing accountability** (Govia) — "report bad policing" category + know-your-rights card | user research | `api` TYPES `police_misconduct` + index `.rights` | ✅ | gate: type available; browser grid+card | PASS |
+| **Community channels** (Zello, light) — area-tagged posts + 🎤 dictation, newest-first feed, XSS-safe | user research | `db.channel` + `api` `/api/channel` + index `renderChannels` | ✅ | gate: post/feed/empty; browser escape | PASS |
 
 ### C. FindMe — missing persons
 | Feature | Source | Where it lives | Status | Validation | Result |
