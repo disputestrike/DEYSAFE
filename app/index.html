@@ -377,6 +377,8 @@ function distToSeg(p,a,b){var s=Math.cos(Math.PI/180*((a[0]+b[0])/2));
   var ax=a[1]*s,ay=a[0],bx=b[1]*s,by=b[0],px=p[1]*s,py=p[0];
   var dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy;var t=L2?((px-ax)*dx+(py-ay)*dy)/L2:0;t=Math.max(0,Math.min(1,t));
   var cx=ax+t*dx,cy=ay+t*dy;return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy))*111;}
+let LASTROUTE=null;
+function sayRoute(){if(LASTROUTE&&LASTROUTE.say)speak(LASTROUTE.say);}
 async function checkRoute(){const a=$('#wFrom').value.trim(),b=$('#wTo').value.trim();
   $('#routeBox').innerHTML='<p class="note">Finding your route…</p>';
   const[ga,gb]=await Promise.all([geocodeClient(a),geocodeClient(b)]);
@@ -388,10 +390,15 @@ async function checkRoute(){const a=$('#wFrom').value.trim(),b=$('#wTo').value.t
   let worst=ORD[ra.level]>=ORD[rb.level]?ra.level:rb.level;
   onRoute.forEach(function(i){var l=LV[i.status];if((ORD[l]||0)>(ORD[worst]||0))worst=l;});
   const guide={GREEN:'Road looks clear. Stay alert and keep moving.',YELLOW:'Caution — unconfirmed reports near this route.',ORANGE:'Active danger on this corridor. Travel by day, in convoy, or delay.',RED:'Verified threat on this route. Do not travel — wait or reroute.'}[worst];
+  var rNear=null,rND=1e9;onRoute.forEach(function(i){var d=hav(A[0],A[1],i.lat,i.lng);if(d<rND){rND=d;rNear=i;}});
+  var sayR=worst+'. '+guide+' '+onRoute.length+' incident'+(onRoute.length===1?'':'s')+' on the corridor from '+aName+' to '+bName+'.';
+  if(rNear){sayR+=' Nearest: '+rNear.type.replace(/_/g,' ')+', about '+Math.round(rND)+' kilometres ahead, near '+rNear.location_name+'.';}
+  LASTROUTE={say:sayR};
   const list=onRoute.length?onRoute.map(function(i){var l=LV[i.status];return '<div class="alert '+l+'"><div class="r1"><span class="pl">'+i.location_name+', '+i.state+'</span><span class="badge '+l+'">'+l+'</span></div><div class="mt">'+i.type.replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+'</div></div>';}).join(''):'<p class="note">No incidents reported along this route right now.</p>';
-  $('#routeBox').innerHTML='<div class="lvl '+worst+'"><b>'+worst+' · '+a+' → '+b+'</b><div class="guide">'+guide+'</div><div class="mt" style="margin-top:6px">'+onRoute.length+' incident(s) on this corridor</div></div>'
+  $('#routeBox').innerHTML='<div class="lvl '+worst+'"><div class="r1"><b>'+worst+' · '+aName+' → '+bName+'</b><button class="spk" onclick="sayRoute()" title="Read aloud">🔊</button></div><div class="guide">'+guide+'</div><div class="mt" style="margin-top:6px">'+onRoute.length+' incident(s) on this corridor</div></div>'
     +'<button class="btn sec" onclick="go(\'home\')">🗺 View route on map</button>'
     +'<h2 class="t" style="margin-top:16px">On your route</h2>'+list;
+  sayRoute();
   if(A&&B){routeLayer.clearLayers();
     L.polyline([A,B],{color:COL[worst],weight:6,opacity:.85}).addTo(routeLayer);
     L.marker(A,{icon:missIcon('A')}).addTo(routeLayer).bindPopup(a);
