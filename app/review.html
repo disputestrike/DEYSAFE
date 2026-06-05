@@ -37,6 +37,46 @@
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#16203a;border:1px solid var(--line);
     padding:11px 18px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none}
   .toast.show{opacity:1}
+  /* ---- RESPONSE panel (the missing half: tasks · alerts · deliveries) ---- */
+  .section{margin-top:30px}
+  .section .shead{display:flex;align-items:baseline;gap:8px;margin:0 2px 10px}
+  .section .shead h2{font-size:15px;letter-spacing:-.01em}
+  .section .shead .cnt{color:var(--muted);font-size:13px}
+  .section .shead .rf{margin-left:auto;flex:0 0 auto;padding:5px 11px;font-size:12px;font-weight:600;
+    background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:8px;cursor:pointer}
+  .rcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin-bottom:10px;border-left:3px solid var(--brand)}
+  .rcard.responding{border-left-color:var(--green)}
+  .rcard.reviewing{border-left-color:var(--amber)}
+  .rcard.closed{border-left-color:var(--faint);opacity:.7}
+  .rcard .rt{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .rcard .rttl{font-weight:700;font-size:14px}
+  .tstate{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:3px 8px;border-radius:999px;
+    background:rgba(91,140,255,.16);color:#9db8ff;white-space:nowrap}
+  .tstate.responding{background:rgba(34,197,94,.16);color:#4ade80}
+  .tstate.reviewing{background:rgba(245,158,11,.16);color:#fbbf24}
+  .tstate.received{background:rgba(147,160,181,.16);color:#cbd5e6}
+  .tstate.closed{background:rgba(95,108,130,.18);color:#93a0b5}
+  .rmeta{color:var(--faint);font-size:12px;margin-top:6px}
+  .racts{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+  .racts button{flex:0 0 auto;padding:8px 13px;font-size:12.5px;font-weight:700;border-radius:9px}
+  .ack{background:var(--brand);color:#fff}
+  .ackclose{background:transparent;border:1px solid var(--line);color:var(--muted)}
+  .cancel{background:transparent;border:1px solid rgba(239,68,68,.5);color:#f87171}
+  .rcard .level{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:3px 8px;border-radius:999px;
+    background:rgba(239,68,68,.16);color:#f87171;white-space:nowrap}
+  .rcard .level.ORANGE{background:rgba(245,158,11,.16);color:#fbbf24}
+  .rcard .level.YELLOW{background:rgba(245,158,11,.14);color:#facc15}
+  .rcard .level.GREEN{background:rgba(34,197,94,.16);color:#4ade80}
+  .drow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+  .drow:last-child{border-bottom:none}
+  .drow .ch{font-weight:700;min-width:74px}
+  .drow .addr{color:var(--muted);flex:1;word-break:break-all}
+  .dstat{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .dstat.ok{background:rgba(34,197,94,.16);color:#4ade80}
+  .dstat.sim{background:rgba(91,140,255,.16);color:#9db8ff}
+  .dstat.failed{background:rgba(239,68,68,.16);color:#f87171}
+  .simtag{font-size:10px;font-weight:700;color:#9db8ff;border:1px solid rgba(91,140,255,.4);border-radius:6px;padding:1px 6px}
+  .rempty{color:var(--muted);font-size:13px;padding:16px 2px}
   /* operator identity strip */
   .who{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:12.5px;color:var(--muted)}
   .who b{color:var(--text);font-weight:700}
@@ -75,6 +115,31 @@
   </div>
   <div class="count"><b id="n">0</b><span>incidents awaiting review</span></div>
   <div id="list"></div>
+
+  <!-- ===== RESPONSE LOOP (the missing half) =====================================
+       Three operator surfaces, all behind the same operator-auth fetch as the queue:
+         · Responder tasks  GET /api/responder/tasks  → Acknowledge (POST /api/responder/ack)
+         · Live alerts      GET /api/alerts           → Cancel/Expire (POST /api/alert/cancel)
+         · Deliveries       GET /api/deliveries        (SIM-mode receipts flagged, never faked)
+       Every value rendered from server data is escaped via esc(); no untrusted string
+       ever enters an inline handler attribute (actions wired by data-index listeners). -->
+  <div class="section" id="secTasks">
+    <div class="shead"><h2>🚑 Responder tasks</h2><span class="cnt" id="tCnt">0</span>
+      <button class="rf" onclick="loadTasks()">⟳ Refresh</button></div>
+    <div id="tasks"></div>
+  </div>
+
+  <div class="section" id="secAlerts">
+    <div class="shead"><h2>📡 Live public alerts</h2><span class="cnt" id="aCnt">0</span>
+      <button class="rf" onclick="loadAlerts()">⟳ Refresh</button></div>
+    <div id="alerts"></div>
+  </div>
+
+  <div class="section" id="secDeliv">
+    <div class="shead"><h2>📨 Deliveries</h2><span class="cnt" id="dCnt">0</span>
+      <button class="rf" onclick="loadDeliveries()">⟳ Refresh</button></div>
+    <div class="rcard" id="delivCard"><div class="rempty">No delivery receipts yet.</div></div>
+  </div>
 </div>
 
 <!-- Operator login gate. Appears only when the server requires auth (a fetch 401s).
@@ -164,6 +229,7 @@ function signOut(){
   clearSession();
   $('#list').innerHTML='';
   $('#n').textContent='0';
+  clearResponse();
   toast('Signed out');
   showLogin();
 }
@@ -183,9 +249,12 @@ async function load(){
     clearSession();
     $('#list').innerHTML='<div class="empty">Operator sign-in required.</div>';
     $('#n').textContent='0';
+    clearResponse();
     showLogin();
     return;
   }
+  // Authenticated (or server open): refresh the response-loop surfaces alongside the queue.
+  loadResponse();
   let d={}; try{ d = await r.json(); }catch(e){ d={}; }
   const q = d.queue||[];
   QUEUE = q;
@@ -248,6 +317,187 @@ async function pullLive(){
     load();
   }catch(e){ $('#pullMsg').textContent='Live pull failed (network).'; toast('⚠ Live pull failed'); }
   b.disabled=false; b.textContent=old;
+}
+
+// ---- RESPONSE LOOP: tasks · alerts · deliveries ---------------------------------
+// All three endpoints are operator-gated (fail-closed): a 401/403 means our session
+// is gone -> drop the token and surface the login gate, mirroring the queue's logic.
+let TASKS = [];   // raw responder tasks, referenced by index from action buttons
+let ALERTS = [];  // raw live alerts, referenced by index from cancel buttons
+
+// Forward ack ladder from response.py (received->reviewing->responding->closed).
+// Acknowledge advances one step; a 'responding' task offers an explicit Mark-closed.
+const TASK_NEXT = {received:'reviewing', reviewing:'responding', responding:'closed', closed:null};
+
+// Map an arbitrary server-supplied state to a safe CSS slug (defence-in-depth: the
+// state also drives a class name, so keep it to [a-z_] like the queue's status slug).
+function slug(s){ return String(s==null?'':s).toLowerCase().replace(/[^a-z_]/g,''); }
+
+// Shared auth-failure handler for the response endpoints. Returns true if it handled
+// a 401/403 (caller should stop). Keeps the token/login behaviour identical to load().
+function respAuthFail(res){
+  if(res && (res.status===401 || res.status===403)){
+    clearSession(); clearResponse(); showLogin();
+    return true;
+  }
+  return false;
+}
+
+function clearResponse(){
+  TASKS=[]; ALERTS=[];
+  $('#tasks').innerHTML=''; $('#tCnt').textContent='0';
+  $('#alerts').innerHTML=''; $('#aCnt').textContent='0';
+  $('#delivCard').innerHTML='<div class="rempty">No delivery receipts yet.</div>'; $('#dCnt').textContent='0';
+}
+
+function loadResponse(){ loadTasks(); loadAlerts(); loadDeliveries(); }
+
+// ---- Responder tasks ------------------------------------------------------------
+async function loadTasks(){
+  let r;
+  // Tolerate either documented path (/api/responder/tasks preferred, -tasks fallback).
+  try{ r = await fetch('/api/responder/tasks',{headers:authHeaders()}); }
+  catch(e){ $('#tasks').innerHTML='<div class="rempty">⚠ Could not reach the server.</div>'; return; }
+  if(r.status===404){ try{ r = await fetch('/api/responder-tasks',{headers:authHeaders()}); }catch(e){} }
+  if(respAuthFail(r)) return;
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  const tasks = d.tasks||[];
+  TASKS = tasks;
+  $('#tCnt').textContent = tasks.length;
+  if(!tasks.length){ $('#tasks').innerHTML='<div class="rempty">No responder tasks yet. A verified incident opens one.</div>'; return; }
+  $('#tasks').innerHTML = tasks.map(function(t, idx){
+    const stateRaw = String(t.state||'');
+    const stateSlug = slug(stateRaw);
+    const stateLabel = esc(stateRaw || '—');
+    const next = TASK_NEXT[stateSlug];               // null when closed/unknown
+    const ref = esc(t.incident_uuid || t.alert_key || t.sos_uuid || t.task_uuid || t.id || '—');
+    const created = esc(t.created_at || '');
+    const esc_after = t.escalate_after ? (' · escalate after '+esc(t.escalate_after)) : '';
+    const note = t.note ? ('<div class="rmeta">'+esc(t.note)+'</div>') : '';
+    let acts = '';
+    if(next === 'closed'){
+      acts = '<button class="ack ackclose" data-i="'+idx+'" data-to="closed">Mark closed</button>';
+    } else if(next){
+      acts = '<button class="ack" data-i="'+idx+'" data-to="'+esc(next)+'">Acknowledge → '+esc(next)+'</button>'
+           + '<button class="ackclose" data-i="'+idx+'" data-to="closed">Close</button>';
+    }
+    return '<div class="rcard '+stateSlug+'">'
+      + '<div class="rt"><span class="rttl">Task · '+ref+'</span>'
+      +   '<span class="tstate '+stateSlug+'">'+stateLabel+'</span></div>'
+      + '<div class="rmeta">opened '+(created||'—')+esc_after+'</div>'
+      + note
+      + (acts ? '<div class="racts">'+acts+'</div>' : '')
+      + '</div>';
+  }).join('');
+  // Wire ack/close via listeners — no untrusted task data in inline handlers.
+  $('#tasks').querySelectorAll('button[data-i]').forEach(function(b){
+    b.addEventListener('click', function(){ ackTask(TASKS[+b.getAttribute('data-i')], b.getAttribute('data-to')); });
+  });
+}
+
+async function ackTask(t, toState){
+  if(!t || !toState) return;
+  // Send both id and task_id so the handler resolves the task by whichever it keys on;
+  // `status` carries the computed next state, validated server-side against the ladder.
+  const payload = {status: toState, state: toState};
+  if(t.task_uuid){ payload.task_id = t.task_uuid; payload.id = t.task_uuid; }
+  else if(t.id!=null){ payload.task_id = t.id; payload.id = t.id; }
+  let res;
+  try{ res = await fetch('/api/responder/ack',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify(payload)}); }
+  catch(e){ toast('⚠ Network error'); return; }
+  if(res.status===404){
+    try{ res = await fetch('/api/responder-ack',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify(payload)}); }catch(e){ toast('⚠ Network error'); return; }
+  }
+  if(respAuthFail(res)){ toast('⚠ Operator sign-in required'); return; }
+  let j={}; try{ j = await res.json(); }catch(e){ j={}; }
+  if(j.ok){ toast('✓ Task → '+(j.state||toState)); loadTasks(); }
+  else toast('⚠ '+(j.error||'ack failed'));
+}
+
+// ---- Live alerts: cancel / expire -----------------------------------------------
+async function loadAlerts(){
+  let r;
+  try{ r = await fetch('/api/alerts',{headers:authHeaders()}); }
+  catch(e){ $('#alerts').innerHTML='<div class="rempty">⚠ Could not reach the server.</div>'; return; }
+  if(respAuthFail(r)) return;
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  const alerts = d.alerts||[];
+  ALERTS = alerts;
+  $('#aCnt').textContent = alerts.length;
+  if(!alerts.length){ $('#alerts').innerHTML='<div class="rempty">No live public alerts.</div>'; return; }
+  $('#alerts').innerHTML = alerts.map(function(a, idx){
+    const lvl = String(a.level_label||'').toUpperCase().replace(/[^A-Z]/g,'');
+    const lvlLabel = esc(a.level_label || a.level || '—');
+    const title = esc(a.title || '(untitled alert)');
+    const place = esc([a.location_name, a.state].filter(Boolean).join(', '));
+    const stateRaw = a.state ? ('state '+esc(a.state)) : '';
+    const exp = a.expires_at ? ('expires '+esc(a.expires_at)) : '';
+    const meta = [place, stateRaw, exp].filter(Boolean).join(' · ');
+    return '<div class="rcard">'
+      + '<div class="rt"><span class="rttl">'+title+'</span>'
+      +   '<span class="level '+lvl+'">'+lvlLabel+'</span></div>'
+      + (meta ? '<div class="rmeta">'+meta+'</div>' : '')
+      + '<div class="racts"><button class="cancel" data-i="'+idx+'">Cancel / Expire</button></div>'
+      + '</div>';
+  }).join('');
+  $('#alerts').querySelectorAll('button[data-i]').forEach(function(b){
+    b.addEventListener('click', function(){ cancelAlert(ALERTS[+b.getAttribute('data-i')]); });
+  });
+}
+
+async function cancelAlert(a){
+  if(!a) return;
+  const reason = (window.prompt('Reason for cancelling this alert (recorded in the audit log):','operator cancel')||'').trim();
+  if(reason==='') return;   // operator backed out
+  // Provide every key the handler might resolve on: incident_key | alert_uuid | key.
+  const payload = {reason: reason};
+  if(a.incident_key) payload.incident_key = a.incident_key;
+  if(a.alert_uuid){ payload.alert_uuid = a.alert_uuid; }
+  payload.key = a.incident_key || a.alert_uuid || a.id;
+  let res;
+  try{ res = await fetch('/api/alert/cancel',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify(payload)}); }
+  catch(e){ toast('⚠ Network error'); return; }
+  if(res.status===404){
+    try{ res = await fetch('/api/alert-cancel',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify(payload)}); }catch(e){ toast('⚠ Network error'); return; }
+  }
+  if(respAuthFail(res)){ toast('⚠ Operator sign-in required'); return; }
+  let j={}; try{ j = await res.json(); }catch(e){ j={}; }
+  if(j.ok){ toast('✓ Alert cancelled'); loadAlerts(); }
+  else toast('⚠ '+(j.error||'cancel failed'));
+}
+
+// ---- Deliveries (read-only receipts; SIM-mode sends flagged, never faked) --------
+async function loadDeliveries(){
+  let r;
+  try{ r = await fetch('/api/deliveries',{headers:authHeaders()}); }
+  catch(e){ $('#delivCard').innerHTML='<div class="rempty">⚠ Could not reach the server.</div>'; return; }
+  if(respAuthFail(r)) return;
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  const rows = d.deliveries||[];
+  $('#dCnt').textContent = rows.length;
+  if(!rows.length){ $('#delivCard').innerHTML='<div class="rempty">No delivery receipts yet.</div>'; return; }
+  $('#delivCard').innerHTML = rows.map(function(x){
+    const isSim = (x.sim===1 || x.sim===true || x.sim==='1');
+    const statusRaw = String(x.status||'');
+    let cls = 'sim';
+    if(!isSim){
+      const lo = statusRaw.toLowerCase();
+      if(lo.indexOf('fail')>=0 || lo.indexOf('error')>=0) cls='failed';
+      else if(lo.indexOf('deliver')>=0 || lo==='sent' || lo==='ok') cls='ok';
+      else cls='ok';
+    }
+    const ch = esc(x.channel || '—');
+    const addr = esc(x.address || '');
+    const statusLabel = esc(statusRaw.replace(/_/g,' ') || (isSim?'sim':'—'));
+    const when = x.created_at ? ('<span class="rmeta" style="margin:0">'+esc(x.created_at)+'</span>') : '';
+    const simTag = isSim ? ' <span class="simtag">SIM</span>' : '';
+    return '<div class="drow">'
+      + '<span class="ch">'+ch+simTag+'</span>'
+      + '<span class="addr">'+addr+'</span>'
+      + '<span class="dstat '+cls+'">'+statusLabel+'</span>'
+      + when
+      + '</div>';
+  }).join('');
 }
 
 renderWho();

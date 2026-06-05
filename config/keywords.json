@@ -1,36 +1,57 @@
 {
-  "_note": "STARTER keyword sets. Non-English terms must be reviewed/expanded by native Hausa/Yoruba/Igbo/Pidgin speakers before any real use.",
+  "_note": "STARTER keyword sets. Non-English terms must be reviewed/expanded by native Hausa/Yoruba/Igbo/Pidgin speakers before any real use. 'negative_terms' is a false-positive suppression list (DATA-05) that the parser MAY use to abstain; it is data only and is wired by geoparse, not stored here as logic.",
   "incident_types": {
     "kidnapping": {
-      "en": ["kidnap", "kidnapped", "kidnapping", "abduct", "abducted", "abduction", "hostage", "ransom", "whisked away", "taken hostage"],
-      "ha": ["sace", "garkuwa", "garkuwa da mutane", "satar mutane"],
-      "yo": ["jigbe", "ji gbe"],
-      "ig": ["toro ego", "wepu"]
+      "en": ["kidnap", "kidnapped", "kidnapping", "kidnappers", "abduct", "abducted", "abduction", "abductors", "hostage", "hostages", "ransom", "ransom demand", "whisked away", "taken hostage", "held captive", "captives", "snatched", "forcibly taken"],
+      "ha": ["sace", "sace", "satar", "garkuwa", "garkuwa da mutane", "satar mutane", "yan sace-sace", "kudin fansa", "fansa"],
+      "yo": ["jigbe", "ji gbe", "ajinigbe", "gbe lo", "owo irapada", "irapada"],
+      "ig": ["toro ego", "wepu", "toro ego mgbapụta", "tọọrọ ego", "wepụ mmadụ"],
+      "pcm": ["kidnap pesin", "carry pesin go", "collect ransom"]
     },
     "banditry_attack": {
-      "en": ["bandit", "bandits", "gunmen", "gunfire", "ambush", "raid", "raided", "attack", "attacked", "herdsmen attack", "armed men", "terrorists", "insurgents"],
-      "ha": ["yan bindiga", "'yan bindiga", "ta'addanci", "mahara"],
-      "yo": ["agbebon"],
-      "ig": ["ndi ogba egbe"]
+      "en": ["bandit", "bandits", "banditry", "gunmen", "gun men", "gunfire", "ambush", "ambushed", "raid", "raided", "attack", "attacked", "herdsmen attack", "armed men", "armed group", "terrorists", "insurgents", "marauders", "village raid", "open fire", "stormed the"],
+      "ha": ["yan bindiga", "'yan bindiga", "ta'addanci", "mahara", "yan ta'adda", "hari", "kai hari", "fada da makamai"],
+      "yo": ["agbebon", "awon agbebon", "olota", "ikolu ologun"],
+      "ig": ["ndi ogba egbe", "ndị ogba egbe", "mwakpo", "ndi omempu"],
+      "pcm": ["gunmen attack", "dem attack village", "armed men enter"]
     },
     "missing_person": {
-      "en": ["missing", "go missing", "went missing", "whereabouts unknown", "declared missing", "search for missing"],
-      "ha": ["bata", "bacewa"],
-      "yo": ["sonu", "ti sonu"],
-      "ig": ["furu efu"]
+      "en": ["missing", "go missing", "went missing", "whereabouts unknown", "declared missing", "search for missing", "has not returned", "not been seen", "last seen", "disappeared"],
+      "ha": ["bata", "bacewa", "bace", "ya bace", "ta bace", "ba a san inda yake ba"],
+      "yo": ["sonu", "ti sonu", "nu", "ko si nibi"],
+      "ig": ["furu efu", "furu efu", "amaghi ebe", "adịghị ahụ"],
+      "pcm": ["pesin lost", "dem no see am", "no dey find am"]
     },
     "armed_robbery": {
-      "en": ["armed robber", "armed robbers", "armed robbery", "robbery", "robbers"],
-      "ha": ["fashi", "yan fashi"],
-      "yo": ["jaguda"],
-      "ig": ["ndi ohi"]
+      "en": ["armed robber", "armed robbers", "armed robbery", "robbery", "robbers", "robbed at gunpoint", "highway robbery", "snatched at gunpoint"],
+      "ha": ["fashi", "yan fashi", "fashi da makami", "fashin makami"],
+      "yo": ["jaguda", "ole onibon", "ja l"],
+      "ig": ["ndi ohi", "ndị ohi", "ohi nwere egbe"],
+      "pcm": ["armed robber", "dem rob am", "thief with gun"]
+    },
+    "police_misconduct": {
+      "en": ["police brutality", "police misconduct", "police harassment", "police extortion", "extortion", "bribe", "bribery", "checkpoint extortion", "illegal checkpoint", "unlawful arrest", "unlawful detention", "wrongful arrest", "wrongful detention", "shot by police", "shot by officers", "beaten by police", "harassed by police", "intimidation by police", "abuse of power", "sars", "fsars", "police shot", "officers extorted", "extorted at checkpoint"],
+      "ha": ["cin hanci", "rashawa", "azabtarwa", "yan sanda sun karbi cin hanci", "tsare ba bisa ka'ida ba", "kama ba bisa ka'ida ba", "danniya"],
+      "yo": ["abete", "owo abete", "ifipabanilo", "olopa lu", "olopa gba owo", "ase ni ipa"],
+      "ig": ["iri ngari", "ego aka", "ndi uwe ojii were ngari", "mmegbu", "ojiri ike"],
+      "pcm": ["police collect bribe", "police dey extort", "olopa collect money", "police beat pesin", "checkpoint wahala", "police shoot pesin"]
     }
   },
-  "severity_terms": ["killed", "kill", "dead", "death", "corpse", "corpses", "slain", "shot dead", "wounded", "injured", "bodies", "feared killed"],
+  "severity_terms": ["killed", "kill", "dead", "death", "corpse", "corpses", "slain", "shot dead", "wounded", "injured", "bodies", "feared killed", "fatalities", "casualties", "burnt", "set ablaze"],
   "language_hints": {
-    "ha": ["yan", "bindiga", "sace", "mutane", "garkuwa", "ta'addanci", "mahara"],
-    "yo": ["awon", "omo", "sonu", "jigbe"],
-    "ig": ["ndi", "efu", "ego"],
-    "pcm": ["dem", "wey", "don", "abi", "dey", "naija"]
+    "ha": ["yan", "bindiga", "sace", "mutane", "garkuwa", "ta'addanci", "mahara", "fansa", "cin hanci", "hari"],
+    "yo": ["awon", "omo", "sonu", "jigbe", "agbebon", "olopa", "irapada"],
+    "ig": ["ndi", "efu", "ego", "egbe", "ngari", "mwakpo"],
+    "pcm": ["dem", "wey", "don", "abi", "dey", "naija", "pesin", "wahala"]
+  },
+  "negative_terms": {
+    "_note": "Words/phrases that signal a non-emergency context. The parser MAY use these to abstain when negatives dominate and no strong incident signal is present (DATA-05 false-positive suppression). Kept conservative so genuine reports (which carry incident + location terms) are not wrongly dropped.",
+    "sports": ["football", "match", "fixture", "league", "premier league", "super eagles", "goalkeeper", "penalty", "stadium", "trophy", "tournament", "kick-off", "kickoff", "striker", "midfielder", "transfer window", "scoreline", "afcon", "world cup", "boxing match", "wrestling", "athletics", "marathon"],
+    "politics": ["election", "campaign", "rally", "polls", "ballot", "candidate", "manifesto", "primaries", "inauguration", "senator-elect", "political party", "vote count", "electoral commission", "inec", "constituency", "swearing-in", "cabinet reshuffle"],
+    "metaphor": ["kidnapped the show", "stole the show", "robbed of victory", "robbed of a win", "robbed of the title", "killed it", "killing it", "dead tired", "dead serious", "ambushed by questions", "under attack from critics", "attacked the proposal", "kill the bill", "missing the point", "lost the plot", "dying to", "dying for"],
+    "entertainment": ["movie", "film", "nollywood", "premiere", "trailer", "box office", "celebrity gossip", "music video", "album drop", "concert", "skit", "comedy skit", "soap opera", "tv series", "episode", "season finale", "afrobeats", "red carpet"],
+    "old_or_syndicated": ["years ago", "last year", "throwback", "this day in history", "on this day", "archive footage", "reposted", "as reported earlier", "syndicated", "wire report", "first published", "originally published"],
+    "satire_or_rumor": ["satire", "parody", "spoof", "the onion", "rumour has it", "rumor has it", "unconfirmed report", "fake news", "hoax", "debunked", "no evidence", "claim has been denied", "denies report", "viral but false"],
+    "scam_or_promo": ["giveaway", "promo", "discount", "loan offer", "forex", "crypto investment", "double your money", "click the link", "win a prize", "betting tips", "sportsbet", "free airtime", "dm to claim", "investment opportunity", "act now"]
   }
 }

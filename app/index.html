@@ -81,6 +81,7 @@
   .watch{width:100%;margin:10px 0 2px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#1f2a44}
   .watch.on{background:#0b6b4f;color:#fff;border-color:#0b6b4f}
   .prowarn{margin:10px 0;padding:12px 14px;border-radius:12px;font-size:13.5px;font-weight:600;line-height:1.4}
+  .outboxbadge{background:#10233f;color:#eaf0fb;border-bottom:1px solid #25406b;font-size:12.5px;font-weight:600;line-height:1.35;padding:8px 14px;text-align:center}
   .ai-intake{background:#f4f7ff;border:1px solid #dce6ff;border-radius:14px;padding:12px;margin:0 0 16px}
   .ai-intake textarea{width:100%;min-height:62px;box-sizing:border-box}
   .sosbig{width:100%;border:none;border-radius:16px;padding:22px 16px;margin:0 0 12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:#fff;font-size:14px;text-align:center}
@@ -92,6 +93,14 @@
   .sosbig:active{transform:translateY(1px)}
   .sosactive{background:#fff1f0;border:2px solid #d92d20;border-radius:16px;padding:16px;text-align:center}
   .sosactive b{font-size:20px;color:#d92d20;display:block;margin-bottom:6px}
+  .sosactive.silent{background:#f4f7ff;border-color:#1d6fe0}.sosactive.silent b{color:#1559b8}
+  .silentrow{display:flex;gap:10px;align-items:flex-start;background:#f4f7ff;border:1px solid #dce6ff;border-radius:12px;padding:11px 12px;margin:0 0 12px;font-size:12.5px;line-height:1.4;color:var(--muted);cursor:pointer}
+  .silentrow input{width:18px;height:18px;flex:0 0 auto;margin-top:1px}
+  .sosref{font-size:12px;font-weight:700;letter-spacing:.04em;background:#10233f;color:#eaf0fb;border-radius:8px;padding:6px 10px;display:inline-block;margin:8px 0}
+  .sosstate{font-size:12.5px;color:var(--muted);margin-top:6px}.sosstate b{color:var(--ink)}
+  .tcitem{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px;font-size:13px}
+  .tcitem .tcx{margin-left:auto;border:none;background:transparent;color:var(--red);font-size:16px;cursor:pointer;line-height:1}
+  .tcitem .tcch{font-size:10px;font-weight:800;text-transform:uppercase;color:#1559b8;background:#eef4fe;border-radius:999px;padding:2px 7px}
   body.sos-flash::after{content:'';position:fixed;inset:0;border:10px solid #d92d20;pointer-events:none;z-index:1500;animation:sosflash .7s infinite}
   @keyframes sosflash{0%,100%{opacity:1}50%{opacity:0}}
   .rights{background:#f4f7ff;border:1px solid #dce6ff;border-radius:12px;padding:10px 12px;margin:4px 0 14px;font-size:13px}
@@ -125,6 +134,7 @@
     <div class="chip" id="chip">—</div>
   </header>
   <div id="alertBanner" class="abanner" style="display:none"></div>
+  <div id="outboxBadge" class="outboxbadge" style="display:none" role="status"></div>
   <div id="proWarn" class="prowarn" style="display:none"></div>
   <datalist id="placelist"></datalist>
   <div class="toast" id="toast"></div>
@@ -180,9 +190,20 @@
     <section class="view pad" id="v-sos">
       <h2 class="t">Emergency SOS</h2>
       <div id="sosHome">
-        <button class="sosbig auto" onclick="sosAuto()"><span class="bigemoji">🔴</span><b>AUTOMATIC</b><small>Alarm + prepare your live location to share — no typing</small></button>
-        <button class="sosbig voice" onclick="sosVoice()"><span class="bigemoji">🎙️</span><b>HOLD &amp; SPEAK</b><small>Say what's happening — it's prepared to share when you go quiet</small></button>
-        <p class="note"><b>You must send it.</b> DeySafe prepares your SOS + location and shares only with the people YOU choose, only when you tap share. It does not auto-deliver to authorities and never auto-dispatches armed responders.</p>
+        <label class="silentrow"><input type="checkbox" id="sosSilentToggle" onchange="renderSosButtons()" /><span><b>🤫 Silent mode</b> — no alarm or flashing. Best during an active abduction. Still saves your SOS, alerts your trusted circle, and prepares your location to share.</span></label>
+        <button class="sosbig auto" onclick="sosAuto()"><span class="bigemoji">🔴</span><b>AUTOMATIC</b><small id="sosAutoSub">Alarm + prepare your live location to share — no typing</small></button>
+        <button class="sosbig voice" onclick="sosVoice()"><span class="bigemoji">🎙️</span><b>HOLD &amp; SPEAK</b><small id="sosVoiceSub">Say what's happening — it's prepared to share when you go quiet</small></button>
+        <p class="note"><b>You must send it.</b> DeySafe saves a durable SOS, asks the operator room to alert the trusted circle YOU added, and prepares your SOS + location to share. Only YOU choose who to share with by tapping share. It does not auto-deliver to authorities and never auto-dispatches armed responders.</p>
+        <details class="rights" id="trustedWrap"><summary>👥 Trusted circle — who we alert for you</summary>
+          <p style="margin:6px 0 8px;color:var(--muted)">Add the people who should be alerted when you raise an SOS. Stored privately on this device; the operator room sends to them on your behalf. Add their phone (with country code, e.g. +234…) or WhatsApp.</p>
+          <input id="tcName" placeholder="Name (e.g. Mama, Brother John)" />
+          <div class="srow" style="margin-top:8px">
+            <select id="tcChannel" style="flex:0 0 130px"><option value="sms">SMS</option><option value="whatsapp">WhatsApp</option></select>
+            <input id="tcAddress" placeholder="+2348012345678" inputmode="tel" />
+          </div>
+          <button class="btn sec" style="margin-top:8px" onclick="addTrusted()">＋ Add to my circle</button>
+          <div id="tcList" style="margin-top:10px"></div>
+        </details>
       </div>
       <div id="sosActive" style="display:none"></div>
     </section>
@@ -227,6 +248,11 @@ const $=(s)=>document.querySelector(s);
 const COL={RED:'#d92d20',ORANGE:'#ef6c12',YELLOW:'#e0a106',GREEN:'#1aa260'};
 const LV={verified:'RED',needs_human_review:'ORANGE',corroborated:'ORANGE',candidate_unverified:'YELLOW'};
 const ORD={GREEN:0,YELLOW:1,ORANGE:2,RED:3};
+// PERF-02: ask list endpoints for a bounded page instead of the full table.
+// Generous default so the map/feeds still show everything they need today; the
+// backend currently ignores it, so this is forward-compatible and harmless.
+const LIST_LIMIT=500;
+const qLimit=(extra)=>'?limit='+LIST_LIMIT+(extra?('&'+extra):'');
 let map,incLayer,missLayer,routeLayer,areaLayer,triLayer,heatLayer,HEAT_ON=false,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
 
 function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
@@ -321,7 +347,7 @@ function triangulate(cid){
     L.polygon(conePts(anchor[0],anchor[1],brg,Math.min(ar,120),34),{color:'#d92d20',weight:1,opacity:.7,fillColor:'#d92d20',fillOpacity:.12}).addTo(triLayer).bindPopup('Likely heading '+compass(brg)+' (~'+Math.round(brg)+'°)');
     if(res.center){var fwd=dest(res.center[0],res.center[1],brg,Math.min(ar*0.4,(res.zoneKm||5)+6));L.marker(fwd,{icon:missIcon('➡️')}).addTo(triLayer).bindPopup('Predicted ahead — search this way');res.heading=Math.round(brg);res.headingC=compass(brg);}
   }
-  res.say='Triangulation: '+res.overlap+' of '+res.sources+' sources overlap. Most likely within '+res.zoneKm+' kilometres'+(m.place?(' near '+m.place):'')+(res.headingC?(', likely moving '+res.headingC):'')+'.';
+  res.say='Preliminary search estimate: '+res.overlap+' of '+res.sources+' sources overlap. Preliminary estimate, search within about '+res.zoneKm+' kilometres'+(m.place?(' near '+m.place):'')+(res.headingC?(', possibly moving '+res.headingC):'')+'. Not a confirmed location.';
   LASTTRI=res;return res;
 }
 function itemInc(i){const lv=LV[i.status]||'YELLOW';return `<div class="item ${lv}" onclick="focusPt(${+i.lat},${+i.lng})">
@@ -338,6 +364,65 @@ function renderHome(){
   ? (INCS.length?INCS.slice().sort((a,b)=>ORD[LV[b.status]]-ORD[LV[a.status]]).map(itemInc).join(''):'<p class="note">No active alerts near you.</p>')
   : (MISS.length?MISS.map(itemMiss).join(''):'<p class="note">No active cases.</p>');}
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+// ----- OFF-01: offline outbox -------------------------------------------------
+// When the network is down, a report / sighting / SOS POST is SAVED ON THE DEVICE
+// (QUEUED) instead of being lost, then auto-flushed (SYNC_PENDING -> RECEIVED) when
+// connectivity returns. Each queued item carries a stable client_id so a replay can
+// be de-duplicated server-side and never double-creates. The user always sees whether
+// their action was delivered now or saved to send later.
+const OUTBOX_KEY='ds_outbox';
+function _uuid(){try{if(crypto&&crypto.randomUUID)return crypto.randomUUID();}catch(e){}return 'q_'+Math.random().toString(36).slice(2)+Date.now().toString(36);}
+function outboxLoad(){try{return JSON.parse(localStorage.getItem(OUTBOX_KEY)||'[]');}catch(e){return [];}}
+function outboxSave(list){try{localStorage.setItem(OUTBOX_KEY,JSON.stringify(list));}catch(e){}}
+function outboxCount(){return outboxLoad().length;}
+function outboxEnqueue(url,body){var list=outboxLoad();var item={id:_uuid(),url:url,body:body,ts:Date.now(),state:'QUEUED'};list.push(item);outboxSave(list);updateOutboxBadge();return item;}
+// Try to send now; on a true network failure, save to the device outbox and tell the
+// caller it was queued (so each form can show the right "saved, will send" message).
+// A non-network rejection (server reachable but returns an error) is passed through as
+// a normal response so genuine validation errors are still surfaced.
+async function postOrQueue(url,body){
+  var payload=Object.assign({client_id:(body&&body.client_id)||_uuid()},body);
+  if(!navigator.onLine){var q0=outboxEnqueue(url,payload);return {__queued:true,client_id:payload.client_id,queued_id:q0.id};}
+  try{
+    var res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    return await res.json();
+  }catch(e){
+    var q=outboxEnqueue(url,payload);
+    return {__queued:true,client_id:payload.client_id,queued_id:q.id};
+  }
+}
+let _flushing=false;
+// Replay queued POSTs oldest-first. Server dedup (raw_hash / client_id) makes replay safe.
+async function flushOutbox(){
+  if(_flushing||!navigator.onLine)return;
+  var list=outboxLoad();if(!list.length){updateOutboxBadge();return;}
+  _flushing=true;var sent=0;
+  try{
+    for(var i=0;i<list.length;i++){
+      var it=list[i];if(it.state==='SENT')continue;it.state='SYNC_PENDING';
+      try{
+        var res=await fetch(it.url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(it.body)});
+        if(res&&res.ok){it.state='SENT';sent++;}
+        else if(res&&res.status>=400&&res.status<500&&res.status!==429){it.state='SENT';sent++;} // server rejected (e.g. dup) -> stop retrying
+        else{it.state='QUEUED';break;} // 5xx / 429 -> keep for later, preserve order
+      }catch(e){it.state='QUEUED';break;} // still offline -> stop, retry next time
+    }
+  }finally{
+    var remaining=list.filter(function(x){return x.state!=='SENT';});
+    remaining.forEach(function(x){if(x.state==='SYNC_PENDING')x.state='QUEUED';});
+    outboxSave(remaining);_flushing=false;updateOutboxBadge();
+    if(sent>0){toast('✓ Sent '+sent+' saved item'+(sent===1?'':'s')+' now you are back online');
+      try{loadData();loadLevel(false);}catch(e){}
+    }
+  }
+}
+// Small status line so the user can SEE pending items waiting to send (delivered-vs-saved).
+function updateOutboxBadge(){
+  var el=$('#outboxBadge');if(!el)return;var n=outboxCount();
+  if(n>0&&!navigator.onLine){el.style.display='block';el.textContent='📥 '+n+' report'+(n===1?'':'s')+' saved on this device — will send when you are back online';}
+  else if(n>0){el.style.display='block';el.textContent='📤 Sending '+n+' saved report'+(n===1?'':'s')+'…';}
+  else{el.style.display='none';}
+}
 // FAKE-01: surface an un-dismissible banner whenever the backend is serving demo/seed data.
 async function checkDemo(){try{var h=await fetch('/api/health').then(r=>r.json());var el=$('#demoBanner');if(el)el.style.display=(h&&h.demo===true)?'block':'none';}catch(e){}}
 function timeAgo(iso){var t=Date.parse(iso);if(isNaN(t))return '';var m=Math.floor((Date.now()-t)/60000);if(m<1)return 'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
@@ -350,7 +435,7 @@ function renderChannels(){
   loadChannel();
 }
 async function loadChannel(){
-  try{var d=await fetch('/api/channel').then(r=>r.json());var posts=d.posts||[],fe=$('#chFeed');if(!fe)return;
+  try{var d=await fetch('/api/channel'+qLimit()).then(r=>r.json());var posts=d.posts||[],fe=$('#chFeed');if(!fe)return;
     fe.innerHTML=posts.length?posts.map(function(p){return '<div class="item"><div class="r1"><span class="pl">📣 '+esc(p.area||'area')+'</span><span class="mt">'+timeAgo(p.created_at)+'</span></div><div class="ds">'+esc(p.text)+'</div></div>';}).join(''):'<p class="note">No posts yet — be the first to share what you see.</p>';
   }catch(e){var fe=$('#chFeed');if(fe)fe.innerHTML='<p class="note">Could not load the channel.</p>';}
 }
@@ -388,7 +473,8 @@ function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('f
 }
 async function addSighting(cid){cid=cid||CASE;if(!cid)return;
   const body={case_id:cid,place:$('#sPlace').value,hours_ago:$('#sHours').value,note:$('#sNote').value.trim()};
-  const r=await fetch('/api/sighting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+  const r=await postOrQueue('/api/sighting',body);
+  if(r.__queued){toast('📥 No connection — sighting saved on this device, will send when you are back online');if($('#sNote'))$('#sNote').value='';return;}
   if(r.ok){MISS=r.missing||[];drawMarkers();renderHome();renderMissList();openCase(cid);}}
 async function setCaseStatus(id,status){
   const r=await fetch('/api/case-status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({case_id:id,status})}).then(r=>r.json());
@@ -550,7 +636,7 @@ async function nlIntake(mode){
     }
   }catch(e){$('#'+noteId).textContent='Network error — just fill it in below.';}
 }
-async function loadData(){const[a,b,al]=await Promise.all([fetch('/api/incidents').then(r=>r.json()),fetch('/api/missing').then(r=>r.json()),fetch('/api/alerts').then(r=>r.json())]);
+async function loadData(){const[a,b,al]=await Promise.all([fetch('/api/incidents'+qLimit()).then(r=>r.json()),fetch('/api/missing'+qLimit()).then(r=>r.json()),fetch('/api/alerts'+qLimit()).then(r=>r.json())]);
   INCS=a.incidents||[];MISS=b.missing||[];renderBanner(al.alerts||[]);drawMarkers();renderHome();renderMissList();}
 function renderBanner(alerts){const el=$('#alertBanner');const a=alerts[0];
   if(a){el.className='abanner L'+a.level;el.style.display='flex';
@@ -590,45 +676,123 @@ async function checkRoute(){const a=$('#wFrom').value.trim(),b=$('#wTo').value.t
     L.marker(B,{icon:missIcon('B')}).addTo(routeLayer).bindPopup(esc(b));
     try{map.fitBounds([A,B],{padding:[60,60]});}catch(e){}}}
 async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').focus();return;}
-  const r=await fetch('/api/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:window.RTYPE,place:$('#rPlace').value,description:d})}).then(r=>r.json());
+  const place=$('#rPlace').value;
+  const r=await postOrQueue('/api/report',{type:window.RTYPE,place:place,description:d});
   const o=$('#okBox');o.style.display='block';
+  if(r.__queued){ // OFF-01: saved on device, will send when back online
+    o.innerHTML=`📥 No connection — your report for “${esc(place)}” is <b>saved on this device</b> and will send automatically when you are back online. You can keep using the app.`;
+    $('#rDesc').value='';return;}
   var unver=r.ok&&(r.location_unverified===true||(r.risk&&r.risk.location_unverified===true)||r.coords_confidence==='unverified');
-  o.innerHTML=r.ok?(unver?`✓ Report received, but we couldn't verify “${esc($('#rPlace').value)}” on the map — it isn't placed yet. Open the map and drop a pin on the exact spot. Thank you.`:`✓ Report received. ${esc($('#rPlace').value)} is now <b>${esc(r.risk&&r.risk.level)}</b>. Thank you.`):'⚠ '+esc(r.error||'failed');
+  o.innerHTML=r.ok?(unver?`✓ Report received, but we couldn't verify “${esc(place)}” on the map — it isn't placed yet. Open the map and drop a pin on the exact spot. Thank you.`:`✓ Report received. ${esc(place)} is now <b>${esc(r.risk&&r.risk.level)}</b>. Thank you.`):'⚠ '+esc(r.error||'failed');
   if(r.ok){$('#rDesc').value='';loadData();loadLevel();}}
 // --- Emergency SOS: AUTOMATIC (alarm + share location) or HOLD & SPEAK (auto-send on dead air).
+// Either can run in SILENT mode (no alarm/flash). On activate we POST /api/sos to create a
+// DURABLE event (SOS-01), show its reference, ask the server to alert the trusted circle YOU
+// added (the server does the send in SIM/real — we never fake one), and poll the event's state.
+// Bright lines preserved: location is captured ON-DEVICE and only YOU share it; no auto-dispatch.
 let SOS_ON=false, sosWatch=null, sosSilence=null, sosCtx=null, sosBeepIv=null, sosMsg='';
+let SOS_SILENT=false, SOS_REF=null, SOS_UUID=null, sosPollIv=null, sosLat=null, sosLng=null, SOS_CLIENT_ID=null;
+const SOS_OWNER=(function(){try{var k=localStorage.getItem('ds_owner');if(!k){k='own_'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem('ds_owner',k);}return k;}catch(e){return 'own_anon';}})();
 function _beep(){try{if(!sosCtx)return;var o=sosCtx.createOscillator(),g=sosCtx.createGain();o.type='square';o.frequency.value=880;o.connect(g);g.connect(sosCtx.destination);var t=sosCtx.currentTime;g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.35,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+0.4);o.start(t);o.stop(t+0.42);}catch(e){}}
 function startAlarm(){try{sosCtx=new (window.AudioContext||window.webkitAudioContext)();_beep();sosBeepIv=setInterval(_beep,650);}catch(e){}document.body.classList.add('sos-flash');}
 function stopAlarm(){if(sosBeepIv){clearInterval(sosBeepIv);sosBeepIv=null;}try{if(sosCtx)sosCtx.close();}catch(e){}sosCtx=null;document.body.classList.remove('sos-flash');}
 function sosLocationMsg(lat,lng,extra){var link='https://maps.google.com/?q='+lat.toFixed(5)+','+lng.toFixed(5);return '🆘 I NEED HELP'+(extra?(' — '+extra):'')+'. My location: '+link;}
+// ----- Trusted circle (SOS-03). Stored privately on-device; mirrored to the server (best-effort)
+// so the operator room can notify them. Addresses are sensitive: rendered only in the owner's own UI.
+function tcLoad(){try{return JSON.parse(localStorage.getItem('ds_trusted')||'[]');}catch(e){return [];}}
+function tcSave(list){try{localStorage.setItem('ds_trusted',JSON.stringify(list));}catch(e){}}
+function renderTrusted(){var el=$('#tcList');if(!el)return;var list=tcLoad();
+  el.innerHTML=list.length?list.map(function(c,i){return '<div class="tcitem"><span class="tcch">'+esc(c.channel||'sms')+'</span><span><b>'+esc(c.name||'Contact')+'</b> · '+esc(c.address||'')+'</span><button class="tcx" title="Remove" onclick="removeTrusted('+i+')">✕</button></div>';}).join('')
+    :'<p class="note" style="text-align:left;margin:4px 2px 0">No one added yet. Add at least one trusted contact so we can alert them for you.</p>';}
+async function addTrusted(){var name=($('#tcName').value||'').trim(),ch=$('#tcChannel').value,addr=($('#tcAddress').value||'').trim();
+  if(!addr){$('#tcAddress').focus();toast('Add a phone or WhatsApp number');return;}
+  var list=tcLoad();list.push({name:name||'Contact',channel:ch,address:addr});tcSave(list);
+  $('#tcName').value='';$('#tcAddress').value='';renderTrusted();toast('Added to your circle');
+  // Best-effort server mirror (consented). Field endpoint; degrades cleanly if not present yet.
+  try{await fetch('/api/trusted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner_token:SOS_OWNER,name:name||'Contact',channel:ch,address:addr})});}catch(e){}}
+function removeTrusted(i){var list=tcLoad();if(i<0||i>=list.length)return;list.splice(i,1);tcSave(list);renderTrusted();
+  try{fetch('/api/trusted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner_token:SOS_OWNER,contacts:list,replace:true})});}catch(e){}}
+function renderSosButtons(){SOS_SILENT=!!($('#sosSilentToggle')&&$('#sosSilentToggle').checked);
+  var a=$('#sosAutoSub'),v=$('#sosVoiceSub');
+  if(a)a.textContent=SOS_SILENT?'No alarm — quietly save SOS + prepare your location to share':'Alarm + prepare your live location to share — no typing';
+  if(v)v.textContent=SOS_SILENT?'Say what\'s happening — saved quietly, no alarm, prepared to share':'Say what\'s happening — it\'s prepared to share when you go quiet';}
+// Create the durable SOS event server-side and request trusted-circle notify. Best-effort:
+// the user's own share path NEVER depends on this call succeeding (fail-open for the victim).
+async function sosCreateEvent(extra){
+  var kind=SOS_SILENT?'silent':'audible';
+  // Stable per-activation id so a replayed offline SOS de-dupes server-side (never double-creates).
+  if(!SOS_CLIENT_ID)SOS_CLIENT_ID=_uuid();
+  var body={mode:SOS_SILENT?'silent':'auto',kind:kind,message:(extra||'').slice(0,280),owner_token:SOS_OWNER,notify:true,contacts:tcLoad(),client_id:SOS_CLIENT_ID};
+  if(sosLat!=null&&sosLng!=null){body.lat=sosLat;body.lng=sosLng;}
+  // OFF-01: if offline, the SOS is SAVED ON THE DEVICE and auto-sent on reconnect.
+  // The victim's own share path (sosShare) never depends on this call — fail-open.
+  var r=await postOrQueue('/api/sos',body);
+  if(r&&r.__queued){renderSosStatus('saved_offline',null,false);return;}
+  if(r&&(r.ok===undefined?true:r.ok)){
+    SOS_REF=r.ref||r.reference||SOS_REF;
+    SOS_UUID=r.sos_uuid||r.sos_id||r.id||r.uuid||SOS_UUID;
+    renderSosStatus(r.status||r.state,r.contact_state||r.notified,true);startSosPoll();
+  }else{renderSosStatus(null,null,false);}
+}
+// Show the durable reference + delivery/escalation state (or a clean "saving locally" fallback).
+function renderSosStatus(status,contactState,online){
+  var el=$('#sosState');if(!el)return;
+  if(!online&&!SOS_REF){el.innerHTML='<span class="sosstate">📥 Saved on this device — your SOS will send automatically when you are back online. Your share below works right now, and we\'ll keep your circle ready.</span>';return;}
+  var refHtml=SOS_REF?('<div class="sosref">Reference '+esc(SOS_REF)+'</div>'):'';
+  var st=(status||'OPEN').toUpperCase().replace(/_/g,' ');
+  var cs=contactState?('Trusted circle: <b>'+esc(typeof contactState==='string'?contactState:'notified')+'</b>'):'Trusted circle: <b>being alerted…</b>';
+  el.innerHTML=refHtml+'<div class="sosstate">Status: <b>'+esc(st)+'</b> · '+cs+'</div>';
+}
+function startSosPoll(){stopSosPoll();if(!SOS_REF&&!SOS_UUID)return;
+  sosPollIv=setInterval(function(){
+    var q=SOS_UUID?('id='+encodeURIComponent(SOS_UUID)):('ref='+encodeURIComponent(SOS_REF));
+    fetch('/api/sos?'+q).then(function(x){return x.json();}).then(function(r){
+      if(!r)return;var node=r.sos||r.event||r;
+      var s=node.status||node.state,cstate=node.contact_state||node.notified;
+      if(s)renderSosStatus(s,cstate,true);
+    }).catch(function(){});
+  },5000);
+}
+function stopSosPoll(){if(sosPollIv){clearInterval(sosPollIv);sosPollIv=null;}}
 function sosActivate(extra){
-  if(SOS_ON)return; SOS_ON=true; startAlarm();
+  if(SOS_ON)return; SOS_ON=true;
+  SOS_SILENT=!!($('#sosSilentToggle')&&$('#sosSilentToggle').checked);
+  if(!SOS_SILENT)startAlarm();
   $('#sosHome').style.display='none';
   var box=$('#sosActive'); box.style.display='block';
-  box.innerHTML='<div class="sosactive"><b>🆘 SOS ACTIVE</b>'+(extra?('<div class="mt">“'+esc(extra)+'”</div>'):'')
+  var hdr=SOS_SILENT?'🤫 SILENT SOS ACTIVE':'🆘 SOS ACTIVE';
+  box.innerHTML='<div class="sosactive'+(SOS_SILENT?' silent':'')+'"><b>'+hdr+'</b>'+(extra?('<div class="mt">“'+esc(extra)+'”</div>'):'')
+    +(SOS_SILENT?'<div class="mt" style="color:#1559b8;font-weight:700">No alarm or flashing — quiet.</div>':'')
+    +'<div id="sosState"><span class="sosstate">Saving your SOS…</span></div>'
     +'<div id="sosWhere" class="mt">Getting your location…</div><div id="sosMsgBox" class="mt" style="font-size:12px;color:var(--muted)"></div>'
-    +'<div class="mt" style="color:var(--red);font-weight:700">Not sent yet — tap below to share it yourself.</div>'
+    +'<div class="mt" style="color:var(--red);font-weight:700">Not sent by us — tap below to share it yourself with your people.</div>'
     +'<button class="btn red" onclick="sosShare()">📤 Send my SOS + location (you must send it)</button>'
     +'<button class="btn sec" onclick="sosStop()">■ I am safe — stop</button></div>';
   sosMsg='🆘 I NEED HELP'+(extra?(' — '+extra):'')+'.';
   if(navigator.geolocation){
-    sosWatch=navigator.geolocation.watchPosition(function(p){var lat=p.coords.latitude,lng=p.coords.longitude;sosMsg=sosLocationMsg(lat,lng,extra);var w=$('#sosWhere'),m=$('#sosMsgBox');if(w)w.textContent='📍 '+lat.toFixed(4)+', '+lng.toFixed(4)+' — live';if(m)m.textContent=sosMsg;},
+    sosWatch=navigator.geolocation.watchPosition(function(p){var lat=p.coords.latitude,lng=p.coords.longitude;sosLat=lat;sosLng=lng;sosMsg=sosLocationMsg(lat,lng,extra);var w=$('#sosWhere'),m=$('#sosMsgBox');if(w)w.textContent='📍 '+lat.toFixed(4)+', '+lng.toFixed(4)+' — live (on your device)';if(m)m.textContent=sosMsg;},
       function(){var w=$('#sosWhere');if(w)w.textContent='Turn on location so people can find you.';},{enableHighAccuracy:true,maximumAge:4000,timeout:15000});
   }
-  speak('S O S activated.'+(extra?(' '+extra+'.'):' ')+'Sharing your location.');
+  sosCreateEvent(extra);
+  if(!SOS_SILENT)speak('S O S activated.'+(extra?(' '+extra+'.'):' ')+'Sharing your location.');
 }
 function sosAuto(){sosActivate('');}
 function sosShare(){var msg=sosMsg||'🆘 I NEED HELP';if(navigator.share){navigator.share({title:'SOS — I need help',text:msg}).catch(function(){});}else{try{navigator.clipboard.writeText(msg);}catch(e){}toast('Copied — paste to your people');try{window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');}catch(e){}}}
-function sosStop(){SOS_ON=false;stopAlarm();if(sosWatch!=null){try{navigator.geolocation.clearWatch(sosWatch);}catch(e){}sosWatch=null;}if(sosSilence){clearTimeout(sosSilence);sosSilence=null;}$('#sosActive').style.display='none';$('#sosHome').style.display='block';toast('SOS stopped — glad you are safe');}
+function sosStop(){SOS_ON=false;stopAlarm();stopSosPoll();if(sosWatch!=null){try{navigator.geolocation.clearWatch(sosWatch);}catch(e){}sosWatch=null;}if(sosSilence){clearTimeout(sosSilence);sosSilence=null;}
+  // Tell the server the owner cancelled (governed transition). Best-effort; no operator token here.
+  if(SOS_REF||SOS_UUID){try{fetch('/api/sos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner_token:SOS_OWNER,ref:SOS_REF,sos_uuid:SOS_UUID,cancel:true})});}catch(e){}}
+  SOS_REF=null;SOS_UUID=null;sosLat=null;sosLng=null;
+  $('#sosActive').style.display='none';$('#sosHome').style.display='block';toast('SOS stopped — glad you are safe');}
 function sosVoice(){
-  if(!voiceSupported()){toast('Voice not available — starting Automatic');sosAuto();return;}
-  toast('🎙️ Speak now — it sends automatically when you go quiet');
+  SOS_SILENT=!!($('#sosSilentToggle')&&$('#sosSilentToggle').checked);
+  if(!voiceSupported()){toast('Voice not available — starting '+(SOS_SILENT?'Silent':'Automatic'));sosAuto();return;}
+  toast(SOS_SILENT?'🎙️ Speak now — saved quietly when you go quiet':'🎙️ Speak now — it sends automatically when you go quiet');
   var SR=window.SpeechRecognition||window.webkitSpeechRecognition,rec=new SR();rec.lang='en-NG';rec.interimResults=true;rec.continuous=true;
   var said='';
   function arm(){if(sosSilence)clearTimeout(sosSilence);sosSilence=setTimeout(function(){try{rec.stop();}catch(e){}},6000);}
   rec.onresult=function(e){var t='';for(var i=0;i<e.results.length;i++)t+=e.results[i][0].transcript+' ';said=t.trim();arm();};
   rec.onerror=function(){};
-  rec.onend=function(){sosActivate(said);if(said){try{fetch('/api/intake',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:said,mode:'report'})});}catch(e){}}};
+  rec.onend=function(){sosActivate(said);};
   try{rec.start();arm();}catch(e){sosAuto();}
 }
 async function sendMissing(){const n=$('#mName').value.trim();if(!n){$('#mName').focus();return;}
@@ -645,9 +809,13 @@ function switchTab(v){document.querySelectorAll('.view').forEach(s=>s.classList.
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.v));
 document.querySelectorAll('.seg').forEach(b=>b.onclick=()=>{document.querySelectorAll('.seg').forEach(x=>x.classList.remove('on'));b.classList.add('on');SEG=b.dataset.seg;renderHome();});
 $('#areaSelect').onchange=function(){loadLevel(true);};
+// OFF-01: drain the device outbox the moment we come back online; reflect state live.
+window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back online — sending anything saved on your device…');flushOutbox();});
+window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 
-(async function(){initMap();checkDemo();await loadPlaces();await loadLevel();await loadData();
+(async function(){initMap();checkDemo();renderTrusted();renderSosButtons();await loadPlaces();await loadLevel();await loadData();
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
+  updateOutboxBadge();flushOutbox(); // send anything saved on a previous offline visit
   setTimeout(()=>map.invalidateSize(),120);
   // Unregister any stale service worker so the app is never served from a cache.
   if('serviceWorker'in navigator){try{var rs=await navigator.serviceWorker.getRegistrations();rs.forEach(function(r){r.unregister();});}catch(e){}}})();

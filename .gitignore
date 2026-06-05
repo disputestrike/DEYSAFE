@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
-data/*.db
+# runtime data: local DB, backups, logs, PIDs, test outputs — never commit (may contain PII)
+data/
 console/incidents.json
 .DS_Store
