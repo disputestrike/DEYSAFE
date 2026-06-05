@@ -498,7 +498,14 @@ if __name__ == "__main__":
             pass
     full.conn.commit()
 
-    now = datetime.datetime(2026, 6, 4, 12, 0, 0)
+    # Anchor the synthetic clock to the REAL present (minus a small offset), NOT a
+    # hardcoded calendar date. Alert liveness (_alerts_active -> response.
+    # alert_is_active) checks the real wall clock against created_at + TTL, so a
+    # fixed past date would make the lifecycle-PUBLISHED alert below age out of its
+    # 24h RED TTL and the alerts_active assertion would go stale to 0. All the
+    # timestamps below are relative to `now`, so the 10-minute latency gaps the
+    # assertions check are preserved on any day the test runs.
+    now = datetime.datetime.now().replace(microsecond=0) - datetime.timedelta(minutes=30)
     t0 = now.isoformat(timespec="seconds")
     t10 = (now + datetime.timedelta(minutes=10)).isoformat(timespec="seconds")
     t20 = (now + datetime.timedelta(minutes=20)).isoformat(timespec="seconds")
