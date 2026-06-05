@@ -775,7 +775,12 @@ class Handler(BaseHTTPRequestHandler):
             # FAKE-01: expose whether this instance is showing synthetic demo data.
             return self._json({"ok": True, "incidents": len(public_incidents(db)),
                                "queue": len(review_queue(db)), "missing": len(db.all_missing()),
-                               "demo": DEMO_MODE, "auth": self._auth_enabled()})
+                               "demo": DEMO_MODE, "auth": self._auth_enabled(),
+                               "database": {"backend": db.backend(),
+                                            "postgres_configured": bool(os.environ.get("DATABASE_URL")),
+                                            "postgres_required": os.environ.get(
+                                                "DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() in (
+                                                "1", "true", "yes", "on")}})
         if u.path == "/api/incidents":
             # PERF-02: paginated (limit/offset) with total + next_offset, list still
             # under "incidents" so existing clients are unaffected.
@@ -905,6 +910,19 @@ class Handler(BaseHTTPRequestHandler):
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
             return self._json({"ok": True, "metrics": metrics.compute(db)})
+        if u.path == "/api/reputation":
+            # OPERATOR (fail-closed): source reputation. Reporter keys are opaque
+            # hashes only; no raw phone/IP/owner token is exposed.
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            return self._json({"ok": True, "reporters": db.all_reporter_stats(self._limit(u))})
+        if u.path == "/api/source-health":
+            # OPERATOR (fail-closed): durable source-health plus in-process
+            # scheduler status, so stale/dead feeds are visible before users notice.
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            return self._json({"ok": True, "sources": db.source_health(self._limit(u)),
+                               "scheduler": scheduler.default_health()})
 
         # AUTH-06: keep the SHIELD operator console behind operator auth when a
         # token/roster is configured. Fail-open (served) when auth is disabled, so
@@ -1396,6 +1414,8 @@ class Handler(BaseHTTPRequestHandler):
                 db.audit("operator", "ingest_live_error", repr(e)[:200])
                 ok = False
             inc = len(public_incidents(db))
+            db.record_source_run("rss_live", ok=ok, fetched=fetched, added=added,
+                                 error=("" if ok else "operator ingest-live failed"))
             if ok:
                 db.audit("operator", "ingest_live", "fetched={} added={} ai={} incidents={}".format(fetched, added, ai_used, inc))
             return self._json({"ok": ok, "fetched": fetched, "added": added, "ai_used": ai_used,
@@ -1783,9 +1803,12 @@ def _ingest_live_once(db=None):
                 added += 1
         recompute(db)
         db.audit("scheduler", "ingest_live", "fetched=%d added=%d" % (fetched, added))
+        db.record_source_run("rss_live", ok=True, fetched=fetched, added=added)
     except Exception as e:
         try:
             db.audit("scheduler", "ingest_live_error", repr(e)[:200])
+            db.record_source_run("rss_live", ok=False, fetched=fetched, added=added,
+                                 error=repr(e)[:200])
         except Exception:
             pass
     return {"fetched": fetched, "added": added}

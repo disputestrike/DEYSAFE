@@ -140,6 +140,18 @@
       <button class="rf" onclick="loadDeliveries()">⟳ Refresh</button></div>
     <div class="rcard" id="delivCard"><div class="rempty">No delivery receipts yet.</div></div>
   </div>
+
+  <div class="section" id="secOps">
+    <div class="shead"><h2>Operations health</h2><span class="cnt" id="oCnt">0</span>
+      <button class="rf" onclick="loadOps()">Refresh</button></div>
+    <div class="rcard" id="opsCard"><div class="rempty">No source runs recorded yet.</div></div>
+  </div>
+
+  <div class="section" id="secRep">
+    <div class="shead"><h2>Source reputation</h2><span class="cnt" id="rCnt">0</span>
+      <button class="rf" onclick="loadReputation()">Refresh</button></div>
+    <div class="rcard" id="repCard"><div class="rempty">No reporter reputation rows yet.</div></div>
+  </div>
 </div>
 
 <!-- Operator login gate. Appears only when the server requires auth (a fetch 401s).
@@ -348,9 +360,11 @@ function clearResponse(){
   $('#tasks').innerHTML=''; $('#tCnt').textContent='0';
   $('#alerts').innerHTML=''; $('#aCnt').textContent='0';
   $('#delivCard').innerHTML='<div class="rempty">No delivery receipts yet.</div>'; $('#dCnt').textContent='0';
+  $('#opsCard').innerHTML='<div class="rempty">No source runs recorded yet.</div>'; $('#oCnt').textContent='0';
+  $('#repCard').innerHTML='<div class="rempty">No reporter reputation rows yet.</div>'; $('#rCnt').textContent='0';
 }
 
-function loadResponse(){ loadTasks(); loadAlerts(); loadDeliveries(); }
+function loadResponse(){ loadTasks(); loadAlerts(); loadDeliveries(); loadOps(); loadReputation(); }
 
 // ---- Responder tasks ------------------------------------------------------------
 async function loadTasks(){
@@ -497,6 +511,60 @@ async function loadDeliveries(){
       + '<span class="dstat '+cls+'">'+statusLabel+'</span>'
       + when
       + '</div>';
+  }).join('');
+}
+
+// ---- Operations health ---------------------------------------------------------
+async function loadOps(){
+  let r;
+  try{ r = await fetch('/api/source-health',{headers:authHeaders()}); }
+  catch(e){ $('#opsCard').innerHTML='<div class="rempty">Could not reach the server.</div>'; return; }
+  if(respAuthFail(r)) return;
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  const rows = d.sources||[];
+  $('#oCnt').textContent = rows.length;
+  const sch = d.scheduler || {};
+  const head = '<div class="drow"><span class="ch">scheduler</span><span class="addr">'
+    + 'enabled '+esc(sch.enabled===true?'yes':'no')+' · running '+esc(sch.running===true?'yes':'no')
+    + (sch.interval_minutes!=null?' · every '+esc(sch.interval_minutes)+'m':'')
+    + '</span><span class="dstat '+(sch.last_error?'failed':'ok')+'">'+esc(sch.last_error?'error':'ok')+'</span></div>';
+  if(!rows.length){ $('#opsCard').innerHTML=head+'<div class="rempty">No source runs recorded yet.</div>'; return; }
+  $('#opsCard').innerHTML = head + rows.map(function(x){
+    const ok = Number(x.errors||0) === 0 || Number(x.successes||0) >= Number(x.errors||0);
+    const status = x.last_error ? 'error' : 'ok';
+    const detail = 'runs '+esc(x.runs||0)+' · success '+esc(x.successes||0)+' · errors '+esc(x.errors||0)
+      +' · fetched '+esc(x.fetched||0)+' · added '+esc(x.added||0);
+    return '<div class="drow"><span class="ch">'+esc(x.source||'source')+'</span>'
+      + '<span class="addr">'+detail+(x.last_run_at?' · last '+esc(x.last_run_at):'')+'</span>'
+      + '<span class="dstat '+(ok?'ok':'failed')+'">'+esc(status)+'</span></div>';
+  }).join('');
+}
+
+// ---- Source reputation ---------------------------------------------------------
+function repBand(row){
+  const score = Number(row.score==null?50:row.score);
+  const reports = Number(row.reports||0);
+  if(reports >= 3 && score >= 70) return 'trusted';
+  if(score < 35) return 'low';
+  return 'neutral';
+}
+async function loadReputation(){
+  let r;
+  try{ r = await fetch('/api/reputation',{headers:authHeaders()}); }
+  catch(e){ $('#repCard').innerHTML='<div class="rempty">Could not reach the server.</div>'; return; }
+  if(respAuthFail(r)) return;
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  const rows = d.reporters||[];
+  $('#rCnt').textContent = rows.length;
+  if(!rows.length){ $('#repCard').innerHTML='<div class="rempty">No reporter reputation rows yet.</div>'; return; }
+  $('#repCard').innerHTML = rows.map(function(x){
+    const band = repBand(x);
+    const cls = band === 'low' ? 'failed' : (band === 'trusted' ? 'ok' : 'sim');
+    const detail = 'score '+esc(x.score==null?'50':x.score)+' · reports '+esc(x.reports||0)
+      +' · verified '+esc(x.verified||0)+' · dismissed '+esc(x.dismissed||0);
+    return '<div class="drow"><span class="ch">'+esc(band)+'</span>'
+      + '<span class="addr">'+esc(x.reporter_key||'opaque reporter')+' · '+detail+'</span>'
+      + '<span class="dstat '+cls+'">'+esc(band)+'</span></div>';
   }).join('');
 }
 

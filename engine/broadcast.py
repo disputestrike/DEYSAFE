@@ -28,9 +28,12 @@ Stdlib only. The api/db layer persists deliveries separately; recent()/record()
 here are an in-process mirror for observability and the SIM gate.
 """
 import os
+import json
 import time
 import threading
 import uuid
+import urllib.request
+import urllib.error
 
 # Channels this adapter knows how to address. Priority order for fan-out and
 # last-mile reach (BC-03): WhatsApp -> SMS -> push.
@@ -154,6 +157,92 @@ def _send_sms_real(to, message):
     return False, ST_UNCONFIGURED, None, r.get("error")
 
 
+def _send_whatsapp_real(to, message):
+    """Real WhatsApp Business Cloud API send.
+
+    Keys:
+      WHATSAPP_TOKEN
+      WHATSAPP_PHONE_ID
+      WHATSAPP_GRAPH_VERSION optional, default v20.0
+    """
+    token = os.environ.get("WHATSAPP_TOKEN", "").strip()
+    phone_id = os.environ.get("WHATSAPP_PHONE_ID", "").strip()
+    if not token or not phone_id:
+        return False, ST_UNCONFIGURED, None, "WHATSAPP_TOKEN/WHATSAPP_PHONE_ID not set"
+    version = os.environ.get("WHATSAPP_GRAPH_VERSION", "v20.0").strip() or "v20.0"
+    url = "https://graph.facebook.com/%s/%s/messages" % (version, phone_id)
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": str(to).strip().lstrip("+"),
+        "type": "text",
+        "text": {"body": str(message)[:4096], "preview_url": False},
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + token},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            raw = r.read().decode("utf-8", "replace")
+        try:
+            resp = json.loads(raw)
+        except Exception:
+            resp = {"raw": raw}
+        ident = None
+        if isinstance(resp, dict) and isinstance(resp.get("messages"), list) and resp["messages"]:
+            ident = resp["messages"][0].get("id")
+        return True, ST_SENT, {"id": ident, "response": resp}, None
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        return False, ST_FAILED, None, "whatsapp http %s: %s" % (e.code, raw[:300])
+    except Exception as e:
+        return False, ST_FAILED, None, repr(e)
+
+
+def _send_push_real(to, message):
+    """Real OneSignal push send.
+
+    Keys:
+      ONESIGNAL_API_KEY
+      ONESIGNAL_APP_ID
+
+    `to` is a OneSignal player id by default. Prefix `external:` to target an
+    external user id, e.g. external:family-123.
+    """
+    key = os.environ.get("ONESIGNAL_API_KEY", "").strip()
+    app_id = os.environ.get("ONESIGNAL_APP_ID", "").strip()
+    if not key or not app_id:
+        return False, ST_UNCONFIGURED, None, "ONESIGNAL_API_KEY/ONESIGNAL_APP_ID not set"
+    target = str(to).strip()
+    payload = {"app_id": app_id, "contents": {"en": str(message)[:1900]}}
+    if target.startswith("external:"):
+        payload["include_external_user_ids"] = [target.split(":", 1)[1]]
+    else:
+        payload["include_player_ids"] = [target]
+    req = urllib.request.Request(
+        "https://onesignal.com/api/v1/notifications",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json", "Authorization": "Basic " + key},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            raw = r.read().decode("utf-8", "replace")
+        try:
+            resp = json.loads(raw)
+        except Exception:
+            resp = {"raw": raw}
+        return True, ST_SENT, {"id": resp.get("id") if isinstance(resp, dict) else None,
+                               "response": resp}, None
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        return False, ST_FAILED, None, "onesignal http %s: %s" % (e.code, raw[:300])
+    except Exception as e:
+        return False, ST_FAILED, None, repr(e)
+
+
 def send(channel, to, message):
     """Send `message` to `to` over `channel`. Returns a delivery record dict
     {id, channel, to, ok, status, sim, provider, error, ts} and appends it to
@@ -189,16 +278,26 @@ def send(channel, to, message):
     if ch == "sms":
         ok, status, resp, err = _send_sms_real(to, message)
         rec = _entry(ch, to, message, ok=ok, status=status,
-                     ident=(_new_id() if ok else None), sim=False,
+                     ident=((resp or {}).get("id") or _new_id() if ok else None), sim=False,
                      provider=("africastalking" if ok else None), error=err)
         return record(rec)
 
-    # whatsapp / push: stubs. No credentials path is wired, so they are honestly
-    # unconfigured (never a fake "delivered"). When keys ARE present but no real
-    # transport is implemented yet, we still report unconfigured rather than lie.
-    rec = _entry(ch, to, message, ok=False, status=ST_UNCONFIGURED, sim=False,
-                 error="%s channel not wired (stub); set DEYSAFE_BROADCAST_SIM=1 "
-                       "to test" % ch)
+    if ch == "whatsapp":
+        ok, status, resp, err = _send_whatsapp_real(to, message)
+        rec = _entry(ch, to, message, ok=ok, status=status,
+                     ident=((resp or {}).get("id") or _new_id() if ok else None),
+                     sim=False, provider=("whatsapp_cloud" if ok else None), error=err)
+        return record(rec)
+
+    if ch == "push":
+        ok, status, resp, err = _send_push_real(to, message)
+        rec = _entry(ch, to, message, ok=ok, status=status,
+                     ident=((resp or {}).get("id") or _new_id() if ok else None),
+                     sim=False, provider=("onesignal" if ok else None), error=err)
+        return record(rec)
+
+    rec = _entry(ch, to, message, ok=False, status=ST_FAILED, sim=False,
+                 error="unknown channel %r" % ch)
     return record(rec)
 
 
@@ -291,5 +390,8 @@ if __name__ == "__main__":
     if not available("whatsapp"):
         w = send("whatsapp", "+2348000000000", "no-key path")
         assert w["ok"] is False and w["status"] == ST_UNCONFIGURED, w
+    if not available("push"):
+        p = send("push", "player-id", "no-key path")
+        assert p["ok"] is False and p["status"] == ST_UNCONFIGURED, p
 
     print("broadcast.py self-test OK")

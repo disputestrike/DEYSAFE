@@ -33,6 +33,8 @@ except Exception:  # pragma: no cover - keep db importable even if reputation.py
     reputation = None
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+REQUIRE_POSTGRES = os.environ.get("DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() in (
+    "1", "true", "yes", "on")
 
 # SQLite schema — kept byte-identical to the original so existing local DBs are
 # untouched (the 6 structured-signal columns are added by _migrate as before).
@@ -219,6 +221,8 @@ class DB:
                 cur.close()
                 self.pg = True
             except Exception as e:
+                if REQUIRE_POSTGRES:
+                    raise RuntimeError("DATABASE_URL is set but Postgres connect failed: %s" % e)
                 # Never crash the app over a bad/unreachable DATABASE_URL — fall back
                 # to SQLite and warn loudly so the misconfig is visible in the logs.
                 sys.stderr.write("[db] DATABASE_URL is set but Postgres connect failed "
@@ -435,6 +439,9 @@ class DB:
             self.conn.close()
         except Exception:
             pass
+
+    def backend(self):
+        return "postgres" if self.pg else "sqlite"
 
     # --- data access (identical surface for both backends) -----------------------
     def insert_signal(self, sig):

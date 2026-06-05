@@ -73,7 +73,7 @@ OPTOKEN = os.environ.get("OPERATOR_TOKEN", "")
 
 # Operator-class path prefixes that should receive the token. Everything else is
 # the public/field surface and is called anonymously.
-OP_PATHS = ("/api/metrics",)
+OP_PATHS = ("/api/metrics", "/api/source-health", "/api/reputation")
 
 P = [0]
 F = [0]
@@ -208,6 +208,20 @@ check("GET /api/metrics carries a North-Star block (verified emergencies w/ ackn
       isinstance(north, dict) and any(k in north for k in
                                       ("verified_emergencies", "within_sla_rate", "acknowledged_responses", "ack_sla_min")),
       "north_star=%s" % (json.dumps(north)[:120] if north is not None else None))
+
+# ---------------------------------------------------------------------------
+# B2. OPS-04 / ABU-04 - operator source-health + reputation visibility
+# ---------------------------------------------------------------------------
+print("\n-- B2. OPS: source-health and reputation are visible to operators --")
+hs, hj, hraw = call("GET", "/api/source-health", want_token=True)
+check("GET /api/source-health (token) returns durable source-health list (OPS)",
+      hs == 200 and isinstance(hj, dict) and isinstance(hj.get("sources"), list)
+      and "scheduler" in hj,
+      "status=%s keys=%s" % (hs, sorted(hj.keys()) if isinstance(hj, dict) else None))
+rs, rj, rraw = call("GET", "/api/reputation", want_token=True)
+check("GET /api/reputation (token) returns opaque reporter reputation rows (ABU-04)",
+      rs == 200 and isinstance(rj, dict) and isinstance(rj.get("reporters"), list),
+      "status=%s keys=%s" % (rs, sorted(rj.keys()) if isinstance(rj, dict) else None))
 
 # ---------------------------------------------------------------------------
 # C. DATA-05 — false-positive suppression (a sports sentence makes NO incident)
