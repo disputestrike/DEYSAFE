@@ -85,6 +85,47 @@ TYPE_GUIDANCE = {
 }
 LEVEL_LABEL = {1: "ADVISORY", 2: "WARNING", 3: "DANGER", 4: "CRITICAL"}
 
+# --- ABU-03 inbound-report stream (coordinated-burst detection) --------------
+# The signals table DEDUPES identical reports by raw_hash, so a coordinated flood
+# of near-identical reports collapses to one stored row — invisible to a detector
+# that reads the table. We therefore mirror every INBOUND report (pre-dedup) into
+# a small, bounded, process-level ring buffer that the coordination detector reads.
+# It holds only the non-PII shape the detector needs (ts, area, coarse coords,
+# text, opaque reporter_key) and is time-pruned, so it never grows unbounded and
+# never persists raw identities. Process-local on purpose: a transient burst signal.
+import collections as _collections
+import threading as _threading
+_RECENT_REPORTS = _collections.deque(maxlen=400)
+_RECENT_LOCK = _threading.Lock()
+
+
+def _remember_report(rep):
+    """Append one inbound report's non-PII shape to the burst ring buffer."""
+    try:
+        with _RECENT_LOCK:
+            _RECENT_REPORTS.append(rep)
+    except Exception:
+        pass
+
+
+def _recent_reports_window(minutes=30, limit=300):
+    """Snapshot of inbound reports seen in the last `minutes` (pre-dedup), newest
+    last — the window the ABU-03 coordinated-burst detector scores."""
+    cutoff = datetime.datetime.now() - datetime.timedelta(minutes=minutes)
+    out = []
+    with _RECENT_LOCK:
+        items = list(_RECENT_REPORTS)
+    for r in items:
+        ts = r.get("ts")
+        try:
+            if ts and datetime.datetime.fromisoformat(ts) < cutoff:
+                continue
+        except Exception:
+            pass
+        out.append(r)
+    return out[-limit:]
+
+
 # --- Phase 1 response-loop helpers (SOS-01/02, BC-03) ------------------------
 # Channels we attempt for a trusted-circle SOS notify, in reach-priority order
 # (broadcast.py orders the same way). Each trusted contact may override with its
@@ -927,33 +968,6 @@ class Handler(BaseHTTPRequestHandler):
         return _h.sha256(self._client_id().encode("utf-8")).hexdigest()[:16]
 
     @staticmethod
-    def _recent_report_window(db, minutes=30, limit=200):
-        """ABU-03: recent COMMUNITY reports as reputation-shaped dicts, for the
-        coordinated-burst detector. Reads the existing signals table (kind='report')
-        — newest first — and projects each to {ts, area, text, source_name} that
-        reputation.coordination_signals() understands. Read-only; bounded."""
-        out = []
-        try:
-            rows = db.all_signals()
-        except Exception:
-            return out
-        cutoff = datetime.datetime.now() - datetime.timedelta(minutes=minutes)
-        for s in rows:
-            if (s.get("kind") or "") != "report":
-                continue
-            ts = s.get("published_at") or s.get("ingested_at")
-            try:
-                if ts and datetime.datetime.fromisoformat(ts) < cutoff:
-                    continue
-            except Exception:
-                pass
-            out.append({"ts": ts, "area": s.get("location_name") or "",
-                        "lat": s.get("lat"), "lng": s.get("lng"),
-                        "text": s.get("text") or s.get("title") or "",
-                        "source_name": s.get("source_name") or ""})
-        return out[-limit:]
-
-    @staticmethod
     def _alert_recipients(db, inc):
         """Geofenced recipient list for a verified alert (BC-02).
 
@@ -1061,20 +1075,26 @@ class Handler(BaseHTTPRequestHandler):
             sev = geoparse.detect_severity(desc + " " + type_word)
             now_iso_ts = datetime.datetime.now().isoformat(timespec="seconds")
 
-            # ABU-04/03/11: reputation + coordinated-burst quarantine. Build the
-            # report's reputation identity (owner_token / client id / ip-hash — only
-            # the HASH is ever stored), accrue a report against that source, and look
-            # at the recent community-report window for a coordinated flood. A source
-            # that is BOTH low-reputation AND riding a coordinated burst is HELD for a
-            # human (needs_human_review) — never auto-published. Bright line: this is
-            # advisory + reversible; volume alone never raises status, and we never
-            # auto-verify or auto-escalate. Either signal alone only down-weights.
+            # ABU-04/03/11: reputation + coordinated-burst quarantine. Build a STABLE
+            # reputation identity for the source — the owner_token if the field app
+            # supplies one, else a one-way hash of the caller IP. We deliberately do
+            # NOT fold in client_id (that's a per-message idempotency token, not an
+            # identity — mixing it in would mint a brand-new pristine source for every
+            # message and defeat reputation entirely). Only the HASH is ever stored
+            # (PRIV-02). We accrue this report against the source, then look at the
+            # recent community-report window for a coordinated flood. A source that is
+            # BOTH low-reputation AND riding a coordinated burst is HELD for a human
+            # (needs_human_review) — never auto-published. Bright line: advisory +
+            # reversible; volume alone never raises status; no auto-verify/escalate;
+            # either signal alone only down-weights.
+            rkey = reputation.reporter_key(data.get("owner_token") or self._ip_hash())
             report_for_rep = {
-                "owner_token": data.get("owner_token"), "client_id": data.get("client_id"),
-                "ip_hash": self._ip_hash(), "source_name": "Community report",
+                "reporter_key": rkey, "owner_token": data.get("owner_token"),
                 "ts": now_iso_ts, "area": loc_name, "lat": lat, "lng": lng,
                 "text": "{} {}".format(type_word, desc)}
-            rkey = reputation.key_of(report_for_rep)
+            # Mirror this inbound report into the burst ring buffer BEFORE the signals
+            # table dedup can hide a flood of identical reports from the detector.
+            _remember_report(report_for_rep)
             stat = None
             try:
                 stat = db.get_reporter_stat(rkey) or reputation.new_stat(rkey)
@@ -1082,8 +1102,8 @@ class Handler(BaseHTTPRequestHandler):
                 db.upsert_reporter_stat(reputation.update_stat(stat, None))
             except Exception:
                 stat = None
-            recent = self._recent_report_window(db)
-            recent.append(report_for_rep)  # include the just-received report in the window
+            # The window already includes this report (we appended it above).
+            recent = _recent_reports_window()
             quarantined = False
             try:
                 quarantined = reputation.should_quarantine(report_for_rep, stat, recent)

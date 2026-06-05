@@ -19,13 +19,16 @@ Design (Phase 0, AUTH-01/02/05):
   - Roles are a strict ladder  viewer < reviewer < verifier < admin. has_role()
     answers "does <held> meet the bar for <needed>?".
 
-FAIL-OPEN CONTRACT (keeps validate.py at 56/56):
+POLICY SEPARATION (this module answers questions; the caller enforces):
   This module *answers questions*; it never decides policy on its own. When the
-  operator set is empty (DEYSAFE_OPERATORS unset), check_login() returns None and
-  identity() returns None, but the api.py gate is responsible for treating an
-  empty roster / empty OPERATOR_TOKEN as "auth disabled -> allow". Nothing here
-  blocks; the caller chooses to enforce only when operators are configured.
-  auth_enabled() is provided so the caller can make that decision in one place.
+  operator set is empty (DEYSAFE_OPERATORS unset), check_login() and identity()
+  return None — no token can be validated. auth_enabled() reports whether any
+  operator/roster is configured, so the caller can decide in one place.
+  The api.py gate is FAIL-CLOSED: operator surfaces require a valid operator
+  token, so an empty roster / empty OPERATOR_TOKEN leaves those endpoints LOCKED
+  (401) — a careless deploy ships safe, not wide open. (Earlier builds were
+  fail-open; that changed in the Phase 0 trust core. validate.py stays green
+  because its operator checks run with OPERATOR_TOKEN / DEYSAFE_OPERATORS set.)
 """
 import os
 import json
