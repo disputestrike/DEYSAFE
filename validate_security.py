@@ -118,7 +118,13 @@ s, j, _ = call("POST", "/api/case-status", {"case_id": 1, "status": "located"})
 check("POST /api/case-status without token -> 401/403 (operator resolves cases)", s in (401, 403), "got " + str(s))
 
 s, h = html("/review.html")
-check("GET /review.html without token -> 401/403 (staging access; AUTH-06)", s in (401, 403), "got " + str(s))
+# AUTH-06: the console PAGE serves (it holds no data — only the shell + sign-in form),
+# but it must PRESENT a login gate, and the operator DATA endpoints above must be 401
+# without a token. Gating the page itself was a UX bug (login form unreachable), so we
+# assert the page serves a sign-in gate instead — data protection is covered by the
+# operator-endpoint 401 checks (queue/verify/case-status/ingest-live) above.
+check("GET /review.html serves the SHIELD console with a sign-in gate (data is API-gated; AUTH-06)",
+      s == 200 and ('id="login"' in h or "operator sign-in" in h.lower()), "got " + str(s))
 
 # ---------------------------------------------------------------------------
 print("\n-- B. DEMO + CONTROLLED VOCAB: synthetic data is labelled; types are constrained (FAKE-01, ABU-09) --")

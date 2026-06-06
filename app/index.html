@@ -137,6 +137,9 @@
   nav button{flex:1;background:none;border:none;color:var(--faint);padding:9px 0 11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;font:inherit;font-size:10.5px;font-weight:600}
   nav button svg{width:21px;height:21px}nav button.active{color:var(--brand)}
   nav button.watchnav.on{color:#1f9d57}nav button.watchnav.on svg{fill:#1f9d5722}
+  .jbanner{display:flex;align-items:center;gap:8px;justify-content:space-between;background:#0d3b66;color:#fff;padding:9px 14px;font-size:12.5px;font-weight:800}
+  .jbanner .jb-act{display:flex;gap:6px;flex:0 0 auto}
+  .jbanner button{background:rgba(255,255,255,.18);color:#fff;border:none;border-radius:7px;padding:6px 9px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}
   @media(min-width:860px){
     body{background:#d9e0ea}
     .app{max-width:1160px}
@@ -171,6 +174,7 @@ Call home after arrival
 Check hotel address</textarea>
   </div>
   <div id="alertBanner" class="abanner" style="display:none"></div>
+  <div id="journeyBanner" class="jbanner" style="display:none;cursor:pointer" role="status" onclick="go('waka')"></div>
   <div id="outboxBadge" class="outboxbadge" style="display:none" role="status"></div>
   <div id="proWarn" class="prowarn" style="display:none"></div>
   <datalist id="placelist"></datalist>
@@ -386,8 +390,13 @@ function toggleHeat(){HEAT_ON=!HEAT_ON;heatLayer.clearLayers();if(HEAT_ON){INCS.
 function triangulate(cid){
   var m=MISS.find(function(x){return x.id===cid;});if(!m){LASTTRI=null;return null;}
   triLayer.clearLayers();
-  var rings=[{lat:m.lat,lng:m.lng,r:reach(hoursSince(m.last_seen)),label:'Last seen: '+esc(m.place)}];
-  (m.sightings||[]).forEach(function(s){rings.push({lat:s.lat,lng:s.lng,r:reach(hoursSince(s.seen_at)),label:'Sighting: '+esc(s.place)});});
+  // GEO-01: skip points with no coordinates — never feed (null,null) to Leaflet (it
+  // throws "Invalid LatLng" and aborts the whole case view). A case with no located
+  // last-seen simply has no client estimate; the backend overlay reports it cleanly.
+  var rings=[];
+  if(m.lat!=null&&m.lng!=null)rings.push({lat:m.lat,lng:m.lng,r:reach(hoursSince(m.last_seen)),label:'Last seen: '+esc(m.place)});
+  (m.sightings||[]).forEach(function(s){if(s.lat!=null&&s.lng!=null)rings.push({lat:s.lat,lng:s.lng,r:reach(hoursSince(s.seen_at)),label:'Sighting: '+esc(s.place)});});
+  if(!rings.length){LASTTRI=null;return null;}
   var pal=['#ef6c12','#0ea5e9','#7c3aed','#0891b2','#e0a106','#1d6fe0'];
   rings.forEach(function(rg,i){L.circle([rg.lat,rg.lng],{radius:rg.r*1000,color:pal[i%pal.length],weight:1.5,opacity:.85,fillColor:pal[i%pal.length],fillOpacity:.07,dashArray:'5'}).addTo(triLayer).bindPopup(rg.label+' · reach '+Math.round(rg.r)+' km');});
   var res={sources:rings.length,overlap:rings.length,zoneKm:rings[0]?Math.round(rings[0].r):0,center:rings[0]?[rings[0].lat,rings[0].lng]:null};
@@ -414,12 +423,36 @@ function triangulate(cid){
   if(sg.length>=2){anchor=[sg[sg.length-1].lat,sg[sg.length-1].lng];brg=bearing(sg[sg.length-2].lat,sg[sg.length-2].lng,sg[sg.length-1].lat,sg[sg.length-1].lng);ar=reach(hoursSince(sg[sg.length-1].seen_at));}
   else if(sg.length===1){anchor=[sg[0].lat,sg[0].lng];brg=bearing(m.lat,m.lng,sg[0].lat,sg[0].lng);ar=reach(hoursSince(sg[0].seen_at));}
   else{anchor=[m.lat,m.lng];brg=dirToBearing(m.direction);}
-  if(brg!=null&&anchor){
+  if(brg!=null&&isFinite(brg)&&anchor&&isFinite(anchor[0])&&isFinite(anchor[1])){
     L.polygon(conePts(anchor[0],anchor[1],brg,Math.min(ar,120),34),{color:'#d92d20',weight:1,opacity:.7,fillColor:'#d92d20',fillOpacity:.12}).addTo(triLayer).bindPopup('Likely heading '+compass(brg)+' (~'+Math.round(brg)+'°)');
     if(res.center){var fwd=dest(res.center[0],res.center[1],brg,Math.min(ar*0.4,(res.zoneKm||5)+6));L.marker(fwd,{icon:missIcon('➡️')}).addTo(triLayer).bindPopup('Predicted ahead — search this way');res.heading=Math.round(brg);res.headingC=compass(brg);}
   }
   res.say='Preliminary search estimate: '+res.overlap+' of '+res.sources+' sources overlap. Preliminary estimate, search within about '+res.zoneKm+' kilometres'+(m.place?(' near '+m.place):'')+(res.headingC?(', possibly moving '+res.headingC):'')+'. Not a confirmed location.';
   LASTTRI=res;return res;
+}
+// TRI-01: overlay the SERVER's authoritative search-zone (real confidence + disclaimer,
+// computed by engine/triangulate.py) on top of the instant client estimate. If the
+// backend is unreachable, the client triangulation above stays as the offline fallback.
+async function drawBackendTriangulation(cid){
+  try{
+    var z=await fetch('/api/triangulate?case_id='+encodeURIComponent(cid)).then(function(r){return r.json();});
+    if(!z||!z.ok||!(z.rings&&z.rings.length)){var e0=$('#triEstimate');if(e0)e0.innerHTML='<p class="note">Not enough located points yet for a search-zone estimate. Add a last-seen location and sightings to triangulate.</p>';return;}
+    triLayer.clearLayers();
+    var pal=['#ef6c12','#0ea5e9','#7c3aed','#0891b2','#e0a106','#1d6fe0'];
+    z.rings.forEach(function(rg,i){var c=rg.center||[rg.lat,rg.lng];if(!c||c[0]==null)return;
+      L.circle(c,{radius:(rg.radius_km||0)*1000,color:pal[i%pal.length],weight:1.5,opacity:.85,fillColor:pal[i%pal.length],fillOpacity:.06,dashArray:'5'}).addTo(triLayer).bindPopup(esc(rg.from_source||'source')+' · reach '+Math.round(rg.radius_km||0)+' km');});
+    var pz=z.priority_zone,conf=pz?Math.round((pz.confidence||0)*100):0;
+    if(pz&&pz.center){
+      L.circle(pz.center,{radius:Math.max(1,(pz.radius_km||3))*1000,color:'#d92d20',weight:2,fillColor:'#d92d20',fillOpacity:.22}).addTo(triLayer);
+      L.marker(pz.center,{icon:missIcon('🎯')}).addTo(triLayer).bindPopup('🎯 Likely search zone · '+conf+'% confidence · ~'+Math.round(pz.radius_km||0)+' km · '+(pz.ring_count||0)+' source(s) overlap');
+    }
+    var mc=z.movement_cone;
+    if(mc&&mc.polygon&&mc.polygon.length){L.polygon(mc.polygon,{color:'#d92d20',weight:1,opacity:.7,fillColor:'#d92d20',fillOpacity:.10}).addTo(triLayer).bindPopup('Likely heading '+esc(mc.heading||''));}
+    var el=$('#triEstimate');
+    if(el){el.innerHTML='<div class="lvl '+(conf>=50?'ORANGE':'YELLOW')+'"><div class="r1"><b>🎯 Likely search zone</b><button class="spk" onclick="sayTri()" title="Read aloud">🔊</button></div><div class="guide"><b>'+conf+'% confidence</b>'+(pz?(' · ~'+Math.round(pz.radius_km||0)+' km across · '+(pz.ring_count||0)+' of '+(z.ring_count||z.rings.length)+' sources overlap'):'')+'. '+esc(z.disclaimer||'Probability estimate, not an exact location.')+'</div></div>';}
+    LASTTRI={say:(z.explanation||('Likely search zone, '+conf+' percent confidence. '+(z.disclaimer||''))),center:pz?pz.center:(z.rings[0]&&z.rings[0].center),zoneKm:pz?Math.round(pz.radius_km||0):0,sources:z.ring_count||z.rings.length,overlap:pz?pz.ring_count:1};
+    if(pz&&pz.center){try{map.fitBounds([pz.center],{maxZoom:9});}catch(e){}}
+  }catch(e){}
 }
 function itemInc(i){const lv=LV[i.status]||'YELLOW';return `<div class="item ${lv}" onclick="focusPt(${+i.lat},${+i.lng})">
   <div class="r1"><span class="pl">${esc(i.location_name)}, ${esc(i.state)}</span><span class="badge ${lv}">${lv}</span></div>
@@ -527,7 +560,7 @@ function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('f
       <div class="kv"><b>Age(s):</b> ${esc(m.age||'—')} &nbsp; <b>Vehicle:</b> ${esc(m.vehicle||'—')}</div>
       <div class="kv"><b>Clothing:</b> ${esc(m.clothing||'—')} &nbsp; <b>Direction:</b> ${esc(m.direction||'—')}</div>
     </div>
-    ${tri&&tri.sources>1?`<div class="lvl ORANGE" style="margin-top:12px"><div class="r1"><b>🎯 Preliminary search estimate</b><button class="spk" onclick="sayTri()" title="Read aloud">🔊</button></div><div class="guide">${+tri.overlap} of ${+tri.sources} sources overlap — preliminary estimate, search within ~${+tri.zoneKm} km. Not a confirmed location; more sightings = tighter estimate.</div></div>`:`<p class="note" style="margin-top:12px">Add a 2nd sighting for a preliminary search estimate.</p>`}
+    <div id="triEstimate" style="margin-top:12px">${tri&&tri.sources>1?`<div class="lvl ORANGE"><div class="r1"><b>🎯 Preliminary search estimate</b><button class="spk" onclick="sayTri()" title="Read aloud">🔊</button></div><div class="guide">${+tri.overlap} of ${+tri.sources} sources overlap — preliminary estimate, search within ~${+tri.zoneKm} km. Not a confirmed location; more sightings = tighter estimate.</div></div>`:`<p class="note">Computing server search-zone estimate…</p>`}</div>
     <h2 class="t" style="margin-top:16px">Sighting trail</h2>${sights}
     <h2 class="t" style="margin-top:16px">Did you see them? Report a sighting</h2>
     <label class="f">Where (type any place)</label><input id="sPlace" list="placelist" autocomplete="off" placeholder="Where seen…" />
@@ -541,6 +574,7 @@ function openCase(id){const m=MISS.find(x=>x.id===id);if(!m)return;CASE=id;go('f
     </div>`;
   $('#sPlace').value = (m.sightings&&m.sightings.length)?m.sightings[m.sightings.length-1].place:m.place;
   $('#caseDetail').scrollIntoView({behavior:'smooth',block:'nearest'});
+  drawBackendTriangulation(m.id);   // overlay the server's authoritative zone + confidence
 }
 async function addSighting(cid){cid=cid||CASE;if(!cid)return;
   const body={case_id:cid,place:$('#sPlace').value,hours_ago:$('#sHours').value,note:$('#sNote').value.trim()};
@@ -612,11 +646,15 @@ let DECOY_TAPS=0,DECOY_TIMER=null,DECOY_CLOCK=null;
 function panicLock(){
   var d=$('#decoy');if(!d)return;
   d.classList.add('show');
+  // KILL SWITCH: persist the lock so a reload OR reopening the app stays disguised
+  // as "Trip Notes" until the covert unlock. Without this the decoy is cosmetic —
+  // a kidnapper who reopens the app would see the real SOS app (the weak point).
+  try{localStorage.setItem('ds_locked','1');}catch(e){}
   if(SOS_ON)stopAlarm();
   function tick(){var c=$('#decoyClock');if(c)c.textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}
   tick();clearInterval(DECOY_CLOCK);DECOY_CLOCK=setInterval(tick,30000);
 }
-function panicUnlock(){var d=$('#decoy');if(d)d.classList.remove('show');clearInterval(DECOY_CLOCK);DECOY_CLOCK=null;DECOY_TAPS=0;}
+function panicUnlock(){var d=$('#decoy');if(d)d.classList.remove('show');clearInterval(DECOY_CLOCK);DECOY_CLOCK=null;DECOY_TAPS=0;try{localStorage.removeItem('ds_locked');}catch(e){}}
 function decoyTap(){clearTimeout(DECOY_TIMER);DECOY_TAPS++;DECOY_TIMER=setTimeout(function(){DECOY_TAPS=0;},2500);if(DECOY_TAPS>=4)panicUnlock();}
 function hav(la1,lo1,la2,lo2){var R=6371,p1=la1*Math.PI/180,p2=la2*Math.PI/180,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180;var x=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2);return 2*R*Math.asin(Math.sqrt(x));}
 const GUIDE={GREEN:"No verified danger nearby. Remain alert.",YELLOW:"Unconfirmed report nearby. Exercise caution.",ORANGE:"Active danger reported nearby. Avoid the area if you can.",RED:"Critical verified threat. Do not travel; follow official guidance."};
@@ -858,18 +896,39 @@ async function checkRoute(){
 }
 
 function renderJourney(j){
+  renderJourneyBanner(j);
   var box=$('#journeyBox');if(!box)return;
   if(!j){box.style.display='none';box.innerHTML='';return;}
   box.style.display='block';
   JOURNEY_ID=j.journey_uuid||j.id||JOURNEY_ID;
   try{localStorage.setItem('ds_journey_id',JOURNEY_ID||'');}catch(e){}
   var reason=j.anomaly_reason?(' - '+esc(j.anomaly_reason)):'';
-  box.innerHTML='<b>Journey '+esc(j.ref||JOURNEY_ID||'active')+'</b>'
-    +'<div class="kv"><b>Status:</b> '+esc(j.status||j.state||'active')+'</div>'
+  var st=esc(j.status||j.state||'active'),risk=esc(j.risk_level||'GREEN');
+  box.innerHTML='<div class="r1"><b>🛡 Journey Guard · '+esc(j.ref||JOURNEY_ID||'active')+'</b><span class="badge '+risk+'">'+risk+'</span></div>'
+    +'<div class="kv"><b>Status:</b> '+st+'</div>'
     +'<div class="kv"><b>Route:</b> '+esc(j.from_place||'start')+' to '+esc(j.to_place||'destination')+'</div>'
-    +'<div class="kv"><b>Risk:</b> '+esc(j.risk_level||'GREEN')+' · '+esc(j.anomaly_level||'normal')+reason+'</div>'
+    +'<div class="kv"><b>Watch:</b> '+esc(j.anomaly_level||'normal')+reason+'</div>'
     +'<div class="kv"><b>Exact sharing:</b> '+(j.share_consent?'on for this journey':'off')+'</div>'
-    +'<div class="kv"><b>Mode:</b> automatic foreground guard'+(JOURNEY_WATCH!=null?' is watching this trip':' will watch when location is available')+'</div>';
+    +'<div class="kv"><b>Mode:</b> automatic guard'+(JOURNEY_WATCH!=null?' — watching this trip now':' — will watch when location is on')+'</div>'
+    +'<p class="note" style="margin-top:8px">Journey Guard watches your trip automatically — no taps needed. Check-ins and arrival happen on their own; your circle and SHIELD are alerted if you go silent or off-route.</p>';
+}
+// First-class, ALWAYS-VISIBLE Journey Guard presence: a slim banner shown on every
+// screen while a trip is active (tap to open WakaSafe). Hidden once arrived/ended.
+function renderJourneyBanner(j){
+  var b=$('#journeyBanner');if(!b)return;
+  var st=j?String(j.status||j.state||'active').toLowerCase():'';
+  if(!j||/arriv|ended|closed|cancel|safe/.test(st)){b.style.display='none';b.innerHTML='';return;}
+  var risk=esc(j.risk_level||'GREEN');
+  b.innerHTML='<span style="flex:1">🛡 Journey Guard · '+esc(j.from_place||'trip')+' → '+esc(j.to_place||'dest')+' · '+risk+(JOURNEY_WATCH!=null?' · watching':'')+'</span>'
+    +'<span class="jb-act" aria-hidden="true">tap for details ›</span>';
+  b.style.display='flex';
+}
+// Restore an in-progress trip after a reload so the guard presence persists.
+async function restoreJourney(){
+  var jid;try{jid=localStorage.getItem('ds_journey_id');}catch(e){}
+  if(!jid)return;
+  try{var r=await fetch('/api/journey?journey_uuid='+encodeURIComponent(jid)).then(x=>x.json());
+    if(r&&r.ok&&r.journey)renderJourney(r.journey);}catch(e){}
 }
 async function startJourneyGuard(auto){
   var a=$('#wFrom').value.trim(),b=$('#wTo').value.trim();
@@ -1121,7 +1180,8 @@ window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_ON)panicLock();});
 
-(async function(){initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace'].forEach(attachPlaceSuggest);await loadLevel();await loadData();await loadReadiness();
+(async function(){try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace'].forEach(attachPlaceSuggest);await loadLevel();await loadData();await loadReadiness();
+  restoreJourney();   // re-show Journey Guard presence if a trip is in progress
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();flushOutbox(); // send anything saved on a previous offline visit
   setTimeout(()=>map.invalidateSize(),120);
