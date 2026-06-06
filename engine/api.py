@@ -467,7 +467,7 @@ class DeySafeHandler(BaseHTTPRequestHandler):
         if u.path == "/api/missing":
             # FIND-01: missing person search.
             # RED-01: redacts names/PII for anonymous callers; shows full for operators.
-            is_op = security.is_operator(self, db)
+            is_op = self._authed() and self._auth_enabled()
             place = q.get("place", [None])[0]
             rows = db.get_missing(place=place)
             
