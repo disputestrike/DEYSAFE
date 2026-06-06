@@ -1088,6 +1088,19 @@ class Handler(BaseHTTPRequestHandler):
         self._security_headers()
         self.end_headers()
 
+    def handle_one_request(self):
+        # Last-resort guard: a handler that raises on weird input must never drop the
+        # socket with a bare traceback and no HTTP response. Per-endpoint validation
+        # catches the known cases; this contains the unknown ones with a clean 500.
+        # (Crashes happen before the handler's final _json, so this won't double-send.)
+        try:
+            return super().handle_one_request()
+        except Exception:
+            try:
+                self._json({"ok": False, "error": "internal error"}, 500)
+            except Exception:
+                pass
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         db = DB(DB_PATH)
@@ -1486,6 +1499,11 @@ class Handler(BaseHTTPRequestHandler):
                 data = {k: v[0] for k, v in urllib.parse.parse_qs(raw).items()}
             except Exception:
                 data = {}
+        if not isinstance(data, dict):
+            # A bare JSON scalar/array body (42, [1], "x", true, null) parses fine but
+            # is not a dict, so every handler's data.get(...) would AttributeError and
+            # drop the connection. Coerce to {} so the handler returns a clean 4xx.
+            data = {}
         db = DB(DB_PATH)
 
         if u.path == "/api/readiness":
@@ -2020,7 +2038,10 @@ class Handler(BaseHTTPRequestHandler):
                 nxt = response.next_state(state, "notify_circle")
                 if nxt:
                     state = nxt
-                    contact_state = "notified"
+                    # Honest: only "notified" when a delivery actually went out (real OR
+                    # sim). With no provider keys every delivery is unconfigured (sent=0),
+                    # so don't claim the circle was notified — the owner must use Share.
+                    contact_state = "notified" if summary.get("sent", 0) > 0 else "not sent (no provider)"
                     db.update_sos_state(sos_uuid, state, contact_state=contact_state)
                 if summary.get("sent", 0) > 0:
                     nxt2 = response.next_state(state, "delivery_confirmed")
@@ -2374,16 +2395,20 @@ class Handler(BaseHTTPRequestHandler):
                 hrs = float(data.get("hours_ago") or 1)
             except Exception:
                 hrs = 1.0
+            try:
+                cnt = max(1, int(data.get("count") or 1))   # non-numeric count must not 500
+            except Exception:
+                cnt = 1
             db.insert_missing({"name": name, "age": (data.get("age") or "").strip(), "place": place,
                                "exact_place": (data.get("exact_place") or "").strip(),
-                               "count": data.get("count") or 1, "lat": lat, "lng": lng,
+                               "count": cnt, "lat": lat, "lng": lng,
                                "last_seen": (datetime.datetime.now() - datetime.timedelta(hours=hrs)).isoformat(timespec="seconds"),
                                "description": (data.get("description") or "").strip(),
                                "vehicle": (data.get("vehicle") or "").strip(),
                                "clothing": (data.get("clothing") or "").strip(),
                                "direction": (data.get("direction") or "").strip(),
                                "beacon_id": (data.get("beacon_id") or "").strip()})
-            db.audit("api", "missing_report", "place={} count={}".format(place, data.get("count") or 1))
+            db.audit("api", "missing_report", "place={} count={}".format(place, cnt))
             # PRIV-01: the POST response echoes the submitter's OWN case in full (you
             # may see what you just filed). The PUBLIC scrape surface is GET /api/missing,
             # which IS redacted for anonymous callers. So the privacy boundary is the
