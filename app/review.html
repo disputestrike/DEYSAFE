@@ -98,6 +98,61 @@
   .lbox .go{width:100%;margin-top:20px;background:var(--brand);color:#fff}
   .lerr{color:#f87171;font-size:13px;min-height:18px;margin-top:10px}
   .lnote{color:var(--faint);font-size:11.5px;margin-top:14px;line-height:1.45}
+  /* ---- Case evidence gallery (operator triage of attached evidence + GeoTrace) ---- */
+  .drow.clk{cursor:pointer}
+  .drow.clk:hover{background:rgba(91,140,255,.06)}
+  .drow.open{background:rgba(91,140,255,.1)}
+  .casepanel{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:14px;margin:12px 0 4px;border-left:3px solid var(--brand)}
+  .casepanel .ctop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .casepanel .ctop h3{font-size:15px;letter-spacing:-.01em}
+  .casepanel .cclose{flex:0 0 auto;padding:5px 11px;font-size:12px;font-weight:600;
+    background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:8px;cursor:pointer}
+  .casepanel .cmeta{color:var(--faint);font-size:12px;margin-top:6px;line-height:1.5}
+  .subhead{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin:18px 2px 9px;display:flex;align-items:baseline;gap:7px}
+  .subhead .sc{color:var(--faint);font-weight:600;letter-spacing:0;text-transform:none}
+  .evcard{background:#0d1626;border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:9px;border-left:3px solid var(--faint)}
+  .evcard.video{border-left-color:#a78bfa}
+  .evcard.photo{border-left-color:#38bdf8}
+  .evcard.audio{border-left-color:#f59e0b}
+  .evcard.note{border-left-color:#22c55e}
+  .evcard .et{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  .evcard .ettl{font-weight:700;font-size:13.5px}
+  .kind{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:999px;white-space:nowrap;background:rgba(147,160,181,.18);color:#cbd5e6}
+  .kind.video{background:rgba(167,139,250,.18);color:#c4b5fd}
+  .kind.photo{background:rgba(56,189,248,.18);color:#7dd3fc}
+  .kind.audio{background:rgba(245,158,11,.16);color:#fbbf24}
+  .kind.note{background:rgba(34,197,94,.16);color:#4ade80}
+  .evsum{color:var(--muted);font-size:13px;margin:7px 0}
+  .evrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{font-size:11px;font-weight:600;padding:2px 8px;border-radius:7px;border:1px solid var(--line);color:var(--muted);background:#0b1220}
+  .chip.hash{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#9db8ff}
+  .chip.store{color:#4ade80;border-color:rgba(34,197,94,.4)}
+  .chip.nostore{color:#fbbf24;border-color:rgba(245,158,11,.4)}
+  .chip.time{color:var(--faint)}
+  .evlink{display:inline-block;margin-top:8px;font-size:12.5px;font-weight:700;color:#9db8ff;text-decoration:none;border:1px solid rgba(91,140,255,.4);border-radius:8px;padding:5px 11px}
+  .evlink:hover{background:rgba(91,140,255,.12)}
+  .gtcard{background:#0d1626;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:9px;border-left:3px solid var(--amber)}
+  .gtcard .gth{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  .gtland{font-weight:700;font-size:13.5px}
+  .conf{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:999px;white-space:nowrap;background:rgba(245,158,11,.16);color:#fbbf24}
+  .conf.high{background:rgba(239,68,68,.16);color:#f87171}
+  .conf.medium{background:rgba(245,158,11,.16);color:#fbbf24}
+  .conf.low{background:rgba(91,140,255,.16);color:#9db8ff}
+  .gtmeta{color:var(--faint);font-size:12px;margin-top:6px}
+  .gtnote{color:var(--muted);font-size:12.5px;margin-top:6px}
+  .evform{background:#0b1220;border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px}
+  .evform .ff{display:flex;gap:8px;flex-wrap:wrap}
+  .evform .ff>*{flex:1 1 140px;min-width:0}
+  .evform label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.04em}
+  .evform input,.evform select,.evform textarea{width:100%;padding:9px 11px;background:#0d1626;border:1px solid var(--line);
+    border-radius:9px;color:var(--text);font:inherit;outline:none}
+  .evform input:focus,.evform select:focus,.evform textarea:focus{border-color:var(--brand)}
+  .evform textarea{resize:vertical;min-height:46px}
+  .evform .fr{flex:1 1 100%}
+  .evform .submit{flex:0 0 auto;margin-top:10px;padding:9px 16px;background:var(--brand);color:#fff;border:none;border-radius:9px;font-weight:700;cursor:pointer}
+  .brightline{font-size:11.5px;color:var(--faint);margin-top:9px;line-height:1.45;border-left:2px solid var(--line);padding-left:9px}
 </style>
 </head>
 <body>
@@ -139,6 +194,13 @@
     <div class="shead"><h2>SHIELD cases</h2><span class="cnt" id="cCnt">0</span>
       <button class="rf" onclick="loadCases()">Refresh</button></div>
     <div class="rcard" id="caseCard"><div class="rempty">No SHIELD cases yet.</div></div>
+    <!-- Case evidence gallery: opens in place when an operator taps a case row above.
+         Shows attached evidence items + GeoTrace probability notes, plus forms to add a
+         note-evidence (POST /api/evidence) and a GeoTrace (POST /api/geotrace). All values
+         escaped via esc(); raw media is never faked — a missing object_url shows an honest
+         "no raw file" state. The redacted public projection lives behind /api/evidence-public
+         and is deliberately NOT mixed into this restricted operator view. -->
+    <div id="caseDetail"></div>
   </div>
 
   <div class="section" id="secAlerts">
@@ -380,6 +442,7 @@ function clearResponse(){
   $('#alerts').innerHTML=''; $('#aCnt').textContent='0';
   $('#journeyCard').innerHTML='<div class="rempty">No active journeys yet.</div>'; $('#jCnt').textContent='0';
   $('#caseCard').innerHTML='<div class="rempty">No SHIELD cases yet.</div>'; $('#cCnt').textContent='0';
+  CASES=[]; OPEN_CASE=null; $('#caseDetail').innerHTML='';
   $('#delivCard').innerHTML='<div class="rempty">No delivery receipts yet.</div>'; $('#dCnt').textContent='0';
   $('#opsCard').innerHTML='<div class="rempty">No source runs recorded yet.</div>'; $('#oCnt').textContent='0';
   $('#repCard').innerHTML='<div class="rempty">No reporter reputation rows yet.</div>'; $('#rCnt').textContent='0';
@@ -481,14 +544,222 @@ async function loadCases(){
   const rows=d.cases||[];
   $('#cCnt').textContent=rows.length;
   if(!rows.length){ $('#caseCard').innerHTML='<div class="rempty">No SHIELD cases yet.</div>'; return; }
+  CASES = rows;
   $('#caseCard').innerHTML=rows.map(function(c){
     const status=String(c.status||'open').toLowerCase();
     const cls=(status==='closed'||status==='resolved')?'ok':'sim';
     const owners='liaison '+esc(c.family_liaison||'unassigned')+' · commander '+esc(c.incident_commander||'unassigned');
-    return '<div class="drow"><span class="ch">'+esc(c.case_type||'case')+'</span>'
+    const uuid=esc(c.case_uuid||'');
+    const isOpen=(OPEN_CASE && c.case_uuid===OPEN_CASE);
+    return '<div class="drow clk'+(isOpen?' open':'')+'" data-case="'+uuid+'" title="Open evidence gallery">'
+      + '<span class="ch">'+esc(c.case_type||'case')+'</span>'
       + '<span class="addr">'+esc(c.summary||c.subject_ref||c.case_uuid||'case')+' · '+owners+'</span>'
       + '<span class="dstat '+cls+'">'+esc(c.status||'open')+'</span></div>';
   }).join('');
+  // Tapping a case row opens its evidence gallery in place (toggles closed if re-tapped).
+  $('#caseCard').querySelectorAll('.drow[data-case]').forEach(function(row){
+    row.addEventListener('click', function(){
+      const id=row.getAttribute('data-case');
+      if(OPEN_CASE===id){ closeCaseDetail(); } else { openCase(id); }
+    });
+  });
+  // If a case was open, keep its gallery in sync after a refresh (or close it if gone).
+  if(OPEN_CASE){
+    if(rows.some(function(c){return c.case_uuid===OPEN_CASE;})) openCase(OPEN_CASE);
+    else closeCaseDetail();
+  }
+}
+
+// ---- Case evidence gallery ------------------------------------------------------
+// Opens GET /api/case?id=<case_uuid> -> {case, updates, evidence, geotraces} and renders
+// the attached evidence items + analyst GeoTrace notes for operator triage. Operator-gated
+// like the rest of the console; a 401/403 surfaces the login gate via respAuthFail().
+let CASES = [];          // raw case rows (for the row->detail lookup)
+let OPEN_CASE = null;    // case_uuid currently expanded, or null
+
+function closeCaseDetail(){
+  OPEN_CASE = null;
+  $('#caseDetail').innerHTML='';
+  $('#caseCard').querySelectorAll('.drow.open').forEach(function(r){ r.classList.remove('open'); });
+}
+
+// http(s) link only — never render a javascript:/data: URL, and never invent a preview.
+function safeUrl(u){
+  const s=String(u==null?'':u).trim();
+  return /^https?:\/\//i.test(s) ? s : '';
+}
+
+async function openCase(caseUuid){
+  if(!caseUuid) return;
+  OPEN_CASE = caseUuid;
+  $('#caseCard').querySelectorAll('.drow[data-case]').forEach(function(r){
+    r.classList.toggle('open', r.getAttribute('data-case')===caseUuid);
+  });
+  $('#caseDetail').innerHTML='<div class="casepanel"><div class="rempty">Loading case…</div></div>';
+  let r;
+  try{ r = await fetch('/api/case?id='+encodeURIComponent(caseUuid),{headers:authHeaders()}); }
+  catch(e){ $('#caseDetail').innerHTML='<div class="casepanel"><div class="rempty">⚠ Could not reach the server.</div></div>'; return; }
+  if(respAuthFail(r)){ closeCaseDetail(); return; }
+  if(r.status===404){ $('#caseDetail').innerHTML='<div class="casepanel"><div class="rempty">Case not found (it may have been removed).</div></div>'; return; }
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  if(!d.ok || !d.case){ $('#caseDetail').innerHTML='<div class="casepanel"><div class="rempty">⚠ '+esc((d&&d.error)||'could not load case')+'</div></div>'; return; }
+  renderCaseDetail(d.case, d.evidence||[], d.geotraces||[]);
+}
+
+function renderCaseDetail(c, evidence, geotraces){
+  const uuid=esc(c.case_uuid||'');
+  const status=esc(c.status||'open');
+  const head='<div class="ctop"><h3>'+esc(c.summary||c.subject_ref||c.case_uuid||'Case')+'</h3>'
+    + '<button class="cclose" id="caseClose">Close ✕</button></div>'
+    + '<div class="cmeta">'+esc(c.case_type||'case')+' · status '+status
+    +   ' · visibility '+esc(c.visibility||'restricted')
+    +   ' · liaison '+esc(c.family_liaison||'unassigned')
+    +   ' · commander '+esc(c.incident_commander||'unassigned')
+    +   ' · analyst '+esc(c.analyst_owner||'unassigned')
+    +   (c.subject_ref?(' · ref '+esc(c.subject_ref)):'')
+    +   '<br>case id '+uuid+(c.created_at?(' · opened '+esc(c.created_at)):'')+'</div>';
+
+  // ---- Evidence gallery ----
+  let evHtml;
+  if(!evidence.length){
+    evHtml='<div class="rempty">No evidence attached to this case yet.</div>';
+  } else {
+    evHtml=evidence.map(function(e){
+      const kindRaw=String(e.evidence_type||'note');
+      const kind=slug(kindRaw)||'note';
+      const kindLabel=esc(kindRaw||'note');
+      const title=esc(e.title||e.evidence_type||'evidence');
+      const summary=e.public_summary||e.notes||'';
+      const sumHtml=summary?'<div class="evsum">'+esc(summary)+'</div>':'';
+      const hash=String(e.custody_hash||'');
+      const hashChip=hash?'<span class="chip hash" title="custody hash '+esc(hash)+'">⛓ '+esc(hash.slice(0,12))+'…</span>':'<span class="chip">no custody hash</span>';
+      // Storage status: a real raw file exists only if the row carries an http(s) object_url.
+      // Evidence rows have no object_url column today, so the honest default is "metadata only".
+      const url=safeUrl(e.object_url);
+      const storeRaw=String(e.storage||'').trim();
+      let storeChip,linkHtml='';
+      if(url){
+        storeChip='<span class="chip store" title="raw file in object storage">▣ uploaded'+(storeRaw?(' · '+esc(storeRaw)):' to R2')+'</span>';
+        linkHtml='<a class="evlink" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">Open raw file ↗</a>';
+      } else {
+        storeChip='<span class="chip nostore" title="no raw file is stored on the server">⚠ metadata only — no raw file (R2 not configured)</span>';
+      }
+      const statusChip=e.status?'<span class="chip">'+esc(String(e.status).replace(/_/g,' '))+'</span>':'';
+      const restChip=e.restricted_level?'<span class="chip">'+esc(e.restricted_level)+'</span>':'';
+      const srcChip=e.source_label?'<span class="chip">src '+esc(e.source_label)+'</span>':'';
+      const when=e.created_at?'<span class="chip time">'+esc(e.created_at)+'</span>':'';
+      return '<div class="evcard '+kind+'">'
+        + '<div class="et"><span class="ettl">'+title+'</span><span class="kind '+kind+'">'+kindLabel+'</span></div>'
+        + sumHtml
+        + '<div class="evrow">'+hashChip+statusChip+storeChip+restChip+srcChip+when+'</div>'
+        + linkHtml
+        + '</div>';
+    }).join('');
+  }
+
+  // ---- GeoTrace annotations (analyst probability notes — NOT an exact locator) ----
+  let gtHtml;
+  if(!geotraces.length){
+    gtHtml='<div class="rempty">No GeoTrace annotations yet.</div>';
+  } else {
+    gtHtml=geotraces.map(function(g){
+      const confRaw=String(g.confidence||'low');
+      const conf=slug(confRaw)||'low';
+      const land=esc(g.area_label||'unlabelled area');
+      const hasLL=(g.lat!=null && g.lng!=null && g.lat!=='' && g.lng!=='');
+      const coord=hasLL?('~'+esc(Number(g.lat).toFixed(3))+', '+esc(Number(g.lng).toFixed(3))):'no coordinates';
+      const radius=(g.radius_km!=null&&g.radius_km!=='')?(' · radius '+esc(g.radius_km)+' km'):'';
+      const meta='confidence '+esc(confRaw)+' · '+esc(g.method||'analyst_annotation')
+        +' · '+coord+radius
+        +(g.actor?(' · by '+esc(g.actor)):'')
+        +(g.created_at?(' · '+esc(g.created_at)):'');
+      const note=g.notes?'<div class="gtnote">'+esc(g.notes)+'</div>':'';
+      return '<div class="gtcard">'
+        + '<div class="gth"><span class="gtland">📍 '+land+'</span><span class="conf '+conf+'">'+esc(confRaw)+'</span></div>'
+        + '<div class="gtmeta">'+meta+'</div>'
+        + note
+        + '</div>';
+    }).join('');
+  }
+
+  // ---- Operator forms: add note-evidence + add GeoTrace ----
+  const evForm='<div class="evform">'
+    + '<div class="ff">'
+    +   '<div class="fr"><label for="evTitle">Note title</label><input id="evTitle" type="text" maxlength="200" placeholder="e.g. Operator triage note" /></div>'
+    +   '<div class="fr"><label for="evNotes">Note (restricted)</label><textarea id="evNotes" maxlength="2000" placeholder="What this evidence shows / triage assessment…"></textarea></div>'
+    +   '<div><label for="evHash">Custody hash (optional)</label><input id="evHash" type="text" maxlength="128" placeholder="sha256…" /></div>'
+    +   '<div><label for="evSummary">Public summary (redacted, optional)</label><input id="evSummary" type="text" maxlength="500" placeholder="Safe one-line summary" /></div>'
+    + '</div>'
+    + '<button class="submit" id="evAdd">＋ Attach note-evidence</button>'
+    + '<div class="brightline">Note-evidence only — no raw media is uploaded here. The public summary is the only field exposed to the redacted public projection; the note stays restricted to operators.</div>'
+    + '</div>';
+
+  const gtForm='<div class="evform">'
+    + '<div class="ff">'
+    +   '<div class="fr"><label for="gtLand">Landmark / area label</label><input id="gtLand" type="text" maxlength="200" placeholder="e.g. forest track north of Kankara" /></div>'
+    +   '<div><label for="gtConf">Confidence</label><select id="gtConf"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></div>'
+    +   '<div><label for="gtRadius">Radius (km)</label><input id="gtRadius" type="number" step="0.1" min="0" placeholder="e.g. 5" /></div>'
+    +   '<div><label for="gtLat">Lat (optional)</label><input id="gtLat" type="number" step="0.00001" placeholder="9.123" /></div>'
+    +   '<div><label for="gtLng">Lng (optional)</label><input id="gtLng" type="number" step="0.00001" placeholder="7.456" /></div>'
+    +   '<div class="fr"><label for="gtNotes">Analyst note</label><textarea id="gtNotes" maxlength="2000" placeholder="Why this area / what the probability is based on…"></textarea></div>'
+    + '</div>'
+    + '<button class="submit" id="gtAdd">＋ Add GeoTrace</button>'
+    + '<div class="brightline">GeoTrace is a restricted analyst probability aid, never an exact locator. Stored restricted; not published to the public surface.</div>'
+    + '</div>';
+
+  $('#caseDetail').innerHTML='<div class="casepanel">'
+    + head
+    + '<div class="subhead">Evidence <span class="sc">'+evidence.length+' item(s)</span></div>'
+    + evHtml
+    + '<div class="subhead">Attach note-evidence</div>'
+    + evForm
+    + '<div class="subhead">GeoTrace annotations <span class="sc">'+geotraces.length+' note(s)</span></div>'
+    + gtHtml
+    + '<div class="subhead">Add GeoTrace</div>'
+    + gtForm
+    + '</div>';
+
+  $('#caseClose').addEventListener('click', closeCaseDetail);
+  $('#evAdd').addEventListener('click', function(){ addEvidenceNote(uuid); });
+  $('#gtAdd').addEventListener('click', function(){ addGeotrace(uuid); });
+}
+
+async function addEvidenceNote(caseUuid){
+  if(!caseUuid) return;
+  const title=$('#evTitle').value.trim();
+  const notes=$('#evNotes').value.trim();
+  if(!title && !notes){ toast('⚠ Add a title or note'); return; }
+  const btn=$('#evAdd'); btn.disabled=true; const old=btn.textContent; btn.textContent='Attaching…';
+  const payload={case_uuid:caseUuid, evidence_type:'note', title:title,
+    notes:notes, custody_hash:$('#evHash').value.trim(),
+    public_summary:$('#evSummary').value.trim()};
+  let res;
+  try{ res = await fetch('/api/evidence',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify(payload)}); }
+  catch(e){ toast('⚠ Network error'); btn.disabled=false; btn.textContent=old; return; }
+  if(respAuthFail(res)){ toast('⚠ Operator sign-in required'); return; }
+  let j={}; try{ j = await res.json(); }catch(e){ j={}; }
+  btn.disabled=false; btn.textContent=old;
+  if(j.ok){ toast('✓ Note-evidence attached'); openCase(caseUuid); }
+  else toast('⚠ '+(j.error||'could not attach evidence'));
+}
+
+async function addGeotrace(caseUuid){
+  if(!caseUuid) return;
+  const land=$('#gtLand').value.trim();
+  const notes=$('#gtNotes').value.trim();
+  if(!land && !notes){ toast('⚠ Add a landmark or note'); return; }
+  const btn=$('#gtAdd'); btn.disabled=true; const old=btn.textContent; btn.textContent='Adding…';
+  const payload={case_uuid:caseUuid, confidence:$('#gtConf').value,
+    area_label:land, notes:notes,
+    lat:$('#gtLat').value.trim(), lng:$('#gtLng').value.trim(), radius_km:$('#gtRadius').value.trim()};
+  let res;
+  try{ res = await fetch('/api/geotrace',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify(payload)}); }
+  catch(e){ toast('⚠ Network error'); btn.disabled=false; btn.textContent=old; return; }
+  if(respAuthFail(res)){ toast('⚠ Operator sign-in required'); return; }
+  let j={}; try{ j = await res.json(); }catch(e){ j={}; }
+  btn.disabled=false; btn.textContent=old;
+  if(j.ok){ toast('✓ GeoTrace added'); openCase(caseUuid); }
+  else toast('⚠ '+(j.error||'could not add geotrace'));
 }
 
 // ---- Live alerts: cancel / expire -----------------------------------------------
