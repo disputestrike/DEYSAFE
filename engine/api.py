@@ -470,7 +470,53 @@ class DeySafeHandler(BaseHTTPRequestHandler):
             deliveries = db.get_sos_deliveries(ev["id"])
             return self._json(public_sos_view(ev, deliveries))
 
-        self.send_error(404)
+        self._serve_static(u.path)
+
+    def _serve_static(self, path):
+        """Serve static files from the app/ directory.
+
+        Maps request paths to files under APP_DIR:
+          /            -> index.html
+          /favicon.ico -> icon.svg
+          /review.html -> review.html
+          /<name>      -> <name>  (if it exists in app/)
+
+        Responds with the correct Content-Type from CTYPES, or falls back to
+        application/octet-stream. Sends 404 if the resolved file does not exist.
+        """
+        # Resolve the request path to a filename inside app/.
+        if path == "/" or path == "":
+            filename = "index.html"
+        elif path == "/favicon.ico":
+            filename = "icon.svg"
+        else:
+            # Strip the leading slash; reject any path traversal attempts.
+            filename = path.lstrip("/")
+            if "/" in filename or filename.startswith("."):
+                self.send_error(404)
+                return
+
+        filepath = os.path.join(APP_DIR, filename)
+        if not os.path.isfile(filepath):
+            self.send_error(404)
+            return
+
+        ext = os.path.splitext(filename)[1].lower()
+        content_type = CTYPES.get(ext, "application/octet-stream")
+
+        try:
+            with open(filepath, "rb") as f:
+                data = f.read()
+        except OSError:
+            self.send_error(500)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
