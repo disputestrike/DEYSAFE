@@ -102,6 +102,18 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 
 ---
 
+### H. Product priority layer (Journey Guard / SHIELD growth)
+| Feature | Source | Where it lives | Status | Validation | Result |
+|---|---|---|---|---|---|
+| Journey Guard trip sessions, check-ins, anomaly/overdue flags, explicit exact-location consent | user 8 priorities | `engine/safety.py`, `engine/db.py`, `/api/journey/start`, `/api/journey/ping`, `/api/journey`, `/api/journeys`, `app/index.html`, `app/review.html` | built | `validate_product.py` Journey Guard section | PASS when gate green |
+| Phone Safety Readiness checklist (Find My/Find Hub, trusted circle, silent SOS, SMS fallback, wearable, offline pack) | user product gaps | `/api/readiness`, `db.safety_readiness`, WakaSafe panel | built | `validate_product.py` readiness section | PASS when gate green |
+| SHIELD case workspace with family liaison, incident commander, analyst owner, restricted updates | user weak ops gaps | `shield_cases`, `case_updates`, `/api/cases`, `/api/case-update`, review console panel | built | `validate_product.py` case section | PASS when gate green |
+| Restricted evidence vault + GeoTrace annotations (probability zones, not exact locator claims) | user danger controls | `evidence_items`, `geotrace_annotations`, `/api/evidence`, `/api/evidence-public`, `/api/geotrace` | built | `validate_product.py` evidence/GeoTrace section | PASS when gate green |
+| Safety Points + Sentinel Network (public exposes only vetted active points) | user network ideas | `safety_points`, `sentinels`, `/api/safety-points`, `/api/sentinels` | built | `validate_product.py` Safety Points/Sentinel section | PASS when gate green |
+| Guardian Mesh software records (consent-scoped devices) | user mesh idea | `mesh_devices`, `mesh_relays`, `/api/mesh/devices`, `/api/mesh/relays` | built (registry) | `validate_product.py` mesh section | PASS when gate green |
+| Hardware tracker registry (stable IDs hashed; public projection omits stable hash) | user DeySafe Tag / tracker idea | `tracker_devices`, `/api/trackers` | built (registry) | `validate_product.py` tracker section | PASS when gate green |
+| Ops agreements and drills for responder handoff, drills, escalation coverage | user weak ops gaps | `ops_agreements`, `ops_drills`, `/api/ops-agreements`, `/api/ops-drills`, `/api/ops-readiness` | built | `validate_product.py` ops section | PASS when gate green |
+
 ## 2. Compliance & safety bright-lines (QC gate)
 | Requirement | Status | Evidence |
 |---|---|---|
@@ -134,5 +146,7 @@ Production stack (Next.js + Supabase/PostGIS + Vercel) · **house-level GPS prec
 2. **Chaos** — bad/empty/huge/malformed/injection inputs validate, never crash (section B). ✅ 16/16
 3. **Functional** — corroboration raises level, sighting tightens search, verify fires alert, typed off-gazetteer report maps (section C). ✅ 4/4
 4. **Visual/manual** — open `http://localhost:4500`; the in-tool screenshot can't capture the live Leaflet map (tool limitation), verified via served HTML + DOM.
+
+5. **Product priorities** - readiness, Journey Guard, SHIELD cases, restricted evidence/GeoTrace, Safety Points/Sentinel, mesh/tracker registry, agreements/drills (`validate_product.py`).
 
 **To accept a new feature:** add its row here, give it a validation in `validate.py`, and it must PASS.

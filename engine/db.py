@@ -12,6 +12,7 @@ import os
 import sys
 import sqlite3
 import hashlib
+import json
 import datetime
 
 try:
@@ -31,6 +32,13 @@ try:
     import reputation
 except Exception:  # pragma: no cover - keep db importable even if reputation.py absent
     reputation = None
+
+try:
+    # Product-safety layer: Journey Guard / readiness / case workspace / evidence /
+    # safety network / mesh / tracker / ops-readiness schema + pure helpers.
+    import safety
+except Exception:  # pragma: no cover - keep db importable even if safety.py absent
+    safety = None
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 REQUIRE_POSTGRES = os.environ.get("DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() in (
@@ -402,6 +410,15 @@ class DB:
                 self._create_table(sdl, pdl)
             except Exception:
                 pass
+        # Product-safety tables: Journey Guard, readiness, SHIELD cases,
+        # evidence/GeoTrace, Safety Points/Sentinels, mesh relays, trackers,
+        # agreements, and drills. These are also idempotent for SQLite/Postgres.
+        if safety is not None:
+            for _name, (sdl, pdl) in getattr(safety, "SAFETY_TABLES", {}).items():
+                try:
+                    self._create_table(sdl, pdl)
+                except Exception:
+                    pass
         if not self.pg:
             self.conn.commit()
 
@@ -1043,3 +1060,383 @@ class DB:
 
     def source_health(self, limit=200):
         return self._all("SELECT * FROM source_health ORDER BY source LIMIT %d" % int(limit))
+
+    # ======================================================================
+    # PRODUCT-SAFETY ACCESSORS
+    # Journey Guard / readiness / SHIELD cases / restricted evidence /
+    # Safety Points + Sentinel Network / Guardian Mesh / trackers / ops gaps.
+    # ======================================================================
+
+    def _uid(self):
+        try:
+            return security.new_uuid()
+        except Exception:
+            return _fallback_uuid()
+
+    @staticmethod
+    def _bool(v):
+        return 1 if (safety.as_bool(v) if safety else bool(v)) else 0
+
+    # --- Phone Safety Readiness --------------------------------------------
+    def upsert_readiness(self, owner_token, data):
+        owner = (owner_token or "").strip()
+        if not owner:
+            raise ValueError("owner_token required")
+        trusted = 0
+        try:
+            trusted = len(self.trusted_for(owner))
+        except Exception:
+            trusted = 0
+        checks, score, gaps = safety.readiness_from(data or {}, trusted) if safety else ({}, 0, [])
+        now = now_iso()
+        row = self._one("SELECT owner_token FROM safety_readiness WHERE owner_token=?", (owner,))
+        vals = {
+            "platform": (data.get("platform") or "").strip() if isinstance(data, dict) else "",
+            "findmy_enabled": self._bool(checks.get("findmy_enabled")),
+            "findhub_enabled": self._bool(checks.get("findhub_enabled")),
+            "trusted_contacts": int(checks.get("trusted_contacts") or 0),
+            "silent_sos": self._bool(checks.get("silent_sos")),
+            "sms_fallback": self._bool(checks.get("sms_fallback")),
+            "wearable": self._bool(checks.get("wearable")),
+            "offline_pack": self._bool(checks.get("offline_pack")),
+            "readiness_score": int(score),
+            "gaps": json.dumps(gaps),
+            "notes": (data.get("notes") or "").strip()[:500] if isinstance(data, dict) else "",
+        }
+        if row:
+            self._run(
+                "UPDATE safety_readiness SET updated_at=?, platform=?, findmy_enabled=?, findhub_enabled=?,"
+                " trusted_contacts=?, silent_sos=?, sms_fallback=?, wearable=?, offline_pack=?,"
+                " readiness_score=?, gaps=?, notes=? WHERE owner_token=?",
+                (now, vals["platform"], vals["findmy_enabled"], vals["findhub_enabled"],
+                 vals["trusted_contacts"], vals["silent_sos"], vals["sms_fallback"],
+                 vals["wearable"], vals["offline_pack"], vals["readiness_score"],
+                 vals["gaps"], vals["notes"], owner))
+        else:
+            self._run(
+                "INSERT INTO safety_readiness (owner_token, created_at, updated_at, platform,"
+                " findmy_enabled, findhub_enabled, trusted_contacts, silent_sos, sms_fallback,"
+                " wearable, offline_pack, readiness_score, gaps, notes)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (owner, now, now, vals["platform"], vals["findmy_enabled"],
+                 vals["findhub_enabled"], vals["trusted_contacts"], vals["silent_sos"],
+                 vals["sms_fallback"], vals["wearable"], vals["offline_pack"],
+                 vals["readiness_score"], vals["gaps"], vals["notes"]))
+        return self.readiness_for(owner)
+
+    def readiness_for(self, owner_token):
+        row = self._one("SELECT * FROM safety_readiness WHERE owner_token=?", ((owner_token or "").strip(),))
+        if not row:
+            return None
+        try:
+            row["gaps"] = json.loads(row.get("gaps") or "[]")
+        except Exception:
+            row["gaps"] = []
+        return row
+
+    # --- Journey Guard ------------------------------------------------------
+    def create_journey(self, d):
+        jid = d.get("journey_uuid") or self._uid()
+        existing = self._one("SELECT * FROM journey_sessions WHERE journey_uuid=?", (jid,))
+        if existing:
+            return existing
+        now = now_iso()
+        ref = d.get("handoff_ref") or self.new_ref("JG")
+        self._run(
+            "INSERT INTO journey_sessions (journey_uuid, owner_token, created_at, updated_at,"
+            " started_at, expected_arrival, from_place, to_place, from_lat, from_lng,"
+            " to_lat, to_lng, mode, state, risk_level, anomaly_level, anomaly_reason,"
+            " handoff_ref, share_consent) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (jid, (d.get("owner_token") or "").strip(), now, now, d.get("started_at") or now,
+             d.get("expected_arrival"), d.get("from_place") or "", d.get("to_place") or "",
+             d.get("from_lat"), d.get("from_lng"), d.get("to_lat"), d.get("to_lng"),
+             d.get("mode") or "journey_guard", d.get("state") or "active",
+             d.get("risk_level") or "GREEN", d.get("anomaly_level") or "normal",
+             d.get("anomaly_reason") or "", ref, self._bool(d.get("share_consent"))))
+        return self.journey_by_uuid(jid)
+
+    def journey_by_uuid(self, journey_uuid):
+        if not journey_uuid:
+            return None
+        return self._one("SELECT * FROM journey_sessions WHERE journey_uuid=?", (journey_uuid,))
+
+    def list_journeys(self, limit=200):
+        return self._all("SELECT * FROM journey_sessions ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def journey_events(self, journey_uuid, limit=100):
+        return self._all("SELECT * FROM journey_events WHERE journey_uuid=? ORDER BY id DESC LIMIT %d" % int(limit),
+                         (journey_uuid,))
+
+    def record_journey_event(self, journey_uuid, d):
+        row = self.journey_by_uuid(journey_uuid)
+        if not row:
+            return None
+        now = now_iso()
+        level, reason, state = safety.assess_journey(row, d) if safety else ("normal", "", row.get("state") or "active")
+        etype = (d.get("event_type") or d.get("type") or "checkin").strip().lower()
+        lat = d.get("lat")
+        lng = d.get("lng")
+        try:
+            lat = float(lat) if lat is not None else None
+            lng = float(lng) if lng is not None else None
+        except Exception:
+            lat = lng = None
+        self._run(
+            "INSERT INTO journey_events (journey_uuid, created_at, event_type, state, lat, lng,"
+            " speed, heading, battery, network, note, anomaly_level, anomaly_reason)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (journey_uuid, now, etype, state, lat, lng, d.get("speed"), d.get("heading"),
+             d.get("battery"), (d.get("network") or "").strip(), (d.get("note") or "").strip()[:500],
+             level, reason))
+        sets = ["updated_at=?", "last_packet_at=?", "state=?", "anomaly_level=?", "anomaly_reason=?"]
+        params = [now, now, state, level, reason]
+        if etype in ("checkin", "arrived", "manual_checkin"):
+            sets.append("last_checkin_at=?")
+            params.append(now)
+        for col, val in (("last_lat", lat), ("last_lng", lng), ("last_speed", d.get("speed")),
+                         ("last_heading", d.get("heading")), ("last_battery", d.get("battery")),
+                         ("last_network", (d.get("network") or "").strip())):
+            if val is not None and val != "":
+                sets.append(col + "=?")
+                params.append(val)
+        params.append(journey_uuid)
+        self._run("UPDATE journey_sessions SET %s WHERE journey_uuid=?" % ", ".join(sets), tuple(params))
+        return self.journey_by_uuid(journey_uuid)
+
+    def close_journey(self, journey_uuid, state="arrived"):
+        self._run("UPDATE journey_sessions SET state=?, updated_at=?, anomaly_level=?, anomaly_reason=? WHERE journey_uuid=?",
+                  (state, now_iso(), "normal", "", journey_uuid))
+        return self.journey_by_uuid(journey_uuid)
+
+    # --- SHIELD case workspace ---------------------------------------------
+    def create_shield_case(self, d):
+        cid = d.get("case_uuid") or self._uid()
+        now = now_iso()
+        existing = self._one("SELECT * FROM shield_cases WHERE case_uuid=?", (cid,))
+        if existing:
+            return existing
+        self._run(
+            "INSERT INTO shield_cases (case_uuid, created_at, updated_at, last_update_at, case_type,"
+            " subject_ref, status, visibility, family_liaison, incident_commander, analyst_owner,"
+            " summary, public_note, requires_second_approval) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (cid, now, now, now, (d.get("case_type") or "incident").strip(),
+             (d.get("subject_ref") or "").strip(), (d.get("status") or "open").strip(),
+             (d.get("visibility") or "restricted").strip(),
+             (d.get("family_liaison") or "").strip(), (d.get("incident_commander") or "").strip(),
+             (d.get("analyst_owner") or "").strip(), (d.get("summary") or "").strip()[:1000],
+             (d.get("public_note") or "").strip()[:500],
+             self._bool(d.get("requires_second_approval"))))
+        return self.shield_case(cid)
+
+    def shield_case(self, case_uuid):
+        if not case_uuid:
+            return None
+        return self._one("SELECT * FROM shield_cases WHERE case_uuid=?", (case_uuid,))
+
+    def shield_cases(self, limit=200):
+        return self._all("SELECT * FROM shield_cases ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def add_case_update(self, case_uuid, d):
+        if not self.shield_case(case_uuid):
+            return None
+        now = now_iso()
+        self._run(
+            "INSERT INTO case_updates (case_uuid, created_at, actor, visibility, body, redacted)"
+            " VALUES (?,?,?,?,?,?)",
+            (case_uuid, now, (d.get("actor") or "").strip(), (d.get("visibility") or "restricted").strip(),
+             (d.get("body") or d.get("note") or "").strip()[:2000], self._bool(d.get("redacted"))))
+        self._run("UPDATE shield_cases SET updated_at=?, last_update_at=? WHERE case_uuid=?",
+                  (now, now, case_uuid))
+        return self.case_updates(case_uuid)
+
+    def case_updates(self, case_uuid, limit=100):
+        return self._all("SELECT * FROM case_updates WHERE case_uuid=? ORDER BY id DESC LIMIT %d" % int(limit),
+                         (case_uuid,))
+
+    # --- Restricted evidence + GeoTrace -------------------------------------
+    def create_evidence(self, d):
+        eid = d.get("evidence_uuid") or self._uid()
+        now = now_iso()
+        prev = ""
+        try:
+            row = self._one("SELECT custody_hash FROM evidence_items ORDER BY id DESC LIMIT 1")
+            prev = (row or {}).get("custody_hash") or ""
+        except Exception:
+            prev = ""
+        payload = {
+            "evidence_uuid": eid,
+            "case_uuid": d.get("case_uuid") or "",
+            "title": d.get("title") or "",
+            "source_label": d.get("source_label") or "",
+            "created_at": now,
+        }
+        custody = security.audit_hash(prev, payload) if security else _fallback_hash(prev, payload)
+        self._run(
+            "INSERT INTO evidence_items (evidence_uuid, case_uuid, created_at, updated_at, evidence_type,"
+            " title, source_label, custody_hash, prev_hash, restricted_level, status, lat, lng,"
+            " captured_at, notes, public_summary) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (eid, d.get("case_uuid") or "", now, now, (d.get("evidence_type") or "note").strip(),
+             (d.get("title") or "").strip()[:200], (d.get("source_label") or "").strip()[:120],
+             custody, prev, (d.get("restricted_level") or "restricted").strip(),
+             (d.get("status") or "received").strip(), d.get("lat"), d.get("lng"),
+             d.get("captured_at"), (d.get("notes") or "").strip()[:2000],
+             (d.get("public_summary") or "").strip()[:500]))
+        return self.evidence_by_uuid(eid)
+
+    def evidence_by_uuid(self, evidence_uuid):
+        return self._one("SELECT * FROM evidence_items WHERE evidence_uuid=?", (evidence_uuid,))
+
+    def evidence_for_case(self, case_uuid, limit=100):
+        return self._all("SELECT * FROM evidence_items WHERE case_uuid=? ORDER BY id DESC LIMIT %d" % int(limit),
+                         (case_uuid,))
+
+    def all_evidence(self, limit=200):
+        return self._all("SELECT * FROM evidence_items ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def create_geotrace(self, d):
+        tid = d.get("trace_uuid") or self._uid()
+        self._run(
+            "INSERT INTO geotrace_annotations (trace_uuid, evidence_uuid, case_uuid, created_at,"
+            " actor, confidence, method, area_label, lat, lng, radius_km, notes, restricted)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (tid, d.get("evidence_uuid") or "", d.get("case_uuid") or "", now_iso(),
+             (d.get("actor") or "").strip(), (d.get("confidence") or "low").strip(),
+             (d.get("method") or "analyst_annotation").strip(),
+             (d.get("area_label") or "").strip()[:200], d.get("lat"), d.get("lng"),
+             d.get("radius_km"), (d.get("notes") or "").strip()[:2000],
+             self._bool(True if d.get("restricted") is None else d.get("restricted"))))
+        return self._one("SELECT * FROM geotrace_annotations WHERE trace_uuid=?", (tid,))
+
+    def geotraces_for_case(self, case_uuid, limit=100):
+        return self._all("SELECT * FROM geotrace_annotations WHERE case_uuid=? ORDER BY id DESC LIMIT %d" % int(limit),
+                         (case_uuid,))
+
+    # --- Safety Points + Sentinel Network -----------------------------------
+    def create_safety_point(self, d):
+        pid = d.get("point_uuid") or self._uid()
+        now = now_iso()
+        self._run(
+            "INSERT INTO safety_points (point_uuid, created_at, updated_at, name, point_type, state,"
+            " lga, address, lat, lng, contact_channel, contact_address, vetted, active,"
+            " verified_by, last_verified_at, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (pid, now, now, (d.get("name") or "").strip(), (d.get("point_type") or "safe_point").strip(),
+             (d.get("state") or "").strip(), (d.get("lga") or "").strip(),
+             (d.get("address") or "").strip(), d.get("lat"), d.get("lng"),
+             (d.get("contact_channel") or "").strip(), (d.get("contact_address") or "").strip(),
+             self._bool(d.get("vetted")), self._bool(True if d.get("active") is None else d.get("active")),
+             (d.get("verified_by") or "").strip(), d.get("last_verified_at") or now,
+             (d.get("notes") or "").strip()[:1000]))
+        return self._one("SELECT * FROM safety_points WHERE point_uuid=?", (pid,))
+
+    def public_safety_points(self, limit=200):
+        return self._all("SELECT * FROM safety_points WHERE vetted=1 AND active=1 ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def all_safety_points(self, limit=500):
+        return self._all("SELECT * FROM safety_points ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def create_sentinel(self, d):
+        sid = d.get("sentinel_uuid") or self._uid()
+        now = now_iso()
+        self._run(
+            "INSERT INTO sentinels (sentinel_uuid, created_at, updated_at, name, org, role, state,"
+            " lga, trust_level, active, consent_revoked_at, channel, address, last_checkin_at, notes)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (sid, now, now, (d.get("name") or "").strip(), (d.get("org") or "").strip(),
+             (d.get("role") or "observer").strip(), (d.get("state") or "").strip(),
+             (d.get("lga") or "").strip(), (d.get("trust_level") or "pending").strip(),
+             self._bool(True if d.get("active") is None else d.get("active")),
+             d.get("consent_revoked_at"), (d.get("channel") or "").strip(),
+             (d.get("address") or "").strip(), d.get("last_checkin_at"),
+             (d.get("notes") or "").strip()[:1000]))
+        return self._one("SELECT * FROM sentinels WHERE sentinel_uuid=?", (sid,))
+
+    def sentinels(self, limit=500):
+        return self._all("SELECT * FROM sentinels ORDER BY id DESC LIMIT %d" % int(limit))
+
+    # --- Guardian Mesh + trackers ------------------------------------------
+    def create_mesh_device(self, d):
+        did = d.get("device_uuid") or self._uid()
+        now = now_iso()
+        self._run(
+            "INSERT INTO mesh_devices (device_uuid, owner_token, created_at, updated_at, device_label,"
+            " consent_scope, rotating_id, active, revoked_at, last_seen_at, notes)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (did, (d.get("owner_token") or "").strip(), now, now,
+             (d.get("device_label") or "").strip(), (d.get("consent_scope") or "trusted_circle").strip(),
+             (d.get("rotating_id") or "").strip(),
+             self._bool(True if d.get("active") is None else d.get("active")),
+             d.get("revoked_at"), d.get("last_seen_at"), (d.get("notes") or "").strip()[:1000]))
+        return self._one("SELECT * FROM mesh_devices WHERE device_uuid=?", (did,))
+
+    def mesh_devices(self, limit=500):
+        return self._all("SELECT * FROM mesh_devices ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def record_mesh_relay(self, d):
+        rid = d.get("relay_uuid") or self._uid()
+        self._run(
+            "INSERT INTO mesh_relays (relay_uuid, created_at, device_uuid, relay_type, rotating_id,"
+            " lat, lng, sig_status, accepted, reason) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (rid, now_iso(), d.get("device_uuid") or "", (d.get("relay_type") or "nearby").strip(),
+             (d.get("rotating_id") or "").strip(), d.get("lat"), d.get("lng"),
+             (d.get("sig_status") or "unsigned").strip(), self._bool(d.get("accepted")),
+             (d.get("reason") or "").strip()[:300]))
+        return self._one("SELECT * FROM mesh_relays WHERE relay_uuid=?", (rid,))
+
+    def mesh_relays(self, limit=500):
+        return self._all("SELECT * FROM mesh_relays ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def create_tracker(self, d):
+        tid = d.get("tracker_uuid") or self._uid()
+        stable = (d.get("stable_id") or d.get("stable_id_hash") or "").strip()
+        if stable and len(stable) != 64:
+            stable = hashlib.sha256(stable.encode("utf-8")).hexdigest()
+        now = now_iso()
+        self._run(
+            "INSERT INTO tracker_devices (tracker_uuid, created_at, updated_at, owner_ref, label,"
+            " tracker_type, stable_id_hash, rotating_id, consent_status, anti_stalking_notice,"
+            " active, revoked_at, last_seen_at, last_lat, last_lng, notes)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (tid, now, now, (d.get("owner_ref") or "").strip(), (d.get("label") or "").strip(),
+             (d.get("tracker_type") or "tag").strip(), stable, (d.get("rotating_id") or "").strip(),
+             (d.get("consent_status") or "active").strip(),
+             self._bool(True if d.get("anti_stalking_notice") is None else d.get("anti_stalking_notice")),
+             self._bool(True if d.get("active") is None else d.get("active")),
+             d.get("revoked_at"), d.get("last_seen_at"), d.get("last_lat"), d.get("last_lng"),
+             (d.get("notes") or "").strip()[:1000]))
+        return self._one("SELECT * FROM tracker_devices WHERE tracker_uuid=?", (tid,))
+
+    def trackers(self, limit=500):
+        return self._all("SELECT * FROM tracker_devices ORDER BY id DESC LIMIT %d" % int(limit))
+
+    # --- Operational weak-spot records --------------------------------------
+    def create_ops_agreement(self, d):
+        aid = d.get("agreement_uuid") or self._uid()
+        now = now_iso()
+        self._run(
+            "INSERT INTO ops_agreements (agreement_uuid, created_at, updated_at, partner_name,"
+            " partner_type, state, lga, scope, escalation_channel, status, signed_at, expires_at,"
+            " owner, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (aid, now, now, (d.get("partner_name") or "").strip(),
+             (d.get("partner_type") or "responder").strip(), (d.get("state") or "").strip(),
+             (d.get("lga") or "").strip(), (d.get("scope") or "").strip(),
+             (d.get("escalation_channel") or "").strip(), (d.get("status") or "draft").strip(),
+             d.get("signed_at"), d.get("expires_at"), (d.get("owner") or "").strip(),
+             (d.get("notes") or "").strip()[:1000]))
+        return self._one("SELECT * FROM ops_agreements WHERE agreement_uuid=?", (aid,))
+
+    def ops_agreements(self, limit=500):
+        return self._all("SELECT * FROM ops_agreements ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def create_ops_drill(self, d):
+        did = d.get("drill_uuid") or self._uid()
+        self._run(
+            "INSERT INTO ops_drills (drill_uuid, created_at, drill_type, state, lga, participants,"
+            " outcome, gaps, next_due_at, owner) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (did, now_iso(), (d.get("drill_type") or "tabletop").strip(),
+             (d.get("state") or "").strip(), (d.get("lga") or "").strip(),
+             (d.get("participants") or "").strip()[:1000], (d.get("outcome") or "").strip()[:1000],
+             (d.get("gaps") or "").strip()[:1000], d.get("next_due_at"), (d.get("owner") or "").strip()))
+        return self._one("SELECT * FROM ops_drills WHERE drill_uuid=?", (did,))
+
+    def ops_drills(self, limit=500):
+        return self._all("SELECT * FROM ops_drills ORDER BY id DESC LIMIT %d" % int(limit))

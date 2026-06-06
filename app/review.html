@@ -129,6 +129,18 @@
     <div id="tasks"></div>
   </div>
 
+  <div class="section" id="secJourneys">
+    <div class="shead"><h2>Journey Guard</h2><span class="cnt" id="jCnt">0</span>
+      <button class="rf" onclick="loadJourneys()">Refresh</button></div>
+    <div class="rcard" id="journeyCard"><div class="rempty">No active journeys yet.</div></div>
+  </div>
+
+  <div class="section" id="secCases">
+    <div class="shead"><h2>SHIELD cases</h2><span class="cnt" id="cCnt">0</span>
+      <button class="rf" onclick="loadCases()">Refresh</button></div>
+    <div class="rcard" id="caseCard"><div class="rempty">No SHIELD cases yet.</div></div>
+  </div>
+
   <div class="section" id="secAlerts">
     <div class="shead"><h2>📡 Live public alerts</h2><span class="cnt" id="aCnt">0</span>
       <button class="rf" onclick="loadAlerts()">⟳ Refresh</button></div>
@@ -151,6 +163,12 @@
     <div class="shead"><h2>Source reputation</h2><span class="cnt" id="rCnt">0</span>
       <button class="rf" onclick="loadReputation()">Refresh</button></div>
     <div class="rcard" id="repCard"><div class="rempty">No reporter reputation rows yet.</div></div>
+  </div>
+
+  <div class="section" id="secOpsReady">
+    <div class="shead"><h2>Ops readiness</h2><span class="cnt" id="orCnt">0</span>
+      <button class="rf" onclick="loadOpsReadiness()">Refresh</button></div>
+    <div class="rcard" id="opsReadyCard"><div class="rempty">No ops readiness data yet.</div></div>
   </div>
 </div>
 
@@ -187,7 +205,8 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
 // ---- Operator auth (AUTH-01/06) -------------------------------------------------
 const TOK_KEY = 'shield_op_token';
 const NAME_KEY = 'shield_op_name';
-function token(){ try{ return localStorage.getItem(TOK_KEY) || ''; }catch(e){ return ''; } }
+function queryToken(){try{return new URLSearchParams(location.search).get('token')||'';}catch(e){return '';}}
+function token(){ try{ return localStorage.getItem(TOK_KEY) || queryToken() || ''; }catch(e){ return queryToken() || ''; } }
 function setSession(tok, name){
   try{ localStorage.setItem(TOK_KEY, tok); if(name) localStorage.setItem(NAME_KEY, name); }catch(e){}
   renderWho();
@@ -359,12 +378,15 @@ function clearResponse(){
   TASKS=[]; ALERTS=[];
   $('#tasks').innerHTML=''; $('#tCnt').textContent='0';
   $('#alerts').innerHTML=''; $('#aCnt').textContent='0';
+  $('#journeyCard').innerHTML='<div class="rempty">No active journeys yet.</div>'; $('#jCnt').textContent='0';
+  $('#caseCard').innerHTML='<div class="rempty">No SHIELD cases yet.</div>'; $('#cCnt').textContent='0';
   $('#delivCard').innerHTML='<div class="rempty">No delivery receipts yet.</div>'; $('#dCnt').textContent='0';
   $('#opsCard').innerHTML='<div class="rempty">No source runs recorded yet.</div>'; $('#oCnt').textContent='0';
   $('#repCard').innerHTML='<div class="rempty">No reporter reputation rows yet.</div>'; $('#rCnt').textContent='0';
+  $('#opsReadyCard').innerHTML='<div class="rempty">No ops readiness data yet.</div>'; $('#orCnt').textContent='0';
 }
 
-function loadResponse(){ loadTasks(); loadAlerts(); loadDeliveries(); loadOps(); loadReputation(); }
+function loadResponse(){ loadTasks(); loadJourneys(); loadCases(); loadAlerts(); loadDeliveries(); loadOps(); loadReputation(); loadOpsReadiness(); }
 
 // ---- Responder tasks ------------------------------------------------------------
 async function loadTasks(){
@@ -426,6 +448,47 @@ async function ackTask(t, toState){
   let j={}; try{ j = await res.json(); }catch(e){ j={}; }
   if(j.ok){ toast('✓ Task → '+(j.state||toState)); loadTasks(); }
   else toast('⚠ '+(j.error||'ack failed'));
+}
+
+// ---- Journey Guard ---------------------------------------------------------------
+async function loadJourneys(){
+  let r;
+  try{ r = await fetch('/api/journeys',{headers:authHeaders()}); }
+  catch(e){ $('#journeyCard').innerHTML='<div class="rempty">Could not reach the server.</div>'; return; }
+  if(respAuthFail(r)) return;
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  const rows=d.journeys||[];
+  $('#jCnt').textContent=rows.length;
+  if(!rows.length){ $('#journeyCard').innerHTML='<div class="rempty">No active journeys yet.</div>'; return; }
+  $('#journeyCard').innerHTML=rows.map(function(j){
+    const state=slug(j.state||'active');
+    const detail='risk '+esc(j.risk_level||'GREEN')+' · '+esc(j.anomaly_level||'normal')
+      +(j.anomaly_reason?(' · '+esc(j.anomaly_reason)):'')
+      +(j.share_consent?' · exact sharing on':' · exact sharing off');
+    return '<div class="drow"><span class="ch">'+esc(j.handoff_ref||'journey')+'</span>'
+      + '<span class="addr">'+esc(j.from_place||'start')+' to '+esc(j.to_place||'destination')+' · '+detail+'</span>'
+      + '<span class="dstat '+(state==='arrived'?'ok':(j.anomaly_level==='normal'?'sim':'failed'))+'">'+esc(j.state||'active')+'</span></div>';
+  }).join('');
+}
+
+// ---- SHIELD cases ---------------------------------------------------------------
+async function loadCases(){
+  let r;
+  try{ r = await fetch('/api/cases',{headers:authHeaders()}); }
+  catch(e){ $('#caseCard').innerHTML='<div class="rempty">Could not reach the server.</div>'; return; }
+  if(respAuthFail(r)) return;
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  const rows=d.cases||[];
+  $('#cCnt').textContent=rows.length;
+  if(!rows.length){ $('#caseCard').innerHTML='<div class="rempty">No SHIELD cases yet.</div>'; return; }
+  $('#caseCard').innerHTML=rows.map(function(c){
+    const status=String(c.status||'open').toLowerCase();
+    const cls=(status==='closed'||status==='resolved')?'ok':'sim';
+    const owners='liaison '+esc(c.family_liaison||'unassigned')+' · commander '+esc(c.incident_commander||'unassigned');
+    return '<div class="drow"><span class="ch">'+esc(c.case_type||'case')+'</span>'
+      + '<span class="addr">'+esc(c.summary||c.subject_ref||c.case_uuid||'case')+' · '+owners+'</span>'
+      + '<span class="dstat '+cls+'">'+esc(c.status||'open')+'</span></div>';
+  }).join('');
 }
 
 // ---- Live alerts: cancel / expire -----------------------------------------------
@@ -565,6 +628,27 @@ async function loadReputation(){
     return '<div class="drow"><span class="ch">'+esc(band)+'</span>'
       + '<span class="addr">'+esc(x.reporter_key||'opaque reporter')+' · '+detail+'</span>'
       + '<span class="dstat '+cls+'">'+esc(band)+'</span></div>';
+  }).join('');
+}
+
+// ---- Ops readiness --------------------------------------------------------------
+async function loadOpsReadiness(){
+  let r;
+  try{ r = await fetch('/api/ops-readiness',{headers:authHeaders()}); }
+  catch(e){ $('#opsReadyCard').innerHTML='<div class="rempty">Could not reach the server.</div>'; return; }
+  if(respAuthFail(r)) return;
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  const o=d.ops_readiness||{};
+  const keys=['responders','sentinels','safety_points','agreements','drills','open_cases'];
+  const total=keys.reduce(function(n,k){return n+Number(o[k]||0);},0);
+  $('#orCnt').textContent=total;
+  $('#opsReadyCard').innerHTML=keys.map(function(k){
+    const val=Number(o[k]||0);
+    const label=k.replace(/_/g,' ');
+    const cls=val>0?'ok':'sim';
+    return '<div class="drow"><span class="ch">'+esc(label)+'</span>'
+      + '<span class="addr">tracked operational coverage item</span>'
+      + '<span class="dstat '+cls+'">'+esc(val)+'</span></div>';
   }).join('');
 }
 

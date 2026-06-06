@@ -164,6 +164,25 @@
       <button class="btn" onclick="checkRoute()">Check route</button>
       <div id="routeBox"></div>
       <p class="note">Corridor scan (not road routing): shows the worst risk level near a straight line between your start and end. It does not follow actual roads or detect every danger between them. Plan before you move.</p>
+      <h2 class="t" style="margin-top:22px">Journey Guard</h2>
+      <label class="f">Expected arrival</label><input id="jEta" type="datetime-local" />
+      <label class="silentrow"><input type="checkbox" id="jShare" /><span><b>Share exact location with SHIELD for this journey</b><br />Off by default. Check-ins still work without sending raw GPS.</span></label>
+      <div class="chips" style="grid-template-columns:1fr 1fr;margin-top:8px">
+        <button onclick="startJourneyGuard()">Start guard</button>
+        <button onclick="journeyCheckin()">Check in</button>
+      </div>
+      <button class="btn sec" onclick="journeyArrive()">Mark arrived</button>
+      <div id="journeyBox" class="case" style="display:none"></div>
+      <h2 class="t" style="margin-top:22px">Phone Safety Readiness</h2>
+      <div class="case">
+        <label class="silentrow"><input type="checkbox" id="rdFind" /><span>Apple Find My or Google Find Hub is enabled and shared with trusted people.</span></label>
+        <label class="silentrow"><input type="checkbox" id="rdSilent" checked /><span>Silent SOS has been tested on this phone.</span></label>
+        <label class="silentrow"><input type="checkbox" id="rdSms" /><span>SMS fallback is ready for low-data areas.</span></label>
+        <label class="silentrow"><input type="checkbox" id="rdWear" /><span>Wearable or tracker is paired for high-risk trips.</span></label>
+        <label class="silentrow"><input type="checkbox" id="rdOffline" /><span>Offline route notes and emergency contacts are saved.</span></label>
+        <button class="btn sec" onclick="saveReadiness()">Save readiness</button>
+        <div id="readyBox" class="kv"></div>
+      </div>
     </section>
 
     <section class="view pad" id="v-report">
@@ -648,6 +667,7 @@ function distToSeg(p,a,b){var s=Math.cos(Math.PI/180*((a[0]+b[0])/2));
   var dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy;var t=L2?((px-ax)*dx+(py-ay)*dy)/L2:0;t=Math.max(0,Math.min(1,t));
   var cx=ax+t*dx,cy=ay+t*dy;return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy))*111;}
 let LASTROUTE=null;
+let JOURNEY_ID=null;
 function sayRoute(){if(LASTROUTE&&LASTROUTE.say)speak(LASTROUTE.say);}
 async function checkRoute(){const a=$('#wFrom').value.trim(),b=$('#wTo').value.trim();
   $('#routeBox').innerHTML='<p class="note">Finding your route…</p>';
@@ -675,6 +695,78 @@ async function checkRoute(){const a=$('#wFrom').value.trim(),b=$('#wTo').value.t
     L.marker(A,{icon:missIcon('A')}).addTo(routeLayer).bindPopup(esc(a));
     L.marker(B,{icon:missIcon('B')}).addTo(routeLayer).bindPopup(esc(b));
     try{map.fitBounds([A,B],{padding:[60,60]});}catch(e){}}}
+function renderJourney(j){
+  var box=$('#journeyBox');if(!box)return;
+  if(!j){box.style.display='none';box.innerHTML='';return;}
+  box.style.display='block';
+  JOURNEY_ID=j.journey_uuid||j.id||JOURNEY_ID;
+  try{localStorage.setItem('ds_journey_id',JOURNEY_ID||'');}catch(e){}
+  var reason=j.anomaly_reason?(' - '+esc(j.anomaly_reason)):'';
+  box.innerHTML='<b>Journey '+esc(j.ref||JOURNEY_ID||'active')+'</b>'
+    +'<div class="kv"><b>Status:</b> '+esc(j.status||j.state||'active')+'</div>'
+    +'<div class="kv"><b>Route:</b> '+esc(j.from_place||'start')+' to '+esc(j.to_place||'destination')+'</div>'
+    +'<div class="kv"><b>Risk:</b> '+esc(j.risk_level||'GREEN')+' · '+esc(j.anomaly_level||'normal')+reason+'</div>'
+    +'<div class="kv"><b>Exact sharing:</b> '+(j.share_consent?'on for this journey':'off')+'</div>';
+}
+async function startJourneyGuard(){
+  var a=$('#wFrom').value.trim(),b=$('#wTo').value.trim();
+  if(!a||!b){toast('Add from and to first');return;}
+  var body={owner_token:SOS_OWNER,from:a,to:b,expected_arrival:$('#jEta').value||'',share_consent:!!($('#jShare')&&$('#jShare').checked)};
+  var r=await fetch('/api/journey/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+  if(!r.ok){toast(r.error||'Could not start guard');return;}
+  renderJourney(r.journey);toast('Journey Guard started');
+}
+function onePosition(cb){
+  if(!navigator.geolocation){cb(null);return;}
+  navigator.geolocation.getCurrentPosition(function(p){cb({lat:p.coords.latitude,lng:p.coords.longitude});},function(){cb(null);},{enableHighAccuracy:true,maximumAge:5000,timeout:10000});
+}
+async function journeyPing(kind){
+  if(!JOURNEY_ID){try{JOURNEY_ID=localStorage.getItem('ds_journey_id')||'';}catch(e){}}
+  if(!JOURNEY_ID){toast('Start Journey Guard first');return;}
+  var share=!!($('#jShare')&&$('#jShare').checked);
+  onePosition(async function(pos){
+    var body={journey_uuid:JOURNEY_ID,event_type:kind||'checkin',share_consent:share,battery:null,network:(navigator.onLine?'online':'offline')};
+    if(share&&pos){body.lat=pos.lat;body.lng=pos.lng;}
+    var r=await fetch('/api/journey/ping',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+    if(r.ok){renderJourney(r.journey);toast(kind==='arrived'?'Arrived marked':'Check-in saved');}
+    else toast(r.error||'Could not check in');
+  });
+}
+function journeyCheckin(){journeyPing('checkin');}
+async function journeyArrive(){
+  if(!JOURNEY_ID){try{JOURNEY_ID=localStorage.getItem('ds_journey_id')||'';}catch(e){}}
+  if(!JOURNEY_ID){toast('Start Journey Guard first');return;}
+  var r=await fetch('/api/journey/arrive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({journey_uuid:JOURNEY_ID})}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+  if(r.ok){renderJourney(r.journey);toast('Glad you arrived');}
+  else toast(r.error||'Could not mark arrived');
+}
+function renderReadiness(r){
+  var box=$('#readyBox');if(!box)return;
+  if(!r){box.innerHTML='Save the checklist before travel.';return;}
+  var gaps=(r.gaps||[]).slice(0,4).map(function(g){return '<div> - '+esc(g)+'</div>';}).join('');
+  box.innerHTML='<b>Score:</b> '+esc(r.readiness_score||0)+'/100'
+    +'<div><b>Trusted contacts:</b> '+esc(r.trusted_contacts||0)+'</div>'
+    +(gaps?'<div style="margin-top:6px">'+gaps+'</div>':'<div style="margin-top:6px">Ready for travel checks.</div>');
+}
+async function saveReadiness(){
+  var body={owner_token:SOS_OWNER,platform:navigator.platform||'',findmy_enabled:!!($('#rdFind')&&$('#rdFind').checked),
+    findhub_enabled:!!($('#rdFind')&&$('#rdFind').checked),trusted_contacts:tcLoad().length,
+    silent_sos:!!($('#rdSilent')&&$('#rdSilent').checked),sms_fallback:!!($('#rdSms')&&$('#rdSms').checked),
+    wearable:!!($('#rdWear')&&$('#rdWear').checked),offline_pack:!!($('#rdOffline')&&$('#rdOffline').checked)};
+  var r=await fetch('/api/readiness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+  if(r.ok){renderReadiness(r.readiness);toast('Readiness saved');}
+  else toast(r.error||'Could not save readiness');
+}
+async function loadReadiness(){
+  try{JOURNEY_ID=localStorage.getItem('ds_journey_id')||'';}catch(e){}
+  try{
+    var r=await fetch('/api/readiness?owner_token='+encodeURIComponent(SOS_OWNER)).then(x=>x.json());
+    if(r&&r.readiness)renderReadiness(r.readiness);else renderReadiness(null);
+  }catch(e){renderReadiness(null);}
+  if(JOURNEY_ID){
+    try{var j=await fetch('/api/journey?id='+encodeURIComponent(JOURNEY_ID)).then(x=>x.json());if(j&&j.journey)renderJourney(j.journey);}catch(e){}
+  }
+}
 async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').focus();return;}
   const place=$('#rPlace').value;
   const r=await postOrQueue('/api/report',{type:window.RTYPE,place:place,description:d});
@@ -813,7 +905,7 @@ $('#areaSelect').onchange=function(){loadLevel(true);};
 window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back online — sending anything saved on your device…');flushOutbox();});
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 
-(async function(){initMap();checkDemo();renderTrusted();renderSosButtons();await loadPlaces();await loadLevel();await loadData();
+(async function(){initMap();checkDemo();renderTrusted();renderSosButtons();await loadPlaces();await loadLevel();await loadData();await loadReadiness();
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();flushOutbox(); // send anything saved on a previous offline visit
   setTimeout(()=>map.invalidateSize(),120);

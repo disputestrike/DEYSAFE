@@ -47,6 +47,7 @@ import terrain     # FIND-02: terrain-aware FindMe search radius
 import reputation  # ABU-03/04/11: source reputation + coordinated-burst quarantine
 import beaconsign  # BLE-01: signed rotating beacon envelope (HMAC + replay guard)
 import scheduler   # DATA-01: periodic ingest worker (default OFF; started from main())
+import safety      # Product-safety layer: Journey Guard/readiness/cases/evidence/network
 
 # --- Phase 0 config ----------------------------------------------------------
 # Operator auth (AUTH-01/06). Two ways to enable a locked posture, both fail-OPEN
@@ -209,6 +210,68 @@ def public_sos_view(ev, deliveries=None):
         "deliveries": {"total": len(dlist), "sent": sent},
     }
     return out
+
+
+def _float_or_none(v):
+    try:
+        if v is None or v == "":
+            return None
+        return float(v)
+    except Exception:
+        return None
+
+
+def public_journey_view(row):
+    """Owner-facing Journey Guard projection.
+
+    A journey id is not an operator credential, so this view avoids contact data
+    and raw live coordinates. It exposes status, route labels, risk, and whether
+    explicit location sharing was enabled.
+    """
+    if not row:
+        return None
+    return {
+        "id": row.get("journey_uuid"),
+        "journey_uuid": row.get("journey_uuid"),
+        "ref": row.get("handoff_ref"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "started_at": row.get("started_at"),
+        "expected_arrival": row.get("expected_arrival"),
+        "from_place": row.get("from_place"),
+        "to_place": row.get("to_place"),
+        "state": row.get("state"),
+        "status": row.get("state"),
+        "risk_level": row.get("risk_level"),
+        "anomaly_level": row.get("anomaly_level"),
+        "anomaly_reason": row.get("anomaly_reason"),
+        "last_checkin_at": row.get("last_checkin_at"),
+        "share_consent": bool(row.get("share_consent")),
+        "coords_redacted": True,
+    }
+
+
+def readiness_view(row):
+    if not row:
+        return None
+    return {
+        "owner_token": row.get("owner_token"),
+        "platform": row.get("platform"),
+        "findmy_enabled": bool(row.get("findmy_enabled")),
+        "findhub_enabled": bool(row.get("findhub_enabled")),
+        "trusted_contacts": int(row.get("trusted_contacts") or 0),
+        "silent_sos": bool(row.get("silent_sos")),
+        "sms_fallback": bool(row.get("sms_fallback")),
+        "wearable": bool(row.get("wearable")),
+        "offline_pack": bool(row.get("offline_pack")),
+        "readiness_score": int(row.get("readiness_score") or 0),
+        "gaps": row.get("gaps") or [],
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def evidence_public_view(row):
+    return safety.public_evidence_view(row) if row else None
 
 
 def alert_level(conf, sev):
@@ -923,6 +986,92 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
             return self._json({"ok": True, "sources": db.source_health(self._limit(u)),
                                "scheduler": scheduler.default_health()})
+        if u.path == "/api/readiness":
+            # FIELD/owner: phone safety readiness is looked up only by the owner's
+            # local token; no global list exists on the public surface.
+            q = urllib.parse.parse_qs(u.query)
+            owner = (q.get("owner_token", [""])[0] or q.get("owner", [""])[0]).strip()
+            if not owner:
+                return self._json({"ok": False, "error": "owner_token required"}, 400)
+            row = db.readiness_for(owner)
+            return self._json({"ok": bool(row), "readiness": readiness_view(row),
+                               "gaps": (row or {}).get("gaps", [])})
+        if u.path == "/api/journey":
+            # FIELD/owner: read back a trip session by id/ref without exposing raw
+            # live coordinates. Operators use /api/journeys for restricted detail.
+            q = urllib.parse.parse_qs(u.query)
+            jid = (q.get("id", [""])[0] or q.get("journey_uuid", [""])[0] or
+                   q.get("uuid", [""])[0]).strip()
+            if not jid:
+                return self._json({"ok": False, "error": "id required"}, 400)
+            row = db.journey_by_uuid(jid)
+            if not row:
+                return self._json({"ok": False, "error": "not found"}, 404)
+            return self._json({"ok": True, "journey": public_journey_view(row)})
+        if u.path == "/api/journeys":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            return self._json({"ok": True, "journeys": db.list_journeys(self._limit(u))})
+        if u.path in ("/api/cases", "/api/shield-cases"):
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            return self._json({"ok": True, "cases": db.shield_cases(self._limit(u))})
+        if u.path in ("/api/case", "/api/shield-case"):
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            q = urllib.parse.parse_qs(u.query)
+            cid = (q.get("id", [""])[0] or q.get("case_uuid", [""])[0]).strip()
+            row = db.shield_case(cid) if cid else None
+            if not row:
+                return self._json({"ok": False, "error": "not found"}, 404)
+            return self._json({"ok": True, "case": row,
+                               "updates": db.case_updates(cid),
+                               "evidence": db.evidence_for_case(cid),
+                               "geotraces": db.geotraces_for_case(cid)})
+        if u.path == "/api/evidence":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            q = urllib.parse.parse_qs(u.query)
+            cid = (q.get("case_uuid", [""])[0] or q.get("case", [""])[0]).strip()
+            rows = db.evidence_for_case(cid, self._limit(u)) if cid else db.all_evidence(self._limit(u))
+            return self._json({"ok": True, "evidence": rows})
+        if u.path == "/api/evidence-public":
+            # Redacted evidence summary: proves the projection exists but never
+            # exposes raw notes, exact coordinates, source identity, or custody internals.
+            q = urllib.parse.parse_qs(u.query)
+            eid = (q.get("id", [""])[0] or q.get("evidence_uuid", [""])[0]).strip()
+            row = db.evidence_by_uuid(eid) if eid else None
+            if not row:
+                return self._json({"ok": False, "error": "not found"}, 404)
+            return self._json({"ok": True, "evidence": evidence_public_view(row)})
+        if u.path == "/api/safety-points":
+            rows = [safety.safety_point_public(r) for r in db.public_safety_points(self._limit(u))]
+            return self._json({"ok": True, "points": rows})
+        if u.path in ("/api/sentinels", "/api/mesh/devices", "/api/mesh/relays",
+                      "/api/trackers", "/api/ops-agreements", "/api/ops-drills",
+                      "/api/ops-readiness"):
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            if u.path == "/api/sentinels":
+                return self._json({"ok": True, "sentinels": db.sentinels(self._limit(u))})
+            if u.path == "/api/mesh/devices":
+                return self._json({"ok": True, "devices": db.mesh_devices(self._limit(u))})
+            if u.path == "/api/mesh/relays":
+                return self._json({"ok": True, "relays": db.mesh_relays(self._limit(u))})
+            if u.path == "/api/trackers":
+                return self._json({"ok": True, "trackers": db.trackers(self._limit(u))})
+            if u.path == "/api/ops-agreements":
+                return self._json({"ok": True, "agreements": db.ops_agreements(self._limit(u))})
+            if u.path == "/api/ops-drills":
+                return self._json({"ok": True, "drills": db.ops_drills(self._limit(u))})
+            return self._json({"ok": True, "ops_readiness": {
+                "responders": len(db.all_responders()),
+                "sentinels": len(db.sentinels()),
+                "safety_points": len(db.all_safety_points()),
+                "agreements": len(db.ops_agreements()),
+                "drills": len(db.ops_drills()),
+                "open_cases": len([c for c in db.shield_cases() if (c.get("status") or "") not in ("closed", "resolved")]),
+            }})
 
         # AUTH-06: keep the SHIELD operator console behind operator auth when a
         # token/roster is configured. Fail-open (served) when auth is disabled, so
@@ -1039,6 +1188,85 @@ class Handler(BaseHTTPRequestHandler):
                 data = {}
         db = DB(DB_PATH)
 
+        if u.path == "/api/readiness":
+            # FIELD/owner: readiness checklist saved by the user's local owner token.
+            if not self._rate_ok("/api/readiness", 40):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            owner = (data.get("owner_token") or data.get("owner") or "").strip()
+            if not owner:
+                return self._json({"ok": False, "error": "owner_token required"}, 400)
+            row = db.upsert_readiness(owner, data)
+            db.audit("field", "readiness_update", "owner=%s score=%s" % (owner[:8], row.get("readiness_score")))
+            return self._json({"ok": True, "readiness": readiness_view(row), "gaps": row.get("gaps") or []})
+
+        if u.path == "/api/journey/start":
+            # FIELD: start a Journey Guard session. Route endpoints are stored; live
+            # raw pings are stored only when share_consent is explicit.
+            if not self._rate_ok("/api/journey/start", 25):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            owner = (data.get("owner_token") or "").strip()
+            from_raw = (data.get("from") or data.get("from_place") or data.get("start") or "").strip()
+            to_raw = (data.get("to") or data.get("to_place") or data.get("end") or "").strip()
+            if not owner or not from_raw or not to_raw:
+                return self._json({"ok": False, "error": "owner_token, from, and to required"}, 400)
+            ga = geocode(from_raw, db=db)
+            gb = geocode(to_raw, db=db)
+            if not ga or not gb:
+                return self._json({"ok": False, "error": "could not resolve from/to",
+                                   "from_resolved": bool(ga), "to_resolved": bool(gb)}, 400)
+            scan = routing.scan((ga["lat"], ga["lng"]), (gb["lat"], gb["lng"]),
+                                public_incidents(db), n=routing.DEFAULT_WAYPOINTS,
+                                radius_km=routing.DEFAULT_RADIUS_KM)
+            row = db.create_journey({
+                "owner_token": owner,
+                "from_place": ga.get("name") or from_raw, "to_place": gb.get("name") or to_raw,
+                "from_lat": ga.get("lat"), "from_lng": ga.get("lng"),
+                "to_lat": gb.get("lat"), "to_lng": gb.get("lng"),
+                "expected_arrival": data.get("expected_arrival"),
+                "mode": data.get("mode") or "journey_guard",
+                "risk_level": scan.get("worst_level") or "GREEN",
+                "share_consent": data.get("share_consent")})
+            db.audit("field", "journey_start", "ref=%s risk=%s consent=%s" % (
+                row.get("handoff_ref"), row.get("risk_level"), bool(row.get("share_consent"))))
+            return self._json({"ok": True, "journey": public_journey_view(row),
+                               "route": {"worst_level": scan.get("worst_level"),
+                                         "guidance": PUBLIC_GUIDANCE.get(scan.get("worst_level", "GREEN"),
+                                                                        PUBLIC_GUIDANCE["GREEN"]),
+                                         "segments": scan.get("segments", [])[:12],
+                                         "note": "Corridor approximation, not exact road routing."}})
+
+        if u.path == "/api/journey/ping":
+            # FIELD: update check-in/anomaly state. Exact coordinates are accepted
+            # only with explicit consent or a duress/emergency event.
+            if not self._rate_ok("/api/journey/ping", 90):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            jid = (data.get("journey_uuid") or data.get("id") or "").strip()
+            row = db.journey_by_uuid(jid) if jid else None
+            if not row:
+                return self._json({"ok": False, "error": "unknown journey"}, 404)
+            etype = (data.get("event_type") or data.get("type") or "checkin").strip().lower()
+            allowed_exact = bool(row.get("share_consent")) or safety.as_bool(data.get("share_consent")) or etype in ("duress", "emergency", "sos")
+            event = dict(data)
+            event["event_type"] = etype
+            if not allowed_exact:
+                event.pop("lat", None)
+                event.pop("lng", None)
+            updated = db.record_journey_event(jid, event)
+            db.audit("field", "journey_ping", "ref=%s event=%s exact=%s state=%s" % (
+                row.get("handoff_ref"), etype, allowed_exact, updated.get("state") if updated else ""))
+            return self._json({"ok": True, "journey": public_journey_view(updated)})
+
+        if u.path == "/api/journey/arrive":
+            if not self._rate_ok("/api/journey/arrive", 40):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            jid = (data.get("journey_uuid") or data.get("id") or "").strip()
+            row = db.close_journey(jid, "arrived") if jid else None
+            if not row:
+                return self._json({"ok": False, "error": "unknown journey"}, 404)
+            db.record_journey_event(jid, {"event_type": "arrived", "note": "owner marked arrived"})
+            db.audit("field", "journey_arrive", "ref=%s" % row.get("handoff_ref"))
+            return self._json({"ok": True, "journey": public_journey_view(db.journey_by_uuid(jid))})
+
         if u.path == "/api/login":
             # AUTH-01: exchange operator username+password for a signed session token.
             # Rate-limited to blunt brute force. Returns {token, name} on success.
@@ -1053,6 +1281,196 @@ class Handler(BaseHTTPRequestHandler):
             ident = auth.identity(tok) or {}
             db.audit("auth", "login_ok", "user=%s role=%s" % (user[:40], ident.get("role")))
             return self._json({"ok": True, "token": tok, "name": user, "role": ident.get("role")})
+
+        if u.path in ("/api/cases", "/api/shield-cases", "/api/case", "/api/shield-case"):
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            actor = (self._operator() or {}).get("user", "operator")
+            row = db.create_shield_case({
+                "case_type": data.get("case_type") or data.get("type") or "incident",
+                "subject_ref": data.get("subject_ref") or data.get("ref") or "",
+                "status": data.get("status") or "open",
+                "visibility": data.get("visibility") or "restricted",
+                "family_liaison": data.get("family_liaison") or "",
+                "incident_commander": data.get("incident_commander") or "",
+                "analyst_owner": data.get("analyst_owner") or actor,
+                "summary": data.get("summary") or "",
+                "public_note": data.get("public_note") or "",
+                "requires_second_approval": data.get("requires_second_approval")})
+            db.add_case_update(row["case_uuid"], {"actor": actor, "visibility": "restricted",
+                                                 "body": "Case opened: " + (row.get("summary") or "")})
+            db.audit(actor, "shield_case_create", "case=%s type=%s" % (row.get("case_uuid"), row.get("case_type")))
+            return self._json({"ok": True, "case": db.shield_case(row["case_uuid"]),
+                               "updates": db.case_updates(row["case_uuid"])})
+
+        if u.path in ("/api/case-update", "/api/shield-case-update"):
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            cid = (data.get("case_uuid") or data.get("id") or "").strip()
+            if not cid:
+                return self._json({"ok": False, "error": "case_uuid required"}, 400)
+            actor = (self._operator() or {}).get("user", "operator")
+            updates = db.add_case_update(cid, {"actor": actor,
+                                               "visibility": data.get("visibility") or "restricted",
+                                               "body": data.get("body") or data.get("note") or "",
+                                               "redacted": data.get("redacted")})
+            if updates is None:
+                return self._json({"ok": False, "error": "unknown case"}, 404)
+            db.audit(actor, "shield_case_update", "case=%s" % cid)
+            return self._json({"ok": True, "updates": updates})
+
+        if u.path == "/api/evidence":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            actor = (self._operator() or {}).get("user", "operator")
+            row = db.create_evidence({
+                "case_uuid": data.get("case_uuid") or "",
+                "evidence_type": data.get("evidence_type") or data.get("type") or "note",
+                "title": data.get("title") or "",
+                "source_label": data.get("source_label") or "",
+                "restricted_level": data.get("restricted_level") or "restricted",
+                "status": data.get("status") or "received",
+                "lat": _float_or_none(data.get("lat")),
+                "lng": _float_or_none(data.get("lng")),
+                "captured_at": data.get("captured_at"),
+                "notes": data.get("notes") or "",
+                "public_summary": data.get("public_summary") or ""})
+            if row.get("case_uuid"):
+                db.add_case_update(row["case_uuid"], {"actor": actor, "visibility": "restricted",
+                                                     "body": "Evidence received: " + (row.get("title") or row.get("evidence_type") or "")})
+            db.audit(actor, "evidence_create", "evidence=%s case=%s" % (row.get("evidence_uuid"), row.get("case_uuid")))
+            return self._json({"ok": True, "evidence": row, "public": evidence_public_view(row)})
+
+        if u.path == "/api/geotrace":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            actor = (self._operator() or {}).get("user", "operator")
+            row = db.create_geotrace({
+                "evidence_uuid": data.get("evidence_uuid") or "",
+                "case_uuid": data.get("case_uuid") or "",
+                "actor": actor,
+                "confidence": data.get("confidence") or "low",
+                "method": data.get("method") or "analyst_annotation",
+                "area_label": data.get("area_label") or "",
+                "lat": _float_or_none(data.get("lat")),
+                "lng": _float_or_none(data.get("lng")),
+                "radius_km": _float_or_none(data.get("radius_km")),
+                "notes": data.get("notes") or "",
+                "restricted": True})
+            db.audit(actor, "geotrace_create", "trace=%s case=%s method=%s" % (
+                row.get("trace_uuid"), row.get("case_uuid"), row.get("method")))
+            return self._json({"ok": True, "geotrace": row,
+                               "note": "Restricted analyst aid; not an exact locator."})
+
+        if u.path == "/api/safety-points":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            actor = (self._operator() or {}).get("user", "operator")
+            row = db.create_safety_point({
+                "name": data.get("name") or "",
+                "point_type": data.get("point_type") or data.get("type") or "safe_point",
+                "state": data.get("state") or "",
+                "lga": data.get("lga") or "",
+                "address": data.get("address") or "",
+                "lat": _float_or_none(data.get("lat")),
+                "lng": _float_or_none(data.get("lng")),
+                "contact_channel": data.get("contact_channel") or "",
+                "contact_address": data.get("contact_address") or "",
+                "vetted": data.get("vetted"),
+                "active": True if data.get("active") is None else data.get("active"),
+                "verified_by": data.get("verified_by") or actor,
+                "notes": data.get("notes") or ""})
+            db.audit(actor, "safety_point_create", "point=%s vetted=%s" % (row.get("point_uuid"), row.get("vetted")))
+            return self._json({"ok": True, "point": row,
+                               "public_points": [safety.safety_point_public(r) for r in db.public_safety_points()]})
+
+        if u.path == "/api/sentinels":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            actor = (self._operator() or {}).get("user", "operator")
+            row = db.create_sentinel({
+                "name": data.get("name") or "",
+                "org": data.get("org") or "",
+                "role": data.get("role") or "observer",
+                "state": data.get("state") or "",
+                "lga": data.get("lga") or "",
+                "trust_level": data.get("trust_level") or "pending",
+                "active": True if data.get("active") is None else data.get("active"),
+                "consent_revoked_at": data.get("consent_revoked_at"),
+                "channel": data.get("channel") or "",
+                "address": data.get("address") or "",
+                "notes": data.get("notes") or ""})
+            db.audit(actor, "sentinel_create", "sentinel=%s trust=%s" % (row.get("sentinel_uuid"), row.get("trust_level")))
+            return self._json({"ok": True, "sentinel": row})
+
+        if u.path == "/api/mesh/devices":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            actor = (self._operator() or {}).get("user", "operator")
+            row = db.create_mesh_device({
+                "owner_token": data.get("owner_token") or "",
+                "device_label": data.get("device_label") or data.get("label") or "",
+                "consent_scope": data.get("consent_scope") or "trusted_circle",
+                "rotating_id": data.get("rotating_id") or "",
+                "active": True if data.get("active") is None else data.get("active"),
+                "notes": data.get("notes") or ""})
+            db.audit(actor, "mesh_device_create", "device=%s scope=%s" % (row.get("device_uuid"), row.get("consent_scope")))
+            return self._json({"ok": True, "device": row})
+
+        if u.path == "/api/trackers":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            actor = (self._operator() or {}).get("user", "operator")
+            row = db.create_tracker({
+                "owner_ref": data.get("owner_ref") or "",
+                "label": data.get("label") or "",
+                "tracker_type": data.get("tracker_type") or data.get("type") or "tag",
+                "stable_id": data.get("stable_id") or "",
+                "stable_id_hash": data.get("stable_id_hash") or "",
+                "rotating_id": data.get("rotating_id") or "",
+                "consent_status": data.get("consent_status") or "active",
+                "anti_stalking_notice": True if data.get("anti_stalking_notice") is None else data.get("anti_stalking_notice"),
+                "active": True if data.get("active") is None else data.get("active"),
+                "notes": data.get("notes") or ""})
+            db.audit(actor, "tracker_create", "tracker=%s type=%s" % (row.get("tracker_uuid"), row.get("tracker_type")))
+            public_row = dict(row)
+            public_row.pop("stable_id_hash", None)
+            return self._json({"ok": True, "tracker": row, "public_projection": public_row})
+
+        if u.path == "/api/ops-agreements":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            actor = (self._operator() or {}).get("user", "operator")
+            row = db.create_ops_agreement({
+                "partner_name": data.get("partner_name") or "",
+                "partner_type": data.get("partner_type") or "responder",
+                "state": data.get("state") or "",
+                "lga": data.get("lga") or "",
+                "scope": data.get("scope") or "",
+                "escalation_channel": data.get("escalation_channel") or "",
+                "status": data.get("status") or "draft",
+                "signed_at": data.get("signed_at"),
+                "expires_at": data.get("expires_at"),
+                "owner": data.get("owner") or actor,
+                "notes": data.get("notes") or ""})
+            db.audit(actor, "ops_agreement_create", "agreement=%s partner=%s" % (row.get("agreement_uuid"), row.get("partner_name")))
+            return self._json({"ok": True, "agreement": row})
+
+        if u.path == "/api/ops-drills":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            actor = (self._operator() or {}).get("user", "operator")
+            row = db.create_ops_drill({
+                "drill_type": data.get("drill_type") or "tabletop",
+                "state": data.get("state") or "",
+                "lga": data.get("lga") or "",
+                "participants": data.get("participants") or "",
+                "outcome": data.get("outcome") or "",
+                "gaps": data.get("gaps") or "",
+                "next_due_at": data.get("next_due_at"),
+                "owner": data.get("owner") or actor})
+            db.audit(actor, "ops_drill_create", "drill=%s type=%s" % (row.get("drill_uuid"), row.get("drill_type")))
+            return self._json({"ok": True, "drill": row})
 
         if u.path == "/api/report":
             # ABU-01: throttle anonymous report spam (per caller). Bucket capacity =
