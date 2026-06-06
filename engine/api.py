@@ -274,6 +274,79 @@ def evidence_public_view(row):
     return safety.public_evidence_view(row) if row else None
 
 
+def road_route_waypoints(a, b):
+    """Return road-snapped waypoints from an OSRM-compatible route service.
+
+    The public OSRM route API supports `geometries=geojson` and `overview=full`
+    for route geometry. We keep this best-effort: if the provider is down or a
+    deploy disables it, WakaSafe falls back to the existing corridor scan rather
+    than failing closed for the traveler.
+    """
+    enabled = os.environ.get("DEYSAFE_ROAD_ROUTING", "1").strip().lower()
+    if enabled in ("0", "false", "no", "off"):
+        return None
+    base = os.environ.get("DEYSAFE_ROAD_ROUTING_URL", "https://router.project-osrm.org").rstrip("/")
+    try:
+        la, lo = float(a["lat"]), float(a["lng"])
+        lb, lob = float(b["lat"]), float(b["lng"])
+    except Exception:
+        return None
+    coords = "%.6f,%.6f;%.6f,%.6f" % (lo, la, lob, lb)  # OSRM expects lng,lat
+    qs = urllib.parse.urlencode({"overview": "full", "geometries": "geojson", "steps": "false"})
+    url = "%s/route/v1/driving/%s?%s" % (base, coords, qs)
+    try:
+        with urllib.request.urlopen(url, timeout=4) as r:
+            raw = r.read(1_500_000).decode("utf-8", "replace")
+        j = json.loads(raw)
+        routes = j.get("routes") if isinstance(j, dict) else None
+        route = routes[0] if routes else None
+        geom = ((route or {}).get("geometry") or {}).get("coordinates") or []
+        pts = []
+        for item in geom:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                pts.append((float(item[1]), float(item[0])))  # GeoJSON lng,lat -> lat,lng
+        if len(pts) < 2:
+            return None
+        # Keep the response compact while preserving road shape enough for map/risk.
+        if len(pts) > 160:
+            step = max(1, int(len(pts) / 160))
+            pts = pts[::step]
+            if pts[-1] != (float(b["lat"]), float(b["lng"])):
+                pts.append((float(b["lat"]), float(b["lng"])))
+        return {
+            "waypoints": pts,
+            "provider": "osrm",
+            "distance_km": round(float(route.get("distance", 0) or 0) / 1000.0, 1),
+            "duration_min": round(float(route.get("duration", 0) or 0) / 60.0, 1),
+        }
+    except Exception:
+        return None
+
+
+def route_scan_between(ga, gb, incidents, n=None, radius=None):
+    """Road route when available, corridor fallback when not."""
+    radius = radius or routing.DEFAULT_RADIUS_KM
+    road = road_route_waypoints(ga, gb)
+    if road and road.get("waypoints"):
+        scan = routing.segment_risk(road["waypoints"], incidents, radius_km=radius)
+        scan["from"] = road["waypoints"][0]
+        scan["to"] = road["waypoints"][-1]
+        scan["waypoints"] = road["waypoints"]
+        scan["approximation"] = "OSRM road route with corridor risk buffer"
+        scan["route_mode"] = "road"
+        scan["road_routing"] = True
+        scan["route_provider"] = road.get("provider")
+        scan["route_distance_km"] = road.get("distance_km")
+        scan["route_duration_min"] = road.get("duration_min")
+        return scan
+    scan = routing.scan((ga["lat"], ga["lng"]), (gb["lat"], gb["lng"]), incidents,
+                        n=(n or routing.DEFAULT_WAYPOINTS), radius_km=radius)
+    scan["route_mode"] = "corridor"
+    scan["road_routing"] = False
+    scan["route_provider"] = "great_circle_fallback"
+    return scan
+
+
 def alert_level(conf, sev):
     if conf >= 90 or sev:
         return 4
@@ -864,8 +937,17 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/channel":
             return self._json({"posts": db.recent_channel()})
         if u.path == "/api/places":
-            coords = {p["name"]: [p["lat"], p["lng"]] for p in PLACES}
-            return self._json({"places": PLACE_NAMES, "types": TYPES, "coords": coords})
+            # FIELD: broad suggestions, not a hard boundary. The app accepts any
+            # typed place and resolves via /api/geocode; this list only improves
+            # autocomplete with the offline gazetteer + seed rows.
+            places = gazetteer.all_places()
+            names = sorted({p["name"] for p in places} | set(PLACE_NAMES))
+            coords = {p["name"]: [p["lat"], p["lng"]] for p in places if p.get("lat") is not None}
+            for p in PLACES:
+                coords.setdefault(p["name"], [p["lat"], p["lng"]])
+            return self._json({"places": names, "types": TYPES, "coords": coords,
+                               "source": "gazetteer_plus_open_geocode",
+                               "count": len(names), "open_search": True})
         if u.path == "/api/ai-status":
             return self._json({"ai": ai.available(), "provider": ai.provider(), "keys": ai.key_count(), "sms": sms.available()})
         if u.path == "/api/risk":
@@ -924,8 +1006,7 @@ class Handler(BaseHTTPRequestHandler):
                 radius = float(q.get("radius_km", [routing.DEFAULT_RADIUS_KM])[0])
             except Exception:
                 radius = routing.DEFAULT_RADIUS_KM
-            scan = routing.scan((ga["lat"], ga["lng"]), (gb["lat"], gb["lng"]),
-                                public_incidents(db), n=n, radius_km=radius)
+            scan = route_scan_between(ga, gb, public_incidents(db), n=n, radius=radius)
             scan["ok"] = True
             scan["from_place"] = ga.get("name") or a_raw
             scan["to_place"] = gb.get("name") or b_raw
@@ -1214,9 +1295,9 @@ class Handler(BaseHTTPRequestHandler):
             if not ga or not gb:
                 return self._json({"ok": False, "error": "could not resolve from/to",
                                    "from_resolved": bool(ga), "to_resolved": bool(gb)}, 400)
-            scan = routing.scan((ga["lat"], ga["lng"]), (gb["lat"], gb["lng"]),
-                                public_incidents(db), n=routing.DEFAULT_WAYPOINTS,
-                                radius_km=routing.DEFAULT_RADIUS_KM)
+            scan = route_scan_between(ga, gb, public_incidents(db),
+                                      n=routing.DEFAULT_WAYPOINTS,
+                                      radius=routing.DEFAULT_RADIUS_KM)
             row = db.create_journey({
                 "owner_token": owner,
                 "from_place": ga.get("name") or from_raw, "to_place": gb.get("name") or to_raw,
@@ -1230,10 +1311,12 @@ class Handler(BaseHTTPRequestHandler):
                 row.get("handoff_ref"), row.get("risk_level"), bool(row.get("share_consent"))))
             return self._json({"ok": True, "journey": public_journey_view(row),
                                "route": {"worst_level": scan.get("worst_level"),
+                                         "road_routing": bool(scan.get("road_routing")),
+                                         "route_mode": scan.get("route_mode"),
                                          "guidance": PUBLIC_GUIDANCE.get(scan.get("worst_level", "GREEN"),
                                                                         PUBLIC_GUIDANCE["GREEN"]),
                                          "segments": scan.get("segments", [])[:12],
-                                         "note": "Corridor approximation, not exact road routing."}})
+                                         "note": "Road route when available; corridor fallback when routing is unavailable."}})
 
         if u.path == "/api/journey/ping":
             # FIELD: update check-in/anomaly state. Exact coordinates are accepted
@@ -1481,6 +1564,22 @@ class Handler(BaseHTTPRequestHandler):
             typ, place, desc = (data.get("type") or "").strip(), (data.get("place") or "").strip(), (data.get("description") or "").strip()
             if not place or not desc:
                 return self._json({"ok": False, "error": "place and description required"}, 400)
+            media_in = data.get("media") if isinstance(data.get("media"), dict) else None
+            evidence_meta = None
+            media_note = ""
+            if media_in:
+                try:
+                    mname = re.sub(r"[^A-Za-z0-9_. -]", "", str(media_in.get("name") or "capture"))[:80]
+                    mtype = re.sub(r"[^A-Za-z0-9_./+-]", "", str(media_in.get("type") or "file"))[:80]
+                    msize = max(0, min(250_000_000, int(media_in.get("size") or 0)))
+                    mhash = str(media_in.get("hash") or "").strip().lower()
+                    if not re.fullmatch(r"[a-f0-9]{64}", mhash):
+                        mhash = ""
+                    evidence_meta = {"name": mname, "type": mtype, "size": msize, "hash": mhash}
+                    media_note = " Evidence metadata: name=%s type=%s size=%s sha256=%s" % (
+                        mname, mtype, msize, (mhash or "not_provided"))
+                except Exception:
+                    evidence_meta = None
             # ABU-09: constrain the incident type to the controlled vocabulary. An
             # arbitrary 'made_up_type' is coerced to other_needs_review, never stored
             # as a fabricated category. (Empty type stays empty -> unstructured signal.)
@@ -1546,15 +1645,16 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 quarantined = False
 
+            stored_desc = desc + media_note
             db.insert_signal({"source_name": "Community report", "kind": "report",
                               "title": "{} near {}".format(type_word, loc_name),
-                              "text": "{} near {}. {}".format(type_word, place, desc),
+                              "text": "{} near {}. {}".format(type_word, place, stored_desc),
                               "url": "", "lang": "en",
                               "published_at": now_iso_ts,
                               "lat": lat, "lng": lng, "location_name": loc_name, "state": state,
                               "gtype": gtype, "gseverity": sev})
-            db.audit("api", "community_report", "place={} type={} geo={} rep={} quarantined={}".format(
-                place, gtype, bool(g), rkey[:8], quarantined))
+            db.audit("api", "community_report", "place={} type={} geo={} rep={} quarantined={} media={}".format(
+                place, gtype, bool(g), rkey[:8], quarantined, bool(evidence_meta)))
 
             if quarantined:
                 # HOLD: do NOT run the public-map recompute for this request, so a
@@ -1571,14 +1671,16 @@ class Handler(BaseHTTPRequestHandler):
                                    "status": "needs_human_review",
                                    "note": "Report received and held for human review.",
                                    "location_unverified": location_unverified,
-                                   "coords_confidence": ("unverified" if location_unverified else (g.get("confidence") or g.get("source") or "gazetteer"))})
+                                    "coords_confidence": ("unverified" if location_unverified else (g.get("confidence") or g.get("source") or "gazetteer")),
+                                    "evidence_meta": evidence_meta})
 
             recompute(db)
             risk = risk_at(public_incidents(db), lat, lng) if lat is not None else risk_for(public_incidents(db), place)
             # GEO-01: tell the client the point wasn't placed so it can prompt a manual
             # pin instead of implying a (non-existent) centroid pin.
             resp = {"ok": True, "risk": risk, "location_unverified": location_unverified,
-                    "coords_confidence": ("unverified" if location_unverified else (g.get("confidence") or g.get("source") or "gazetteer"))}
+                    "coords_confidence": ("unverified" if location_unverified else (g.get("confidence") or g.get("source") or "gazetteer")),
+                    "evidence_meta": evidence_meta}
             return self._json(resp)
 
         if u.path == "/api/sos":

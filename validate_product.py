@@ -89,6 +89,66 @@ if not OPTOKEN:
     print("note: OPERATOR_TOKEN is empty; operator-gated checks will show the gap.")
 
 
+# Launch UX / PWA / WakaSafe regression gates
+s, j, raw = call("GET", "/api/places", want_token=False)
+check("GET /api/places is broad autocomplete, not a hardcoded travel boundary",
+      s == 200 and j.get("open_search") is True and int(j.get("count") or 0) >= 100
+      and len(j.get("places") or []) >= 100,
+      "status=%s count=%s source=%s" % (s, j.get("count"), j.get("source")))
+s, j, raw = call("GET", "/api/route?from=Abuja&to=Kaduna", want_token=False)
+check("GET /api/route exposes auto-renderable road/fallback route metadata",
+      s == 200 and j.get("ok") is True and j.get("route_mode") in ("road", "corridor")
+      and isinstance(j.get("waypoints"), list) and len(j.get("waypoints") or []) >= 2
+      and "road_routing" in j and j.get("from_place") and j.get("to_place"),
+      "status=%s mode=%s waypoints=%s raw=%s" % (s, j.get("route_mode"), len(j.get("waypoints") or []), raw[:160]))
+app_path = os.path.join(os.path.dirname(__file__), "app", "index.html")
+sw_path = os.path.join(os.path.dirname(__file__), "app", "sw.js")
+try:
+    app_html = open(app_path, encoding="utf-8").read()
+    sw_js = open(sw_path, encoding="utf-8").read()
+except Exception:
+    app_html = ""
+    sw_js = ""
+check("PWA install path is wired in the browser app",
+      "beforeinstallprompt" in app_html and "installApp" in app_html
+      and "serviceWorker.register('/sw.js')" in app_html,
+      "install/register markers missing")
+check("Service worker caches the shell while keeping live API calls network-first",
+      "SHELL_CACHE" in sw_js and "startsWith('/api/')" in sw_js and "caches.open" in sw_js,
+      "service worker markers missing")
+check("WakaSafe auto-renders route on map and no longer asks to view route",
+      "Road route rendered automatically" in app_html and "View route on map" not in app_html
+      and "go('home')" in app_html,
+      "auto-route markers missing")
+check("WakaSafe starts Journey Guard automatically instead of exposing manual trip buttons",
+      "Start WakaSafe" in app_html and "startJourneyAutoWatch" in app_html
+      and "Start guard" not in app_html and "Check in</button>" not in app_html
+      and "Mark arrived" not in app_html,
+      "manual guard controls still visible")
+check("Privacy decoy lock is available for coercion-safe SOS concealment",
+      'id="decoy"' in app_html and "panicLock" in app_html and "Privacy lock" in app_html
+      and "Trip Notes" in app_html,
+      "decoy lock markers missing")
+check("Report screen exposes camera/video evidence capture metadata",
+      'id="rMedia"' in app_html and "capture=\"environment\"" in app_html
+      and "mediaMetaFromInput" in app_html,
+      "media capture markers missing")
+check("Readiness moved into settings instead of cluttering WakaSafe",
+      'id="v-settings"' in app_html and "Phone Safety Readiness" in app_html
+      and "settingsBtn" in app_html,
+      "settings/readiness markers missing")
+s, j, raw = call("POST", "/api/report", {
+    "type": "armed_robbery",
+    "place": "Kaduna",
+    "description": "robbery report with camera evidence metadata",
+    "media": {"name": "clip.mp4", "type": "video/mp4", "size": 12345,
+              "hash": "a" * 64},
+}, want_token=False)
+check("POST /api/report preserves camera/video evidence fingerprint metadata",
+      s == 200 and j.get("ok") is True and (j.get("evidence_meta") or {}).get("hash") == "a" * 64,
+      "status=%s evidence=%s raw=%s" % (s, j.get("evidence_meta"), raw[:160]))
+
+
 # A. Phone Safety Readiness
 owner = "prod-gate-owner"
 s, j, raw = call("POST", "/api/readiness", {

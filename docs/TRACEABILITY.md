@@ -4,11 +4,16 @@
 *its status*, *how it's validated*, and *the result*. We build, measure, and accept work
 against this document.
 
+**Launch compliance crosswalk:** see `docs/LAUNCH_COMPLIANCE_CROSSWALK.md` for
+the public-release matrix, PWA install instructions, route/voice corrections,
+real-data gates, and corrective actions.
+
 **Engineering process (every change):** MONITOR (run the gate) → CORRECT (fix fails) →
 MEASURE (pass rate) → ADJUST. Nothing is "done" until it's in the matrix AND passes its gate.
 
-**Run the automated gate:** `python validate.py` (against the live server).
-**Last run: 2026-06-04 → 56 passed / 0 failed** (32 endpoint + 20 chaos + 4 functional) — verified on **BOTH SQLite and PostgreSQL**.
+**Run the automated gate:** `powershell -ExecutionPolicy Bypass -File scripts\verify_all.ps1`.
+**Last full local run: 2026-06-06 -> 139 passed / 0 failed** (56 core + 17 security + 19 response + 17 quality + 30 product).
+Postgres verification is encoded in `scripts\verify_all.ps1 -Postgres -DatabaseUrl "<url>"` and must be run against Railway or a disposable Postgres database before production promotion.
 
 Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your account/key · ⛔ excluded by a safety bright-line
 
@@ -35,7 +40,8 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | **Geofenced area report** ("drill fence") — type area → written report: level + N incidents within radius + per-incident type/status/distance + circle on map | Doc P4 / GDACS + user "drill fence" | `api.risk_at` (radius+distance) + index `loadLevel`/`areaLayer` | ✅ | `GET /api/risk?lat&lng` + browser (Kaduna ORANGE, Gusau RED) | PASS |
 | Anonymous incident reporting — typed place → geocoded map incident (ANY town, human-gated `candidate_unverified`) | Doc P3.2 | `api.report` (geocode + structured `recompute`) + index | ✅ | `POST /api/report` + off-gazetteer incident + chaos | PASS |
 | Public alert banner (top of screen) | Doc P3.1 | `index.renderBanner` + `api.alerts` | ✅ | `/api/alerts` + verify fires | PASS |
-| WakaSafe route detail — type ANY from/to (level + summary + incidents-on-corridor + map) | DeySafe add (Tesla) | `index.checkRoute` (geocoded) + `distToSeg` | ✅ | Abuja→Kaduna detail | PASS |
+| WakaSafe route detail — type ANY from/to (road route when available; corridor fallback when not) | DeySafe add | `engine/api.py` `/api/route` + `route_scan_between` + `index.checkRoute` | ✅ | auto map render + route metadata gate | PASS |
+| **Automatic Journey Guard** — one WakaSafe action starts route, voice, guard, foreground warnings/check-ins, and arrival detection | user "too manual" | `index.checkRoute` + `startJourneyAutoWatch` + `/api/journey/start`/`ping`/`arrive` | ✅ foreground | `validate_product.py` | PASS |
 | **Free-text location** — type ANY town/village (not a 48-item dropdown) | user CAPA #1 | `api.geocode` gazetteer→OSM/Nominatim (no key) + index `geocodeClient` + shared `<datalist>` | ✅ | `/api/geocode` + `/api/risk?lat&lng` + off-centroid pin | PASS |
 | Tap-map-to-report | DeySafe add | `index.onMapTap` | ✅ | manual | PASS |
 | 📍 Locate-me + ⤢ reset view (Google-Maps style control) — **GPS computed ON-DEVICE, coordinate never sent to server** | user ask + privacy bright-line | `index` Leaflet ctrl + `locateMe`/`riskAtClient`/`resetView` | ✅ | browser: 0 network calls on locate, private marker + report | PASS |
@@ -44,10 +50,12 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | **Proactive proximity warnings** (Waze/Google style) — watch location as you move, warn of danger within 40 km (banner + voice), dedup; **GPS stays ON-DEVICE** | user "Waze proactive warning" | `index` `toggleWatch`/`checkProximity`/`proWarn` (`watchPosition`, client-side) | ✅ | browser: near-Kaduna → fires kidnapping warning, dedupes, 0 errors | PASS |
 | Action buttons 2×2 grid (no sideways scroll) | user feedback | `index .chips` | ✅ | manual | PASS |
 | Responsive desktop (no page-scroll) | user feedback | `index @media` (`#v-home.active`) | ✅ | manual | PASS |
-| Installable PWA (manifest) | Doc P7 | `app/manifest.json` | ✅ | served | PASS |
-| Service worker (kill-switch, no stale cache) | bugfix | `app/sw.js` | ✅ | manual | PASS |
+| Installable PWA (manifest + install prompt) | Doc P7 | `app/manifest.json` + `index.installApp` | ✅ | product gate | PASS |
+| Service worker (offline shell, live API network-first) | launch fix | `app/sw.js` | ✅ | product gate | PASS |
 | **SOS** — Automatic (alarm + on-device location + share link) / Hold-&-Speak (dead-air auto-send + AI) | DeySafe add + user | `index` `sosAuto`/`sosVoice`/`sosActivate` | ✅ (send-to-stored-circle needs a channel ⛔ no armed auto-dispatch) | browser: alarm+location+share, 0 errors | PASS |
+| **Privacy/decoy lock** — hides the app behind harmless Trip Notes after silent SOS or manual lock | user coercion safety | `index.panicLock` / `decoy` | ✅ client-side | `validate_product.py` | PASS |
 | **Policing accountability** (Govia) — "report bad policing" category + know-your-rights card | user research | `api` TYPES `police_misconduct` + index `.rights` | ✅ | gate: type available; browser grid+card | PASS |
+| **Camera/video evidence capture metadata** — attach image/video hash + file facts to an anonymous report | user evidence ask | `index.rMedia`/`mediaMetaFromInput` + `/api/report` `evidence_meta` | ✅ metadata; raw storage pending | `validate_product.py` | PASS |
 | **Community channels** (Zello, light) — area-tagged posts + 🎤 dictation, newest-first feed, XSS-safe | user research | `db.channel` + `api` `/api/channel` + index `renderChannels` | ✅ | gate: post/feed/empty; browser escape | PASS |
 
 ### C. FindMe — missing persons
@@ -106,7 +114,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Feature | Source | Where it lives | Status | Validation | Result |
 |---|---|---|---|---|---|
 | Journey Guard trip sessions, check-ins, anomaly/overdue flags, explicit exact-location consent | user 8 priorities | `engine/safety.py`, `engine/db.py`, `/api/journey/start`, `/api/journey/ping`, `/api/journey`, `/api/journeys`, `app/index.html`, `app/review.html` | built | `validate_product.py` Journey Guard section | PASS when gate green |
-| Phone Safety Readiness checklist (Find My/Find Hub, trusted circle, silent SOS, SMS fallback, wearable, offline pack) | user product gaps | `/api/readiness`, `db.safety_readiness`, WakaSafe panel | built | `validate_product.py` readiness section | PASS when gate green |
+| Phone Safety Readiness checklist (Find My/Find Hub, trusted circle, silent SOS, SMS fallback, wearable, offline pack) | user product gaps | `/api/readiness`, `db.safety_readiness`, Settings panel | built | `validate_product.py` readiness section | PASS when gate green |
 | SHIELD case workspace with family liaison, incident commander, analyst owner, restricted updates | user weak ops gaps | `shield_cases`, `case_updates`, `/api/cases`, `/api/case-update`, review console panel | built | `validate_product.py` case section | PASS when gate green |
 | Restricted evidence vault + GeoTrace annotations (probability zones, not exact locator claims) | user danger controls | `evidence_items`, `geotrace_annotations`, `/api/evidence`, `/api/evidence-public`, `/api/geotrace` | built | `validate_product.py` evidence/GeoTrace section | PASS when gate green |
 | Safety Points + Sentinel Network (public exposes only vetted active points) | user network ideas | `safety_points`, `sentinels`, `/api/safety-points`, `/api/sentinels` | built | `validate_product.py` Safety Points/Sentinel section | PASS when gate green |
@@ -126,7 +134,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | No naming individuals (locations/descriptions only) | ✅ | design |
 | SQL-injection safe (parameterized queries) | ✅ | chaos test: injection string + DB-intact PASS |
 | Input validation — never 500-crash on bad input | ✅ | 14/14 chaos checks PASS |
-| No stale cached app served (kill-switch SW) | ✅ | `sw.js` |
+| App shell installable/offline without caching live API safety data | ✅ | `app/sw.js` |
 | No secrets hardcoded (env only) | ✅ / ⚠️ | code uses env; **doc's 5 Cerebras keys are exposed → ROTATE** |
 | NDPA (Nigeria Data Protection Act) | ◑ | anonymous ✅; retention schedule + erasure ☐ |
 

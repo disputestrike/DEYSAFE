@@ -31,10 +31,11 @@ without consent, never auto-acts, and never cues force.
 **Public app (DeySafe PWA)**
 - Map-first home (Leaflet) with GREEN / YELLOW / ORANGE / RED severity.
 - **Geofenced area report** — type *any* town/village (free-text geocoding via OpenStreetMap, no key) → a written report of incidents within range + a "drill-fence" circle.
-- **WakaSafe** — type any *from → to*; risk along the corridor + spoken summary.
+- **WakaSafe** — type any *from -> to* once; road route risk when available, clearly labeled corridor fallback when not, automatic map render, spoken summary, foreground Journey Guard, warnings, check-ins, and arrival handling.
 - **📍 Locate-me** (Google-Maps style, on-device) + **🛡 proactive proximity warnings** (Waze-style: warns of danger near you as you move).
 - **Voice in & out** — speak "am I safe in Kaduna" / "Lagos to Kano"; it reads the report back.
-- **🆘 SOS** — *Automatic* (alarm + on-device location + shareable link) or *Hold-&-Speak* (auto-sends after dead air).
+- **SOS** — *Automatic* (alarm + on-device location + shareable link) or *Hold-&-Speak* (auto-sends after dead air), with silent mode and a decoy privacy lock.
+- **Camera/video evidence metadata** — attach an image/video fingerprint and file facts to an anonymous report; raw evidence storage remains restricted.
 - **Report danger** (any town → geocoded, human-gated incident), **police-misconduct** category + **know-your-rights** card, **community channels** (area-tagged posts).
 
 **FindMe — missing persons**
@@ -82,11 +83,11 @@ python validate.py            # 56 checks: endpoints + chaos + functional
 ## Architecture
 - **Backend:** Python **standard library only** (`http.server`, `sqlite3`, `urllib`) — one optional dep, `psycopg2-binary`, used only in Postgres mode.
 - **Storage:** dual-mode **SQLite ↔ PostgreSQL** (auto-selects on `DATABASE_URL`).
-- **Frontend:** vanilla JS PWA + Leaflet (no build step).
+- **Frontend:** vanilla JS PWA + Leaflet (no build step). Install from browser: Android/desktop via Install/Add to Home Screen; iPhone via Safari Share -> Add to Home Screen.
 - **Deploy:** Railway-ready (`Procfile`, binds `0.0.0.0:$PORT`, seed-if-empty). Connect the repo → it auto-deploys; add a Postgres plugin for persistence.
 
 ## Validation
-`docs/TRACEABILITY.md` is the North Star matrix (every feature → where it lives → status → how it's validated). The gate (`validate.py`) must pass before any release. **Last run: 56/56 on SQLite + Postgres.**
+`docs/TRACEABILITY.md` is the North Star matrix (every feature -> where it lives -> status -> how it's validated). `docs/LAUNCH_COMPLIANCE_CROSSWALK.md` is the public-release crosswalk and corrective-action matrix. The gates must pass before any release.
 
 ---
 

@@ -27,7 +27,9 @@ $envKeys = @(
   "DATABASE_URL",
   "DEYSAFE_REQUIRE_POSTGRES",
   "DEYSAFE_INGEST_MINUTES",
-  "DEYSAFE_BROADCAST_SIM"
+  "DEYSAFE_BROADCAST_SIM",
+  "DEYSAFE_ROAD_ROUTING",
+  "DEYSAFE_ROAD_ROUTING_URL"
 )
 $oldEnv = @{}
 foreach ($key in $envKeys) {
@@ -114,6 +116,8 @@ try {
     }
     $env:DEYSAFE_INGEST_MINUTES = "0"
     $env:DEYSAFE_BROADCAST_SIM = "1"
+    $env:DEYSAFE_ROAD_ROUTING = "0"
+    $env:DEYSAFE_ROAD_ROUTING_URL = ""
 
     $serverOut = Join-Path $logDir "$safeGate.server.out.log"
     $serverErr = Join-Path $logDir "$safeGate.server.err.log"
