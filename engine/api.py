@@ -49,6 +49,7 @@ import reputation  # ABU-03/04/11: source reputation + coordinated-burst quarant
 import beaconsign  # BLE-01: signed rotating beacon envelope (HMAC + replay guard)
 import scheduler   # DATA-01: periodic ingest worker (default OFF; started from main())
 import safety      # Product-safety layer: Journey Guard/readiness/cases/evidence/network
+import triangulate # TRI-01: server-side reachability-ring / Venn search-zone engine (FindMe)
 
 # --- Phase 0 config ----------------------------------------------------------
 # Operator auth (AUTH-01/06). Two ways to enable a locked posture, both fail-OPEN
@@ -1228,6 +1229,37 @@ class Handler(BaseHTTPRequestHandler):
                                "updates": db.case_updates(cid),
                                "evidence": db.evidence_for_case(cid),
                                "geotraces": db.geotraces_for_case(cid)})
+        if u.path == "/api/triangulate":
+            # FindMe (TRI-01): server-side reachability-ring / Venn search-zone estimate
+            # for a missing case. BRIGHT LINE: returns PROBABILITY zones + a disclaimer,
+            # never an exact location. Pure read; public-safe.
+            q = urllib.parse.parse_qs(u.query)
+            cid_raw = (q.get("case_id", [""])[0] or q.get("id", [""])[0]).strip()
+            try:
+                cid = int(cid_raw)
+            except Exception:
+                return self._json({"ok": False, "error": "case_id required"}, 400)
+            m = db.get_missing(cid)
+            if not m:
+                return self._json({"ok": False, "error": "case not found"}, 404)
+            if m.get("lat") is None or m.get("lng") is None:
+                return self._json({"ok": False, "error": "case has no last-seen location"}, 400)
+            sl = [{"lat": s["lat"], "lng": s["lng"],
+                   "seen_at": s.get("seen_at") or s.get("created_at"),
+                   "source": s.get("source", "sighting")}
+                  for s in db.sightings_for(cid)
+                  if s.get("lat") is not None and s.get("lng") is not None]
+            last_seen = {"lat": m["lat"], "lng": m["lng"],
+                         "seen_at": m.get("last_seen") or m.get("created_at")}
+            now_iso = datetime.datetime.now().isoformat(timespec="seconds")
+            try:
+                zones = triangulate.search_zones(last_seen, sl, now_iso)
+            except Exception as e:
+                return self._json({"ok": False, "error": "triangulation failed",
+                                   "detail": str(e)[:120]}, 500)
+            zones["ok"] = True
+            zones["case_id"] = cid
+            return self._json(zones)
         if u.path == "/api/evidence":
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
