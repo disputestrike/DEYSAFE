@@ -1369,11 +1369,15 @@ class Handler(BaseHTTPRequestHandler):
                 "open_cases": len([c for c in db.shield_cases() if (c.get("status") or "") not in ("closed", "resolved")]),
             }})
 
-        # AUTH-06: keep the SHIELD operator console behind operator auth when a
-        # token/roster is configured. Fail-open (served) when auth is disabled, so
-        # validate.py:88 ("SHIELD" in /review.html) stays green on a fresh box.
-        if u.path in ("/review.html", "/review") and not self._authed():
-            return self._json({"ok": False, "error": "operator auth required"}, 401)
+        # AUTH-06: the SHIELD operator console PAGE is always served — it carries NO
+        # data, only the shell + the sign-in form. Gating the page itself was a bug:
+        # the login form lives INSIDE review.html, so returning 401 here made the
+        # sign-in unreachable (chicken-and-egg — you can't log in to load the page you
+        # need in order to log in). Security is enforced where the DATA is: every
+        # operator API is FAIL-CLOSED (401 without a valid token / roster login), and
+        # the page shows its login overlay on the first 401. So: serve the page, gate
+        # the data. (Standard admin-login pattern: the login screen is reachable; the
+        # data behind it is not.)
         return self._static(u.path)
 
     def _client_id(self):
