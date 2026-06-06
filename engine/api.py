@@ -180,8 +180,12 @@ def _duplicate_report_throttled(client_id, typ, place, desc):
     with _DUP_LOCK:
         # Opportunistically prune fully-expired signatures so the dict stays bounded.
         if len(_DUP_HITS) > _DUP_MAX_KEYS:
-            for k in [k for k, v in _DUP_HITS.items() if not v or v[-1] < cutoff][: len(_DUP_HITS) - _DUP_MAX_KEYS + 1]:
+            for k in [k for k, v in _DUP_HITS.items() if not v or v[-1] < cutoff]:
                 _DUP_HITS.pop(k, None)
+            # A flood of DISTINCT content keeps every entry live (nothing expired to drop),
+            # so also evict oldest-first until back at the cap — the dict can't grow unbounded.
+            while len(_DUP_HITS) > _DUP_MAX_KEYS:
+                _DUP_HITS.popitem(last=False)
         hits = [t for t in _DUP_HITS.get(sig, ()) if t >= cutoff]
         if len(hits) >= _DUP_MAX_PER_WINDOW:
             _DUP_HITS[sig] = hits            # keep the window; do NOT count the blocked dupe
@@ -1394,11 +1398,16 @@ class Handler(BaseHTTPRequestHandler):
         return self._static(u.path)
 
     def _client_id(self):
-        # Best-effort caller identity for rate limiting. Prefer a forwarded IP
-        # (behind a proxy/CDN), else the socket peer.
-        fwd = self.headers.get("X-Forwarded-For", "")
-        if fwd:
-            return fwd.split(",")[0].strip()
+        # Caller identity for rate limiting + reputation. X-Forwarded-For is
+        # attacker-controllable on a direct-connect deploy — forging a new value per
+        # request would mint a fresh rate-limit bucket AND a fresh pristine reputation
+        # every time. So only TRUST it when we know a real proxy/CDN sits in front
+        # (env DEYSAFE_TRUST_XFF=1 — set this on Railway). Otherwise use the socket peer,
+        # which can't be spoofed.
+        if os.environ.get("DEYSAFE_TRUST_XFF", "").strip().lower() in ("1", "true", "yes", "on"):
+            fwd = self.headers.get("X-Forwarded-For", "")
+            if fwd:
+                return fwd.split(",")[0].strip()
         try:
             return self.client_address[0]
         except Exception:
@@ -2621,6 +2630,17 @@ def main():
     sched_on = "ON (every %s min)" % scheduler.configured_minutes() if scheduler.enabled() else "OFF"
     print("DeySafe + SHIELD on %s:%d  |  AI: %s  |  ingest scheduler: %s  |  operator console at /review.html" % (
         host, port, ai_on, sched_on))
+    # Launch-posture warnings — loud at boot so a real deploy never ships a silent
+    # footgun. None of these block startup; see DEPLOY.md for the launch checklist.
+    _warn = []
+    if DEMO_MODE:
+        _warn.append("DEMO_MODE is ON (synthetic incidents) — set DEMO_MODE=0 for real data before public use")
+    if not os.environ.get("DEYSAFE_BEACON_SECRET", "").strip():
+        _warn.append("DEYSAFE_BEACON_SECRET unset — beacon relays are UNSIGNED/spoofable; set it before FindMe/BLE goes live")
+    if not (OPERATOR_TOKEN or auth.auth_enabled()):
+        _warn.append("no OPERATOR_TOKEN / DEYSAFE_OPERATORS — operator console has no working sign-in (locked)")
+    for _w in _warn:
+        print("  [launch-warning]", _w)
     try:
         ThreadingHTTPServer((host, port), Handler).serve_forever()
     finally:

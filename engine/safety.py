@@ -532,7 +532,6 @@ def public_evidence_view(row):
         "evidence_uuid": row.get("evidence_uuid"),
         "case_uuid": row.get("case_uuid"),
         "evidence_type": row.get("evidence_type"),
-        "title": row.get("title"),
         "status": row.get("status"),
         "public_summary": row.get("public_summary") or "",
         "restricted": True,

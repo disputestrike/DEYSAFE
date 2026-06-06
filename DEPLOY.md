@@ -22,6 +22,7 @@ These are the difference between a demo and a real, safe deployment. **Set all o
 | `DATABASE_URL` | **strongly** | Postgres connection string (Railway → add a Postgres plugin → it injects this). Persists data across redeploys. Without it, SQLite is used (add a **Volume** at `data/` so it survives, or data resets each deploy). Set `DEYSAFE_REQUIRE_POSTGRES=1` to refuse to boot on the SQLite fallback. |
 | `DEYSAFE_BEACON_SECRET` | **yes (if FindMe/BLE used)** | Required to verify signed beacon relays. **Without it, anyone can POST a fake "Bluetooth relay" sighting and misdirect a missing-person search.** |
 | `DEYSAFE_INGEST_MINUTES` | recommended | Minutes between automatic public-RSS pulls (e.g. `30`). Default OFF — without it (and without an operator clicking "Pull live public feeds"), the live map stays empty once `DEMO_MODE=0`. |
+| `DEYSAFE_TRUST_XFF` | **`1` on Railway** | Trust `X-Forwarded-For` for caller identity (rate-limit / abuse). Railway puts a proxy in front, so set `1` there so each client is limited separately. Leave UNSET on a direct-connect host — otherwise an attacker forges the header to get a fresh rate-limit bucket per request. |
 
 ### Optional — flip features from "ready" to "live" as you get keys
 | Variable(s) | Enables |
