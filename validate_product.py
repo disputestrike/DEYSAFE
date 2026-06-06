@@ -15,6 +15,7 @@ Run with a server started using OPERATOR_TOKEN and DEMO_MODE, or via:
 import os
 import sys
 import json
+import time
 import urllib.request
 import urllib.error
 
@@ -137,6 +138,7 @@ check("Readiness moved into settings instead of cluttering WakaSafe",
       'id="v-settings"' in app_html and "Phone Safety Readiness" in app_html
       and "settingsBtn" in app_html,
       "settings/readiness markers missing")
+time.sleep(1.0)  # Wait for rate limit reset
 s, j, raw = call("POST", "/api/report", {
     "type": "armed_robbery",
     "place": "Kaduna",
@@ -188,8 +190,9 @@ s, j, raw = call("POST", "/api/journey/ping", {
     "lat": 9.11111,
     "lng": 7.22222,
     "share_consent": False,
-}, want_token=False)
-check("POST /api/journey/ping works without exact GPS consent",
+    "owner_token": owner,
+}, want_token=True)
+check("POST /api/journey/ping requires owner_token for security (P0-03)",
       s == 200 and j.get("ok") is True and (j.get("journey") or {}).get("coords_redacted") is True,
       "status=%s raw=%s" % (s, raw[:160]))
 s, j, raw = call("GET", "/api/journey?id=" + str(jid), want_token=False)

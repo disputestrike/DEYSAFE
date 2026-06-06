@@ -164,6 +164,15 @@ def identity(token):
     return {"user": user, "role": rec["role"]}
 
 
+def generate_owner_token():
+    """Generate a cryptographically strong owner_token for field users (SOS, Journey, Trusted).
+    
+    Uses secrets.token_urlsafe() for cryptographic randomness (not Math.random()).
+    This token is meant to be stored client-side and used for ownership verification.
+    """
+    return secrets.token_urlsafe(32)  # 256-bit entropy
+
+
 # --- self-test ---------------------------------------------------------------
 if __name__ == "__main__":
     pw = "correct horse battery staple"

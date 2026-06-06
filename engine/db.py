@@ -198,6 +198,11 @@ _EXTRA_TABLES = {
     "source_health": (SOURCE_HEALTH_SQLITE, SOURCE_HEALTH_PG),
 }
 
+# Phase 4: SafeMeet tables from safety module
+if safety:
+    _EXTRA_TABLES["safemeet_sessions"] = (safety.SAFEMEET_SQLITE, safety.SAFEMEET_PG)
+    _EXTRA_TABLES["safemeet_checkins"] = (safety.SAFEMEET_CHECKINS_SQLITE, safety.SAFEMEET_CHECKINS_PG)
+
 
 def now_iso():
     return datetime.datetime.now().isoformat(timespec="seconds")
@@ -1440,3 +1445,168 @@ class DB:
 
     def ops_drills(self, limit=500):
         return self._all("SELECT * FROM ops_drills ORDER BY id DESC LIMIT %d" % int(limit))
+
+    # ========================================================================
+    # Phase 4: SafeMeet - High-Risk Meeting Protection
+    # ========================================================================
+    
+    def insert_safemeet_session(self, d):
+        """Create a new SafeMeet session for high-risk meeting protection."""
+        session_uuid = d.get("session_uuid") or self._uid()
+        owner_token = d.get("owner_token", "")
+        
+        # Calculate risk level if not provided
+        risk_level = d.get("risk_level")
+        if not risk_level and safety:
+            risk_level = safety.calculate_meeting_risk(
+                d.get("meeting_type", ""),
+                d.get("meeting_lat"),
+                d.get("meeting_lng"),
+                d.get("expected_arrival")
+            )
+        
+        # Hash PINs if provided
+        safe_pin_hash = None
+        duress_pin_hash = None
+        if d.get("safe_pin") and security:
+            safe_pin_hash = security.hash_password(d["safe_pin"])
+        if d.get("duress_pin") and security:
+            duress_pin_hash = security.hash_password(d["duress_pin"])
+        
+        self._run(
+            """INSERT INTO safemeet_sessions (
+                session_uuid, owner_token, created_at, updated_at,
+                meeting_type, risk_level,
+                meeting_place, meeting_address, meeting_lat, meeting_lng,
+                contact_name, contact_phone, contact_photo_url, contact_social_profile,
+                vehicle_description, license_plate,
+                expected_arrival, expected_departure,
+                checkin_interval_minutes, next_checkin_due,
+                state, safe_pin_hash, duress_pin_hash,
+                user_notes
+            ) VALUES (?,?, ?,?, ?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?, ?,?, ?,?, ?)""",
+            (session_uuid, owner_token, now_iso(), now_iso(),
+             (d.get("meeting_type") or "").strip(), risk_level or "medium",
+             (d.get("meeting_place") or "").strip(), (d.get("meeting_address") or "").strip(),
+             d.get("meeting_lat"), d.get("meeting_lng"),
+             (d.get("contact_name") or "").strip(), (d.get("contact_phone") or "").strip(),
+             (d.get("contact_photo_url") or "").strip(), (d.get("contact_social_profile") or "").strip(),
+             (d.get("vehicle_description") or "").strip(), (d.get("license_plate") or "").strip(),
+             d.get("expected_arrival"), d.get("expected_departure"),
+             int(d.get("checkin_interval_minutes") or 30), d.get("next_checkin_due"),
+             "scheduled", safe_pin_hash, duress_pin_hash,
+             (d.get("user_notes") or "").strip())
+        )
+        return self._one("SELECT * FROM safemeet_sessions WHERE session_uuid=?", (session_uuid,))
+    
+    def get_safemeet_session(self, session_uuid):
+        """Get a SafeMeet session by UUID."""
+        return self._one("SELECT * FROM safemeet_sessions WHERE session_uuid=?", (session_uuid,))
+    
+    def get_safemeet_session_by_token(self, owner_token, limit=50):
+        """Get all SafeMeet sessions for an owner."""
+        return self._all(
+            "SELECT * FROM safemeet_sessions WHERE owner_token=? ORDER BY id DESC LIMIT ?",
+            (owner_token, int(limit))
+        )
+    
+    def update_safemeet_session(self, session_uuid, updates):
+        """Update a SafeMeet session (check-ins, state changes, anomalies)."""
+        sets = []
+        vals = []
+        
+        if "state" in updates:
+            sets.append("state=?")
+            vals.append(updates["state"])
+        if "actual_arrival" in updates:
+            sets.append("actual_arrival=?")
+            vals.append(updates["actual_arrival"])
+        if "actual_departure" in updates:
+            sets.append("actual_departure=?")
+            vals.append(updates["actual_departure"])
+        if "last_checkin_at" in updates:
+            sets.append("last_checkin_at=?")
+            vals.append(updates["last_checkin_at"])
+        if "next_checkin_due" in updates:
+            sets.append("next_checkin_due=?")
+            vals.append(updates["next_checkin_due"])
+        if "missed_checkins" in updates:
+            sets.append("missed_checkins=?")
+            vals.append(updates["missed_checkins"])
+        if "location_changed" in updates:
+            sets.append("location_changed=?")
+            vals.append(1 if updates["location_changed"] else 0)
+        if "route_deviation" in updates:
+            sets.append("route_deviation=?")
+            vals.append(1 if updates["route_deviation"] else 0)
+        if "phone_off_suddenly" in updates:
+            sets.append("phone_off_suddenly=?")
+            vals.append(1 if updates["phone_off_suddenly"] else 0)
+        if "duress_triggered" in updates:
+            sets.append("duress_triggered=?")
+            sets.append("duress_trigger_time=?")
+            vals.append(1 if updates["duress_triggered"] else 0)
+            vals.append(now_iso() if updates["duress_triggered"] else None)
+        if "escalated_at" in updates:
+            sets.append("escalated_at=?")
+            vals.append(updates["escalated_at"])
+        if "escalation_reason" in updates:
+            sets.append("escalation_reason=?")
+            vals.append(updates["escalation_reason"])
+        if "system_notes" in updates:
+            sets.append("system_notes=?")
+            vals.append(updates["system_notes"])
+        
+        if sets:
+            sets.append("updated_at=?")
+            vals.append(now_iso())
+            vals.append(session_uuid)
+            self._run(
+                "UPDATE safemeet_sessions SET %s WHERE session_uuid=?" % ", ".join(sets),
+                vals
+            )
+        return self._one("SELECT * FROM safemeet_sessions WHERE session_uuid=?", (session_uuid,))
+    
+    def insert_safemeet_checkin(self, d):
+        """Record a SafeMeet check-in."""
+        checkin_uuid = d.get("checkin_uuid") or self._uid()
+        session_id = d.get("session_id")
+        
+        self._run(
+            """INSERT INTO safemeet_checkins (
+                session_id, checkin_uuid, ts, checkin_type,
+                lat, lng, location_accuracy, battery_level, network_type,
+                note, duress_flag, photo_url
+            ) VALUES (?, ?,?, ?,?, ?,?,?, ?,?, ?)""",
+            (session_id, checkin_uuid, now_iso(), (d.get("checkin_type") or "manual").strip(),
+             d.get("lat"), d.get("lng"), d.get("location_accuracy"),
+             d.get("battery_level"), (d.get("network_type") or "").strip(),
+             (d.get("note") or "").strip(), 1 if d.get("duress_flag") else 0,
+             (d.get("photo_url") or "").strip())
+        )
+        
+        # Update session's last_checkin_at and next_checkin_due
+        if session_id:
+            session = self._one("SELECT * FROM safemeet_sessions WHERE id=?", (session_id,))
+            if session and safety:
+                interval = session.get("checkin_interval_minutes") or 30
+                from datetime import datetime, timedelta
+                next_due = datetime.now() + timedelta(minutes=interval)
+                self.update_safemeet_session(
+                    session.get("session_uuid"),
+                    {
+                        "last_checkin_at": now_iso(),
+                        "next_checkin_due": next_due.isoformat(timespec="seconds")
+                    }
+                )
+        
+        return self._one("SELECT * FROM safemeet_checkins WHERE checkin_uuid=?", (checkin_uuid,))
+    
+    def get_safemeet_checkins(self, session_uuid, limit=100):
+        """Get check-ins for a SafeMeet session."""
+        return self._all(
+            """SELECT c.* FROM safemeet_checkins c
+               JOIN safemeet_sessions s ON c.session_id = s.id
+               WHERE s.session_uuid=? ORDER BY c.id DESC LIMIT ?""",
+            (session_uuid, int(limit))
+        )
