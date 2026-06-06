@@ -129,6 +129,70 @@ def _recent_reports_window(minutes=30, limit=300):
     return out[-limit:]
 
 
+# --- ABU-01 content-aware duplicate throttle (NAT-SAFE) ----------------------
+# Nigeria runs almost entirely on carrier-grade NAT, so MANY distinct, legitimate
+# reporters share ONE public IP. A naive per-IP request cap would therefore SILENCE
+# real mass-reporting during an actual attack — the single worst failure mode for a
+# safety app (exactly when many people need to report the same event at once). So we
+# do NOT cap requests per IP. Instead we throttle only the spam SIGNATURE: the same
+# caller posting the SAME / near-identical report CONTENT over and over in a short
+# window (that pattern = automation/flooding, not a crowd). DISTINCT reports from the
+# same IP — different people describing different things — always pass.
+#
+# Mechanism: a per-(caller + normalized-content-hash) sliding window. We normalise the
+# (type+place+description) so trivial variations collapse to one signature — crucially
+# we STRIP digit runs, so an automated burst that only bumps a trailing counter
+# ("...probe 0", "...probe 1", ...) is recognised as the SAME content, while genuinely
+# different wording yields a different signature and is never throttled. More than
+# _DUP_MAX_PER_WINDOW posts of one signature within _DUP_WINDOW_SECONDS from one caller
+# -> 429 on the excess dupes only. The backing dict is bounded and time-pruned so it
+# can never grow without limit.
+_DUP_WINDOW_SECONDS = 60.0     # sliding window per (caller, content) signature
+_DUP_MAX_PER_WINDOW = 3        # allow a few honest re-submits; throttle the 4th+ dupe
+_DUP_MAX_KEYS = 4096           # hard cap on tracked signatures (memory bound)
+_DUP_HITS = _collections.OrderedDict()   # signature_key -> [recent monotonic timestamps]
+_DUP_LOCK = _threading.Lock()
+
+
+def _content_signature(typ, place, desc):
+    """Normalise a report's (type, place, description) into a spam signature.
+
+    Lowercases, strips digit runs (so a counter-incremented burst collapses to one
+    signature), drops non-alphanumeric noise, and collapses whitespace. Two reports
+    that differ only by a number / punctuation / casing share a signature; reports
+    with genuinely different wording do not."""
+    blob = "{}\x1f{}\x1f{}".format(typ or "", place or "", desc or "").lower()
+    blob = re.sub(r"\d+", "", blob)              # trailing/embedded counters -> nothing
+    blob = re.sub(r"[^a-z\x1f]+", " ", blob)     # keep letters + field separator only
+    blob = re.sub(r"\s+", " ", blob).strip()
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
+
+
+def _duplicate_report_throttled(client_id, typ, place, desc):
+    """True if `client_id` has already posted this near-identical content
+    _DUP_MAX_PER_WINDOW times within _DUP_WINDOW_SECONDS (i.e. this one is a dupe to
+    throttle). NAT-safe: keyed on caller + CONTENT, so distinct reports from the same
+    shared IP are never throttled. Records this hit when it allows it. Self-pruning."""
+    import time as _time
+    sig = client_id + "|" + _content_signature(typ, place, desc)
+    now = _time.monotonic()
+    cutoff = now - _DUP_WINDOW_SECONDS
+    with _DUP_LOCK:
+        # Opportunistically prune fully-expired signatures so the dict stays bounded.
+        if len(_DUP_HITS) > _DUP_MAX_KEYS:
+            for k in [k for k, v in _DUP_HITS.items() if not v or v[-1] < cutoff][: len(_DUP_HITS) - _DUP_MAX_KEYS + 1]:
+                _DUP_HITS.pop(k, None)
+        hits = [t for t in _DUP_HITS.get(sig, ()) if t >= cutoff]
+        if len(hits) >= _DUP_MAX_PER_WINDOW:
+            _DUP_HITS[sig] = hits            # keep the window; do NOT count the blocked dupe
+            _DUP_HITS.move_to_end(sig)
+            return True
+        hits.append(now)
+        _DUP_HITS[sig] = hits
+        _DUP_HITS.move_to_end(sig)
+        return False
+
+
 # --- Phase 1 response-loop helpers (SOS-01/02, BC-03) ------------------------
 # Channels we attempt for a trusted-circle SOS notify, in reach-priority order
 # (broadcast.py orders the same way). Each trusted contact may override with its
@@ -1716,13 +1780,28 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/report":
             # ABU-01: throttle anonymous report spam (per caller). Bucket capacity =
-            # 20/min: a tight burst (25 identical reports) trips a 429, while normal
-            # spread-out reporting is unaffected.
+            # 12/min: a tight burst trips a 429, while normal spread-out reporting is
+            # unaffected. NOTE: each /api/report does a synchronous recompute and is
+            # therefore SLOW, so a scripted "burst" actually arrives SEQUENTIALLY over
+            # tens of seconds — slow enough that this per-minute bucket refills between
+            # hits and never trips. So the real spam defence below is content-aware.
             if not self._rate_ok("/api/report", 12):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
             typ, place, desc = (data.get("type") or "").strip(), (data.get("place") or "").strip(), (data.get("description") or "").strip()
             if not place or not desc:
                 return self._json({"ok": False, "error": "place and description required"}, 400)
+            # ABU-01 (NAT-SAFE content-aware throttle): Nigeria is carrier-grade NAT, so
+            # many DISTINCT real reporters share one public IP. We must NOT cap requests
+            # per IP — that would mute genuine mass-reporting during an attack. Instead
+            # we throttle only the spam SIGNATURE: the SAME caller re-posting the SAME /
+            # near-identical CONTENT (type+place+description, digit-runs normalised so a
+            # counter-incremented flood collapses to one signature) more than a few times
+            # within ~60s. Distinct reports from the same IP always pass; only the
+            # duplicate flood is 429'd. ABU-03 quarantine + reputation below stay intact.
+            if _duplicate_report_throttled(self._client_id(), typ, place, desc):
+                db.audit("api", "report_dup_throttled", "place=%s type=%s" % (place, typ or "-"))
+                return self._json({"ok": False, "error": "duplicate report throttled",
+                                   "note": "This near-identical report was already submitted repeatedly; distinct reports are always accepted."}, 429)
             media_in = data.get("media") if isinstance(data.get("media"), dict) else None
             evidence_meta = None
             media_note = ""
