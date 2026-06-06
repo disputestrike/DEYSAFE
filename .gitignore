@@ -1,8 +1,22 @@
+```
+# Python
 __pycache__/
 *.pyc
-# runtime data: local DB, backups, logs, PIDs, test outputs — never commit (may contain PII)
-data/
-*.log
-.verify-logs/
-console/incidents.json
-.DS_Store
+*.pyo
+*.pyd
+*.py~
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Databases
+*.db
+
+# Backup files
+*.bak*
+
+# Scripts
+scripts/*.sh
+```

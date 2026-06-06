@@ -551,3 +551,338 @@ def safety_point_public(row):
         "vetted": bool(row.get("vetted")),
         "last_verified_at": row.get("last_verified_at"),
     }
+
+
+# =============================================================================
+# PHASE 4: SafeMeet - High-Risk Meeting Protection
+# =============================================================================
+# Pre-incident workflow for dating, marketplace sales, job interviews,
+# deliveries, ride-share pickups, and other high-risk encounters.
+# =============================================================================
+
+SAFEMEET_SQLITE = """
+CREATE TABLE IF NOT EXISTS safemeet_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_uuid TEXT UNIQUE,
+  owner_token TEXT,
+  created_at TEXT, updated_at TEXT,
+  
+  -- Meeting details
+  meeting_type TEXT,
+  risk_level TEXT DEFAULT 'medium',
+  
+  -- Location
+  meeting_place TEXT,
+  meeting_address TEXT,
+  meeting_lat REAL,
+  meeting_lng REAL,
+  
+  -- Counterparty information
+  contact_name TEXT,
+  contact_phone TEXT,
+  contact_photo_url TEXT,
+  contact_social_profile TEXT,
+  
+  -- Vehicle info (for rides, deliveries, marketplace)
+  vehicle_description TEXT,
+  license_plate TEXT,
+  
+  -- Timing
+  expected_arrival TEXT,
+  expected_departure TEXT,
+  actual_arrival TEXT,
+  actual_departure TEXT,
+  
+  -- Check-in workflow
+  checkin_interval_minutes INTEGER DEFAULT 30,
+  last_checkin_at TEXT,
+  next_checkin_due TEXT,
+  missed_checkins INTEGER DEFAULT 0,
+  
+  -- Status tracking
+  state TEXT DEFAULT 'scheduled',
+  -- states: scheduled, in_progress, completed, escalated, cancelled
+  
+  -- Duress & safety
+  duress_triggered INTEGER DEFAULT 0,
+  duress_trigger_time TEXT,
+  safe_pin_hash TEXT,
+  duress_pin_hash TEXT,
+  
+  -- Anomaly detection
+  location_changed INTEGER DEFAULT 0,
+  route_deviation INTEGER DEFAULT 0,
+  phone_off_suddenly INTEGER DEFAULT 0,
+  
+  -- Escalation
+  escalated_at TEXT,
+  escalation_reason TEXT,
+  escalated_to_contacts INTEGER DEFAULT 0,
+  
+  -- Evidence preservation
+  evidence_preserved INTEGER DEFAULT 0,
+  evidence_snapshot_url TEXT,
+  
+  -- Notes
+  user_notes TEXT,
+  system_notes TEXT
+);
+"""
+
+SAFEMEET_PG = """
+CREATE TABLE IF NOT EXISTS safemeet_sessions (
+  id SERIAL PRIMARY KEY,
+  session_uuid TEXT UNIQUE,
+  owner_token TEXT,
+  created_at TEXT, updated_at TEXT,
+  
+  meeting_type TEXT,
+  risk_level TEXT DEFAULT 'medium',
+  
+  meeting_place TEXT,
+  meeting_address TEXT,
+  meeting_lat DOUBLE PRECISION,
+  meeting_lng DOUBLE PRECISION,
+  
+  contact_name TEXT,
+  contact_phone TEXT,
+  contact_photo_url TEXT,
+  contact_social_profile TEXT,
+  
+  vehicle_description TEXT,
+  license_plate TEXT,
+  
+  expected_arrival TEXT,
+  expected_departure TEXT,
+  actual_arrival TEXT,
+  actual_departure TEXT,
+  
+  checkin_interval_minutes INTEGER DEFAULT 30,
+  last_checkin_at TEXT,
+  next_checkin_due TEXT,
+  missed_checkins INTEGER DEFAULT 0,
+  
+  state TEXT DEFAULT 'scheduled',
+  
+  duress_triggered INTEGER DEFAULT 0,
+  duress_trigger_time TEXT,
+  safe_pin_hash TEXT,
+  duress_pin_hash TEXT,
+  
+  location_changed INTEGER DEFAULT 0,
+  route_deviation INTEGER DEFAULT 0,
+  phone_off_suddenly INTEGER DEFAULT 0,
+  
+  escalated_at TEXT,
+  escalation_reason TEXT,
+  escalated_to_contacts INTEGER DEFAULT 0,
+  
+  evidence_preserved INTEGER DEFAULT 0,
+  evidence_snapshot_url TEXT,
+  
+  user_notes TEXT,
+  system_notes TEXT
+);
+"""
+
+SAFEMEET_CHECKINS_SQLITE = """
+CREATE TABLE IF NOT EXISTS safemeet_checkins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER,
+  checkin_uuid TEXT UNIQUE,
+  ts TEXT,
+  checkin_type TEXT,
+  -- types: scheduled, manual, auto_location, duress_safe, duress_covert
+  lat REAL,
+  lng REAL,
+  location_accuracy REAL,
+  battery_level REAL,
+  network_type TEXT,
+  note TEXT,
+  duress_flag INTEGER DEFAULT 0,
+  photo_url TEXT,
+  audio_url TEXT
+);
+"""
+
+SAFEMEET_CHECKINS_PG = """
+CREATE TABLE IF NOT EXISTS safemeet_checkins (
+  id SERIAL PRIMARY KEY,
+  session_id INTEGER,
+  checkin_uuid TEXT UNIQUE,
+  ts TEXT,
+  checkin_type TEXT,
+  lat DOUBLE PRECISION,
+  lng DOUBLE PRECISION,
+  location_accuracy DOUBLE PRECISION,
+  battery_level DOUBLE PRECISION,
+  network_type TEXT,
+  note TEXT,
+  duress_flag INTEGER DEFAULT 0,
+  photo_url TEXT,
+  audio_url TEXT
+);
+"""
+
+
+def safemeet_session_public(row):
+    """Return public-safe view of a SafeMeet session (no tokens/hashes)."""
+    return {
+        "session_uuid": row.get("session_uuid"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "meeting_type": row.get("meeting_type"),
+        "risk_level": row.get("risk_level"),
+        "meeting_place": row.get("meeting_place"),
+        "meeting_address": row.get("meeting_address"),
+        "meeting_lat": row.get("meeting_lat"),
+        "meeting_lng": row.get("meeting_lng"),
+        "contact_name": row.get("contact_name"),
+        "contact_phone": row.get("contact_phone"),
+        "vehicle_description": row.get("vehicle_description"),
+        "license_plate": row.get("license_plate"),
+        "expected_arrival": row.get("expected_arrival"),
+        "expected_departure": row.get("expected_departure"),
+        "actual_arrival": row.get("actual_arrival"),
+        "actual_departure": row.get("actual_departure"),
+        "checkin_interval_minutes": row.get("checkin_interval_minutes"),
+        "last_checkin_at": row.get("last_checkin_at"),
+        "next_checkin_due": row.get("next_checkin_due"),
+        "missed_checkins": row.get("missed_checkins"),
+        "state": row.get("state"),
+        "duress_triggered": bool(row.get("duress_triggered")),
+        "location_changed": bool(row.get("location_changed")),
+        "route_deviation": bool(row.get("route_deviation")),
+        "escalated_at": row.get("escalated_at"),
+        "escalation_reason": row.get("escalation_reason"),
+        "user_notes": row.get("user_notes"),
+    }
+
+
+def safemeet_checkin_public(row):
+    """Return public-safe view of a SafeMeet check-in."""
+    return {
+        "checkin_uuid": row.get("checkin_uuid"),
+        "ts": row.get("ts"),
+        "checkin_type": row.get("checkin_type"),
+        "lat": row.get("lat"),
+        "lng": row.get("lng"),
+        "location_accuracy": row.get("location_accuracy"),
+        "battery_level": row.get("battery_level"),
+        "network_type": row.get("network_type"),
+        "note": row.get("note"),
+        "duress_flag": bool(row.get("duress_flag")),
+        "photo_url": row.get("photo_url"),
+    }
+
+
+def calculate_meeting_risk(meeting_type, location_lat, location_lng, time_of_day, historical_data=None):
+    """
+    Calculate initial risk level for a meeting based on multiple factors.
+    
+    Returns: 'low', 'medium', 'high', 'critical'
+    """
+    risk_score = 50  # baseline medium
+    
+    # Meeting type adjustments
+    type_risks = {
+        'dating': 20,
+        'marketplace_sale': 15,
+        'job_interview': 10,
+        'ride_share': 25,
+        'delivery': 15,
+        'house_call': 20,
+        'business_meeting': 5,
+        'informant_meeting': 40,
+    }
+    risk_score += type_risks.get(meeting_type, 10)
+    
+    # Time of day adjustments (simplified)
+    if time_of_day:
+        try:
+            hour = int(time_of_day.split('T')[1].split(':')[0]) if 'T' in time_of_day else 12
+            if hour < 6 or hour > 22:
+                risk_score += 15  # night meetings higher risk
+        except Exception:
+            pass
+    
+    # Historical crime data for location (if available)
+    if historical_data:
+        # Would query incident history for this lat/lng
+        pass
+    
+    # Convert score to level
+    if risk_score >= 80:
+        return 'critical'
+    elif risk_score >= 60:
+        return 'high'
+    elif risk_score >= 40:
+        return 'medium'
+    else:
+        return 'low'
+
+
+def detect_meeting_anomalies(session_row, current_lat, current_lng, device_status):
+    """
+    Detect anomalies during an active SafeMeet session.
+    
+    Returns dict with anomaly flags and reasons.
+    """
+    anomalies = {
+        'location_changed': False,
+        'route_deviation': False,
+        'phone_off_suddenly': False,
+        'duration_exceeded': False,
+        'checkin_missed': False,
+        'reasons': []
+    }
+    
+    # Check if location changed significantly from planned meeting place
+    if session_row.get('meeting_lat') and current_lat:
+        from math import radians, sin, cos, sqrt, atan2
+        def haversine(lat1, lon1, lat2, lon2):
+            R = 6371  # Earth radius in km
+            dlat = radians(lat2 - lat1)
+            dlon = radians(lon2 - lon1)
+            a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+            c = 2 * atan2(sqrt(a), sqrt(1-a))
+            return R * c
+        
+        distance = haversine(
+            session_row['meeting_lat'], session_row['meeting_lng'],
+            current_lat, current_lng
+        )
+        
+        if distance > 5.0:  # More than 5km from meeting place
+            anomalies['location_changed'] = True
+            anomalies['reasons'].append(f'Moved {distance:.1f}km from meeting location')
+    
+    # Check if phone was turned off suddenly during active meeting
+    if device_status == 'offline' and session_row.get('state') == 'in_progress':
+        anomalies['phone_off_suddenly'] = True
+        anomalies['reasons'].append('Device went offline during active meeting')
+    
+    # Check if meeting duration exceeded expected time
+    if session_row.get('expected_departure') and session_row.get('actual_arrival'):
+        from datetime import datetime
+        try:
+            expected_end = datetime.fromisoformat(session_row['expected_departure'])
+            now = datetime.now()
+            if now > expected_end:
+                anomalies['duration_exceeded'] = True
+                anomalies['reasons'].append('Meeting exceeded expected duration')
+        except Exception:
+            pass
+    
+    # Check for missed check-ins
+    if session_row.get('next_checkin_due'):
+        from datetime import datetime
+        try:
+            next_due = datetime.fromisoformat(session_row['next_checkin_due'])
+            if datetime.now() > next_due:
+                anomalies['checkin_missed'] = True
+                anomalies['reasons'].append('Scheduled check-in missed')
+        except Exception:
+            pass
+    
+    return anomalies

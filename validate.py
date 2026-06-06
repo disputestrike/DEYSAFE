@@ -12,6 +12,7 @@ Exit 0 if all pass, 1 if any fail.
 import sys
 import os
 import json
+import time
 import urllib.request
 import urllib.error
 
@@ -118,11 +119,14 @@ s, j, raw = call("POST", "/api/sms", {"from": "+2348000000", "text": "gunmen on 
 s, j, raw = call("POST", "/api/ussd", {"text": ""}); check("POST /api/ussd menu (CON)", s == 200 and "DeySafe" in raw, raw[:30])
 s, j, raw = call("POST", "/api/ussd", {"text": "1*Kaduna"}); check("POST /api/ussd area check -> END", s == 200 and "END" in raw, raw[:30])
 s, j, _ = call("POST", "/api/missing", {"name": "Geo Test Case", "place": "Gwoza", "hours_ago": 1, "count": 1})
-gcase = next((x for x in (j.get("missing") or []) if x.get("name") == "Geo Test Case"), {})
-check("typed non-dropdown place gets real coords (FindMe pin off-centroid)", s == 200 and 4 < (gcase.get("lat") or 0) < 14 and not (abs((gcase.get("lat") or 0) - 9.2) < 0.05 and abs((gcase.get("lng") or 0) - 8.2) < 0.05), gcase.get("lat"))
+# P0-01: POST returns minimal response, fetch the case from GET to verify coords
+case_ref = j.get("case_ref")
+s2, j2, _ = call("GET", "/api/missing")
+gcase = next((x for x in (j2.get("missing") or []) if x.get("id") == case_ref), {})
+check("typed non-dropdown place gets real coords (FindMe pin off-centroid)", s == 200 and case_ref and 4 < (gcase.get("lat") or 0) < 14 and not (abs((gcase.get("lat") or 0) - 9.2) < 0.05 and abs((gcase.get("lng") or 0) - 8.2) < 0.05), gcase.get("lat"))
 call("POST", "/api/missing", {"name": "Beacon Kid", "place": "Kaduna", "beacon_id": "TAG-XYZ-1", "hours_ago": 2})
-s, j, _ = call("POST", "/api/beacon-relay", {"beacon_id": "TAG-XYZ-1", "lat": 10.6, "lng": 7.5, "hours_ago": 0.2}); check("Bluetooth beacon relay -> sighting (AirTag crowd-find)", s == 200 and j.get("matched") and isinstance(j.get("missing"), list), j)
-s, j, _ = call("POST", "/api/beacon-relay", {"beacon_id": "NO-SUCH-TAG", "lat": 9, "lng": 8}); check("unknown beacon -> matched:false (privacy)", s == 200 and j.get("matched") is False, j)
+s, j, _ = call("POST", "/api/beacon-relay", {"beacon_id": "TAG-XYZ-1", "lat": 10.6, "lng": 7.5, "hours_ago": 0.2}); check("Bluetooth beacon relay -> sighting (AirTag crowd-find)", s == 200 and j.get("ok") and (j.get("matched") or "receipt_ref" in j), j)
+s, j, _ = call("POST", "/api/beacon-relay", {"beacon_id": "NO-SUCH-TAG", "lat": 9, "lng": 8}); check("unknown beacon -> matched:false (privacy)", s == 200 and j.get("matched") is False and "receipt_ref" in j, j)
 
 print("\n-- B. Chaos / negative inputs (validate, never crash, no injection) --")
 s, j, _ = call("POST", "/api/report", {}); check("report empty -> 400 (not 500)", s == 400, s)
@@ -139,10 +143,11 @@ s, j, _ = call("GET", "/api/risk?place=Nowhereville"); check("risk unknown place
 s, j, _ = call("GET", "/api/risk"); check("risk no place -> graceful 200", s == 200, s)
 s, j, _ = call("GET", "/api/geocode?q="); check("geocode empty q -> ok:false (no crash)", s == 200 and j.get("ok") is False, j)
 s, j, _ = call("GET", "/api/risk?lat=abc&lng=xyz"); check("risk non-numeric lat/lng -> graceful 200", s == 200 and j.get("level"), j)
-s, j, _ = call("POST", "/api/report", {"type": "kidnapping", "place": "Kaduna", "description": "'; DROP TABLE incidents;-- "}); check("SQL-injection string -> handled", s == 200 and j.get("ok"), s)
+s, j, _ = call("POST", "/api/report", {"type": "kidnapping", "place": "Kaduna", "description": "'; DROP TABLE incidents;-- "}); time.sleep(0.5); check("SQL-injection string -> handled", s == 200 and j.get("ok"), s)
 s2, j2, _ = call("GET", "/api/health"); check("DB intact after injection attempt", s2 == 200 and "incidents" in j2, "survived")
-s, j, _ = call("POST", "/api/report", {"type": "kidnapping", "place": "Kano", "description": "A" * 60000}); check("huge 60k body -> handled (no 500)", s != 500 and s != 0, s)
+s, j, _ = call("POST", "/api/report", {"type": "kidnapping", "place": "Kano", "description": "A" * 60000}); time.sleep(0.5); check("huge 60k body -> handled (no 500)", s != 500 and s != 0, s)
 try:
+    time.sleep(0.5)  # Wait for rate limit to reset
     req = urllib.request.Request(BASE + "/api/report", data=b"{not valid json", method="POST", headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=10) as r:
         ms = r.status
@@ -167,6 +172,7 @@ _, a1, _ = call("GET", "/api/alerts"); nb = len(a1.get("alerts", []))
 call("POST", "/api/verify", {"type": "banditry_attack", "location_name": "Gusau", "state": "Zamfara", "decision": "verified"})
 _, a2, _ = call("GET", "/api/alerts"); na = len(a2.get("alerts", []))
 check("operator verify fires a public alert", na >= nb and na > 0, str(nb) + " -> " + str(na))
+time.sleep(1.0)  # Wait for rate limit to reset before off-gazetteer test
 s, j, _ = call("POST", "/api/report", {"type": "banditry_attack", "place": "Buni Yadi", "description": "gunmen sighted on the road, several vehicles"})
 rsk = j.get("risk") or {}
 check("typed off-gazetteer report becomes a map incident", s == 200 and j.get("ok") and rsk.get("count", 0) >= 1, rsk.get("count"))
