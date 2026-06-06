@@ -350,6 +350,38 @@ class DeySafeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data).encode("utf-8"))
 
+    def _static(self, rel_path):
+        """Serve a static file from the app/ directory."""
+        if rel_path == "/" or not rel_path:
+            rel_path = "index.html"
+        
+        # Security: prevent path traversal.
+        path = os.path.normpath(os.path.join(APP_DIR, rel_path.lstrip("/")))
+        if not path.startswith(os.path.abspath(APP_DIR)):
+            return self.send_error(403)
+            
+        if not os.path.exists(path) or os.path.isdir(path):
+            # Fallback to index.html for PWA routing.
+            path = os.path.join(APP_DIR, "index.html")
+            if not os.path.exists(path):
+                return self.send_error(404)
+
+        ext = os.path.splitext(path)[1].lower()
+        ctype = CTYPES.get(ext, "application/octet-stream")
+        
+        try:
+            with open(path, "rb") as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", len(content))
+            # Cache PWA assets for 1 hour.
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception:
+            self.send_error(500)
+
     def do_OPTIONS(self):
         self._json({"ok": True})
 
@@ -469,6 +501,10 @@ class DeySafeHandler(BaseHTTPRequestHandler):
             # PRIV-01: redact sensitive fields for the public poll.
             deliveries = db.get_sos_deliveries(ev["id"])
             return self._json(public_sos_view(ev, deliveries))
+
+        # --- Static Frontend Fallback -----------------------------------------
+        if not u.path.startswith("/api/"):
+            return self._static(u.path)
 
         self.send_error(404)
 
