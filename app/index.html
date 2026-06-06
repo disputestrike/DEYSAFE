@@ -136,6 +136,7 @@
   nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:600}
   nav button{flex:1;background:none;border:none;color:var(--faint);padding:9px 0 11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;font:inherit;font-size:10.5px;font-weight:600}
   nav button svg{width:21px;height:21px}nav button.active{color:var(--brand)}
+  nav button.watchnav.on{color:#1f9d57}nav button.watchnav.on svg{fill:#1f9d5722}
   @media(min-width:860px){
     body{background:#d9e0ea}
     .app{max-width:1160px}
@@ -178,8 +179,12 @@ Check hotel address</textarea>
     <section class="view active" id="v-home">
       <div id="map"></div>
       <div class="panel">
-        <div class="srow"><input id="areaSelect" list="placelist" autocomplete="off" placeholder="Live map starting… or type an area" aria-label="Your area" /><button id="micBtn" class="mic" onclick="startVoice()" title="Speak a place" aria-label="Voice input">🎤</button><button id="watchBtn" class="mic watchmini" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me">🛡</button><span class="pill" id="lvpill">—</span></div>
-        <div class="livestate"><span id="liveDot" class="live-dot"></span><span id="liveState">Waiting for live location permission</span></div>
+        <!-- Live location drives your area safety automatically (Google-Maps style), so the
+             old "type an area" search box + voice-a-place mic were removed. #areaSelect is kept
+             HIDDEN so the area-risk, channel and voice-assistant functions keep working. The
+             "Warn me of danger" shield moved to the bottom nav. -->
+        <input id="areaSelect" type="hidden" autocomplete="off" aria-hidden="true" />
+        <div class="livestate"><span id="liveDot" class="live-dot"></span><span id="liveState">Waiting for live location permission</span><span class="pill" id="lvpill" style="margin-left:auto">—</span></div>
         <div class="guide" id="guide"></div>
         <div id="areaReport"></div>
         <div class="assistantbox">
@@ -304,6 +309,7 @@ Check hotel address</textarea>
     <button data-v="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Report</button>
     <button data-v="sos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg>SOS</button>
     <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>FindMe</button>
+    <button id="watchBtn" class="watchnav" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z"/></svg>Warn me</button>
   </nav>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -654,6 +660,7 @@ function locateMe(){
     showArea('Your location',r,lat,lng,true,true);sayArea('your location',r);
   },function(err){toast('Location off — type your area instead');$('#areaSelect').focus();},
   {enableHighAccuracy:true,timeout:8000,maximumAge:30000});}
+let LIVE_AREA_SIG=null;
 function updateLivePosition(lat,lng,accuracy,recenter){
   LIVE_POS={lat:lat,lng:lng,accuracy:accuracy||0,ts:Date.now()};
   var dot=$('#liveDot'),state=$('#liveState');
@@ -664,6 +671,15 @@ function updateLivePosition(lat,lng,accuracy,recenter){
     L.marker([lat,lng],{icon:missIcon('●')}).addTo(meLayer).bindPopup('You are here · private to this phone');
   }
   checkProximity(lat,lng);
+  // Drive the home area-safety report from live location automatically — this replaces
+  // the removed "type an area" search box. Throttled to re-render only when the on-device
+  // risk picture (level + count) changes, so it doesn't rebuild on every GPS tick.
+  // Computed ON-DEVICE from already-loaded public incidents (privacy bright line).
+  try{
+    var _rr=riskAtClient(lat,lng,60),_sig=(_rr.level||'GREEN')+':'+(_rr.count||0);
+    if(_sig!==LIVE_AREA_SIG){LIVE_AREA_SIG=_sig;showArea('Your area',_rr,lat,lng,true,false);
+      var _n=(_rr.incidents||[])[0],_as=$('#areaSelect');if(_as&&!_as.value&&_n&&_n.location_name)_as.value=_n.location_name;}
+  }catch(e){}
   if(recenter&&map){try{map.setView([lat,lng],14);}catch(e){}}
 }
 function startLiveLocation(){
@@ -705,6 +721,13 @@ async function runAssistant(){
   if(/sos|help me|emergency|danger now|silent/.test(low)){
     go('sos');if(/silent|quiet|covert|kidnapp|abduct/.test(low)){var s=$('#sosSilentToggle');if(s){s.checked=true;renderSosButtons();}}return;
   }
+  // "Am I safe in X / is it safe in X / how safe is X" -> area risk (the function the
+  // removed home search box used to do). Guarded so an actual report ("armed robbery
+  // near Oshodi") still falls through to the report intake below.
+  if(/\b(safe|risk|dangerous)\b/.test(low)&&!/report|saw|happening|attack|robber|kidnapp|abduct|missing|gun|bandit/.test(low)){
+    var pl=low.replace(/[?.!]/g,'').replace(/^(am i|are we|is it|how|will i be|should i)\s+/,'').replace(/\b(safe|risk|dangerous|danger)\b/g,'').replace(/\b(in|at|near|is|it|to|go|right now|now|today|here|there)\b/g,' ').replace(/\s+/g,' ').trim();
+    if(pl){$('#areaSelect').value=titleCaseWords(pl);go('home');await loadLevel(true);sayLast();return;}
+  }
   $('#rNL').value=text;go('report');await nlIntake('report');
 }
 function startVoice(){
@@ -742,13 +765,13 @@ function checkProximity(lat,lng){
 }
 function toggleWatch(){
   var btn=$('#watchBtn');
-  if(WATCH!=null){navigator.geolocation.clearWatch(WATCH);WATCH=null;if(btn){btn.classList.remove('on');btn.textContent='🛡';}$('#proWarn').style.display='none';toast('Proactive alerts off');return;}
+  if(WATCH!=null){navigator.geolocation.clearWatch(WATCH);WATCH=null;if(btn){btn.classList.remove('on');}$('#proWarn').style.display='none';toast('Proactive alerts off');return;}
   if(!navigator.geolocation){toast('Location not supported here');return;}
   ANNOUNCED.clear();
   WATCH=navigator.geolocation.watchPosition(function(p){checkProximity(p.coords.latitude,p.coords.longitude);},
-    function(){toast('Turn on location to get proactive alerts');if(btn){btn.classList.remove('on');btn.textContent='🛡';}WATCH=null;},
+    function(){toast('Turn on location to get proactive alerts');if(btn){btn.classList.remove('on');}WATCH=null;},
     {enableHighAccuracy:true,maximumAge:15000,timeout:20000});
-  if(btn){btn.classList.add('on');btn.textContent='🛡';}
+  if(btn){btn.classList.add('on');}
   toast('🛡 Proactive alerts ON — I\'ll warn you of danger within '+WATCH_KM+' km as you move. Your location stays on your device.');
 }
 // --- AI intake: speak/type plain language -> /api/intake -> pre-fill the form.
@@ -1087,10 +1110,10 @@ async function sendMissing(){const n=$('#mName').value.trim();if(!n){$('#mName')
   if(r.ok){o.innerHTML='✓ Search case opened. See it on the map with its search area.';['#mName','#mExact','#mVeh','#mClo','#mDir'].forEach(s=>$(s).value='');MISS=r.missing||[];drawMarkers();renderHome();renderMissList();}
   else o.innerHTML='⚠ '+esc(r.error||'failed');}
 
-function go(v){switchTab(v);document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));}
+function go(v){switchTab(v);document.querySelectorAll('nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));}
 function switchTab(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));$('#v-'+v).classList.add('active');
   if(v==='home'){loadLevel(false);setTimeout(()=>map&&map.invalidateSize(),60);}}
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.v));
+document.querySelectorAll('nav button[data-v]').forEach(b=>b.onclick=()=>go(b.dataset.v));
 document.querySelectorAll('.seg').forEach(b=>b.onclick=()=>{document.querySelectorAll('.seg').forEach(x=>x.classList.remove('on'));b.classList.add('on');SEG=b.dataset.seg;renderHome();});
 $('#areaSelect').onchange=function(){loadLevel(true);};
 // OFF-01: drain the device outbox the moment we come back online; reflect state live.
