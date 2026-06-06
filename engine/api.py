@@ -275,6 +275,25 @@ def evidence_public_view(row):
     return safety.public_evidence_view(row) if row else None
 
 
+# In-process road-route cache. The free public OSRM demo is rate-limited and
+# frequently times out, which was dropping WakaSafe to the straight-line corridor
+# intermittently. Caching successful routes (keyed to ~11 m rounded endpoints) means
+# a corridor people actually travel keeps drawing the REAL road even when the
+# provider briefly fails. Bounded so memory can't grow without limit.
+_ROUTE_CACHE = {}
+_ROUTE_CACHE_ORDER = []
+_ROUTE_CACHE_MAX = 512
+
+
+def _route_cache_put(key, value):
+    if key in _ROUTE_CACHE:
+        return
+    _ROUTE_CACHE[key] = dict(value)
+    _ROUTE_CACHE_ORDER.append(key)
+    if len(_ROUTE_CACHE_ORDER) > _ROUTE_CACHE_MAX:
+        _ROUTE_CACHE.pop(_ROUTE_CACHE_ORDER.pop(0), None)
+
+
 def road_route_waypoints(a, b):
     """Return road-snapped waypoints from an OSRM-compatible route service.
 
@@ -293,35 +312,54 @@ def road_route_waypoints(a, b):
     except Exception:
         return None
     coords = "%.6f,%.6f;%.6f,%.6f" % (lo, la, lob, lb)  # OSRM expects lng,lat
+    # Serve a previously-resolved road for these endpoints instantly (and survive a
+    # provider outage). ~11 m rounding keeps the key stable for the same trip.
+    ckey = "%.4f,%.4f;%.4f,%.4f" % (la, lo, lb, lob)
+    cached = _ROUTE_CACHE.get(ckey)
+    if cached is not None:
+        return dict(cached)
     qs = urllib.parse.urlencode({"overview": "full", "geometries": "geojson", "steps": "false"})
     url = "%s/route/v1/driving/%s?%s" % (base, coords, qs)
-    try:
-        with urllib.request.urlopen(url, timeout=4) as r:
-            raw = r.read(1_500_000).decode("utf-8", "replace")
-        j = json.loads(raw)
-        routes = j.get("routes") if isinstance(j, dict) else None
-        route = routes[0] if routes else None
-        geom = ((route or {}).get("geometry") or {}).get("coordinates") or []
-        pts = []
-        for item in geom:
-            if isinstance(item, (list, tuple)) and len(item) >= 2:
-                pts.append((float(item[1]), float(item[0])))  # GeoJSON lng,lat -> lat,lng
-        if len(pts) < 2:
-            return None
-        # Keep the response compact while preserving road shape enough for map/risk.
-        if len(pts) > 160:
-            step = max(1, int(len(pts) / 160))
-            pts = pts[::step]
-            if pts[-1] != (float(b["lat"]), float(b["lng"])):
-                pts.append((float(b["lat"]), float(b["lng"])))
-        return {
-            "waypoints": pts,
-            "provider": "osrm",
-            "distance_km": round(float(route.get("distance", 0) or 0) / 1000.0, 1),
-            "duration_min": round(float(route.get("duration", 0) or 0) / 60.0, 1),
-        }
-    except Exception:
-        return None
+    # Best-effort with ONE short retry: the public OSRM demo often fails the first
+    # hit but answers the second. A miss still falls back to the corridor below —
+    # never fails closed for the traveler.
+    for attempt in (1, 2):
+        try:
+            with urllib.request.urlopen(url, timeout=7) as r:
+                raw = r.read(1_500_000).decode("utf-8", "replace")
+            j = json.loads(raw)
+            routes = j.get("routes") if isinstance(j, dict) else None
+            route = routes[0] if routes else None
+            geom = ((route or {}).get("geometry") or {}).get("coordinates") or []
+            pts = []
+            for item in geom:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    pts.append((float(item[1]), float(item[0])))  # GeoJSON lng,lat -> lat,lng
+            if len(pts) < 2:
+                return None
+            # Keep the response compact while preserving road shape enough for map/risk.
+            if len(pts) > 160:
+                step = max(1, int(len(pts) / 160))
+                pts = pts[::step]
+                if pts[-1] != (float(b["lat"]), float(b["lng"])):
+                    pts.append((float(b["lat"]), float(b["lng"])))
+            result = {
+                "waypoints": pts,
+                "provider": "osrm",
+                "distance_km": round(float(route.get("distance", 0) or 0) / 1000.0, 1),
+                "duration_min": round(float(route.get("duration", 0) or 0) / 60.0, 1),
+            }
+            _route_cache_put(ckey, result)
+            return dict(result)
+        except Exception:
+            if attempt == 2:
+                return None
+            try:
+                import time as _t
+                _t.sleep(0.4)   # brief pause before the single retry
+            except Exception:
+                pass
+    return None
 
 
 def route_scan_between(ga, gb, incidents, n=None, radius=None):
