@@ -237,8 +237,16 @@ class DB:
                                  "(%s) -- falling back to SQLite so the app stays up.\n" % e)
                 self.pg = False
         if not self.pg:
-            self.conn = sqlite3.connect(path)
+            self.conn = sqlite3.connect(path, timeout=30)
             self.conn.row_factory = sqlite3.Row
+            # WAL + busy_timeout: ThreadingHTTPServer runs each request in its own thread
+            # and /api/report's recompute does a bulk delete+insert; without this, concurrent
+            # writes raise "database is locked" (which, unhandled, dropped the connection).
+            try:
+                self.conn.execute("PRAGMA journal_mode=WAL")
+                self.conn.execute("PRAGMA busy_timeout=30000")
+            except Exception:
+                pass
             self.conn.executescript(SCHEMA_SQLITE)
             self.conn.commit()
         self._migrate()
