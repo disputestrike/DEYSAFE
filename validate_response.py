@@ -462,6 +462,9 @@ else:
 print("\n-- E. USSD: the missing-person path (text '3*Kaduna') opens a real case + reference (FIND-03) --")
 def _missing_count():
     st, jj, _ = call("GET", "/api/missing", want_token=False)
+    # Use pagination envelope 'total' field, not just first page length
+    if isinstance(jj, dict) and "total" in jj:
+        return st, jj["total"]
     arr = jj.get("missing") if isinstance(jj.get("missing"), list) else None
     return st, (len(arr) if isinstance(arr, list) else None)
 

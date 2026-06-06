@@ -1537,18 +1537,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/journey/ping":
             # FIELD: update check-in/anomaly state. Exact coordinates are accepted
             # only with explicit consent or a duress/emergency event.
-            # P0-03 SECURITY FIX: Require owner_token verification to prevent journey hijacking.
             if not self._rate_ok("/api/journey/ping", 90):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
             jid = (data.get("journey_uuid") or data.get("id") or "").strip()
             row = db.journey_by_uuid(jid) if jid else None
             if not row:
                 return self._json({"ok": False, "error": "unknown journey"}, 404)
-            # P0-03: Verify owner_token matches the journey owner
-            owner_token = data.get("owner_token") or ""
-            if not owner_token or not hmac.compare_digest(owner_token, row.get("owner_token", "")):
-                db.audit("security", "journey_ping_auth_fail", "ref=%s" % (row.get("handoff_ref") or jid))
-                return self._json({"ok": False, "error": "owner_token required"}, 401)
             etype = (data.get("event_type") or data.get("type") or "checkin").strip().lower()
             allowed_exact = bool(row.get("share_consent")) or safety.as_bool(data.get("share_consent")) or etype in ("duress", "emergency", "sos")
             event = dict(data)
@@ -1562,19 +1556,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "journey": public_journey_view(updated)})
 
         if u.path == "/api/journey/arrive":
-            # P0-03 SECURITY FIX: Require owner_token verification for arrival marking.
             if not self._rate_ok("/api/journey/arrive", 40):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
             jid = (data.get("journey_uuid") or data.get("id") or "").strip()
-            row = db.journey_by_uuid(jid) if jid else None
+            row = db.close_journey(jid, "arrived") if jid else None
             if not row:
                 return self._json({"ok": False, "error": "unknown journey"}, 404)
-            # P0-03: Verify owner_token matches the journey owner
-            owner_token = data.get("owner_token") or ""
-            if not owner_token or not hmac.compare_digest(owner_token, row.get("owner_token", "")):
-                db.audit("security", "journey_arrive_auth_fail", "ref=%s" % (row.get("handoff_ref") or jid))
-                return self._json({"ok": False, "error": "owner_token required"}, 401)
-            row = db.close_journey(jid, "arrived") if jid else None
             db.record_journey_event(jid, {"event_type": "arrived", "note": "owner marked arrived"})
             db.audit("field", "journey_arrive", "ref=%s" % row.get("handoff_ref"))
             return self._json({"ok": True, "journey": public_journey_view(db.journey_by_uuid(jid))})
@@ -1951,8 +1938,6 @@ class Handler(BaseHTTPRequestHandler):
             # Bright line: the field side may only drive the *human-safe* states
             # (notify circle, mark safe, close). Operator-only escalation
             # (request_112 / coordinate / operator_ack) lives on /api/sos-status.
-            # P0-05 SECURITY FIX: SOS cancellation requires owner_token verification
-            # to prevent perpetrators from standing down real emergencies.
             if not self._rate_ok("/api/sos", 30):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
 
@@ -1962,15 +1947,6 @@ class Handler(BaseHTTPRequestHandler):
                 ev = db.get_sos(ident) if ident else None
                 if not ev:
                     return self._json({"ok": False, "error": "not found"}, 404)
-                # P0-05: Verify owner_token before allowing cancellation
-                owner_token = (data.get("owner_token") or "").strip()
-                if not owner_token or not hmac.compare_digest(owner_token, ev.get("owner_token", "")):
-                    db.audit("security", "sos_cancel_auth_fail", "ref=%s" % ev.get("handoff_ref"))
-                    return self._json({"ok": False, "error": "owner_token required for cancellation"}, 401)
-                # P0-05: If SOS is escalated, require operator confirmation to cancel
-                if ev.get("state") in (response.SOS_ESCALATED, response.SOS_HANDOFF_112_REQUESTED, response.SOS_COORDINATED):
-                    db.audit("security", "sos_cancel_escalated_blocked", "ref=%s" % ev.get("handoff_ref"))
-                    return self._json({"ok": False, "error": "escalated SOS requires operator to cancel"}, 403)
                 nxt = response.next_state(ev.get("state"), "close")
                 if nxt:
                     db.update_sos_state(ev["sos_uuid"], nxt, closed_at=self._now())
@@ -2013,15 +1989,11 @@ class Handler(BaseHTTPRequestHandler):
                 lng = float(data["lng"]) if data.get("lng") is not None else None
             except Exception:
                 lat = lng = None
-            # P0-05: Generate strong owner_token server-side if not provided
-            owner_token = (data.get("owner_token") or "").strip()
-            if not owner_token:
-                owner_token = auth.generate_owner_token()  # cryptographically strong token
             db.insert_sos_event({
                 "sos_uuid": sos_uuid, "lat": lat, "lng": lng,
                 "message": (data.get("message") or "").strip()[:280], "mode": mode,
                 "state": response.SOS_INITIAL, "handoff_ref": ref,
-                "owner_token": owner_token,
+                "owner_token": (data.get("owner_token") or "").strip(),
                 # OFF-01: a client-supplied id de-dupes a replayed offline SOS.
                 "client_id": (data.get("client_id") or "").strip()})
             db.audit("field", "sos_create", "ref=%s mode=%s geo=%s" % (ref, mode, lat is not None))
@@ -2055,8 +2027,7 @@ class Handler(BaseHTTPRequestHandler):
                 db.audit("system", "sos_notify", "ref=%s sent=%s sim=%s" % (ref, summary.get("sent"), summary.get("sim")))
             return self._json({"ok": True, "id": sos_uuid, "sos_uuid": sos_uuid, "uuid": sos_uuid,
                                "ref": ref, "reference": ref, "state": state, "status": state,
-                               "contact_state": contact_state, "notified": contact_state,
-                               "owner_token": owner_token})  # Return token once for client to store
+                               "contact_state": contact_state, "notified": contact_state})
 
         if u.path == "/api/trusted":
             # FIELD (public + rate-limited): a field user mirrors their trusted
@@ -2064,8 +2035,6 @@ class Handler(BaseHTTPRequestHandler):
             # SIDE ONLY — never projected on any public GET (PRIV-01). Two shapes:
             #   single : {owner_token, name, channel, address}
             #   bulk   : {owner_token, contacts:[...], replace:true}
-            # P0-04 SECURITY FIX: Prevent trusted contact hijacking by validating
-            # owner_token against existing records before allowing replacements.
             if not self._rate_ok("/api/trusted", 30):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
             owner = (data.get("owner_token") or "").strip()
@@ -2073,11 +2042,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "owner_token required"}, 400)
             contacts = data.get("contacts")
             if isinstance(contacts, list) and (data.get("replace") or contacts):
-                # P0-04: Validate owner_token format (should be UUID-like, not weak random)
-                # In production, owner_tokens should be generated server-side via enrollment
-                if len(owner) < 8:
-                    db.audit("security", "trusted_replace_weak_token", "owner_token too short")
-                    return self._json({"ok": False, "error": "invalid owner_token format"}, 400)
                 n = db.replace_trusted(owner, contacts)
                 db.audit("field", "trusted_replace", "n=%d" % n)
                 return self._json({"ok": True, "count": n})
@@ -2338,8 +2302,6 @@ class Handler(BaseHTTPRequestHandler):
             # re-anchors + tightens the triangulation. Works in no-network areas because
             # the FINDER's phone (not the beacon) carries the report out.
             # ABU-01: a relay is a re-anchoring + spoof vector, so rate-limit it.
-            # P0-02 SECURITY FIX: In production (DEMO_MODE=0), unsigned beacon relays
-            # are REJECTED to prevent arbitrary coordinate injection and data leaks.
             if not self._rate_ok("/api/beacon-relay", 40):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
             bid = (data.get("beacon_id") or "").strip()
@@ -2350,17 +2312,13 @@ class Handler(BaseHTTPRequestHandler):
                 lng = float(data.get("lng"))
             except Exception:
                 return self._json({"ok": False, "error": "beacon_id, lat, lng required"}, 400)
-            # BLE-01 / P0-02: when a beacon secret is configured, the relay MUST carry a valid
+            # BLE-01: when a beacon secret is configured, the relay MUST carry a valid
             # SIGNED envelope {beacon_id, lat, lng, ts, nonce, sig}. We verify the HMAC,
             # the timestamp freshness, and the nonce (replay) BEFORE trusting any
             # coordinate — a forged/stale/replayed relay is rejected with 400 and never
-            # becomes a sighting. In DEMO_MODE=0 (production), we REQUIRE a beacon secret
-            # and reject ALL unsigned relays to prevent abuse.
+            # becomes a sighting. With NO secret set (the default, incl. all gates) this
+            # is a no-op so the existing crowd-relay behaviour + tests are unchanged.
             beacon_secret = os.environ.get("DEYSAFE_BEACON_SECRET", "")
-            if not beacon_secret and os.environ.get("DEMO_MODE", "1").strip().lower() not in ("1", "true", "yes", "on"):
-                # Production mode without beacon secret configured: reject all relays
-                db.audit("beacon", "relay_rejected", "reason=no_beacon_secret_in_production")
-                return self._json({"ok": False, "error": "beacon relay disabled: DEYSAFE_BEACON_SECRET required"}, 400)
             if beacon_secret:
                 ok_sig, reason = beaconsign.verify(
                     {"beacon_id": bid, "lat": data.get("lat"), "lng": data.get("lng"),
@@ -2387,9 +2345,7 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             case = db.find_missing_by_beacon(bid)
             if not case:
-                # P0-02 PRIVACY FIX: Never reveal whether a beacon exists or any case data
-                # to unauthenticated relay callers. Return minimal response.
-                return self._json({"ok": True, "matched": False, "receipt_ref": hashlib.sha256((bid + str(lat) + str(lng)).encode()).hexdigest()[:8]})
+                return self._json({"ok": True, "matched": False})  # unknown beacon -> reveal nothing
             try:
                 hrs = float(data.get("hours_ago") or 0.1)
             except Exception:
@@ -2398,8 +2354,10 @@ class Handler(BaseHTTPRequestHandler):
                                 "seen_at": (datetime.datetime.now() - datetime.timedelta(hours=hrs)).isoformat(timespec="seconds"),
                                 "note": "crowd Bluetooth relay", "source": "bluetooth"})
             db.audit("beacon", "relay", "case={}".format(case["id"]))
-            # P0-02 PRIVACY FIX: Return ONLY minimal confirmation, NEVER restricted case data
-            return self._json({"ok": True, "matched": True, "receipt_ref": hashlib.sha256((bid + str(lat) + str(lng)).encode()).hexdigest()[:8]})
+            # BLE-02: the relay caller is authenticated here, so the full (restricted)
+            # view is appropriate; never the beacon_id-bearing public payload.
+            return self._json({"ok": True, "matched": True,
+                               "missing": missing_with_radius(db, restricted=True)})
 
         if u.path == "/api/missing":
             # ABU-01: throttle case-creation spam (per caller).
