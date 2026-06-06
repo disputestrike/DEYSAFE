@@ -17,6 +17,7 @@ import os
 import re
 import json
 import hmac
+import hashlib
 import datetime
 import urllib.parse
 import urllib.request
@@ -345,6 +346,86 @@ def route_scan_between(ga, gb, incidents, n=None, radius=None):
     scan["road_routing"] = False
     scan["route_provider"] = "great_circle_fallback"
     return scan
+
+
+def _r2_setting(*names):
+    for name in names:
+        v = os.environ.get(name, "").strip()
+        if v:
+            return v
+    return ""
+
+
+def _r2_config():
+    account = _r2_setting("CLOUDFLARE_R2_ACCOUNT_ID", "R2_ACCOUNT_ID")
+    endpoint = _r2_setting("CLOUDFLARE_R2_ENDPOINT", "R2_ENDPOINT")
+    if not endpoint and account:
+        endpoint = "https://%s.r2.cloudflarestorage.com" % account
+    return {
+        "endpoint": endpoint.rstrip("/"),
+        "bucket": _r2_setting("CLOUDFLARE_R2_BUCKET", "R2_BUCKET"),
+        "access_key": _r2_setting("CLOUDFLARE_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"),
+        "secret_key": _r2_setting("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY"),
+        "public_url": _r2_setting("CLOUDFLARE_R2_PUBLIC_URL", "R2_PUBLIC_URL").rstrip("/"),
+    }
+
+
+def _r2_signing_key(secret, date_stamp):
+    k_date = hmac.new(("AWS4" + secret).encode("utf-8"), date_stamp.encode("utf-8"), hashlib.sha256).digest()
+    k_region = hmac.new(k_date, b"auto", hashlib.sha256).digest()
+    k_service = hmac.new(k_region, b"s3", hashlib.sha256).digest()
+    return hmac.new(k_service, b"aws4_request", hashlib.sha256).digest()
+
+
+def r2_presign_put(filename, content_type, size):
+    cfg = _r2_config()
+    needed = ("endpoint", "bucket", "access_key", "secret_key")
+    if not all(cfg.get(k) for k in needed):
+        return {"ok": True, "configured": False, "provider": "cloudflare_r2",
+                "missing": [k for k in needed if not cfg.get(k)]}
+    try:
+        size = int(size or 0)
+    except Exception:
+        size = 0
+    max_bytes = int(float(os.environ.get("DEYSAFE_MEDIA_MAX_MB", "80")) * 1024 * 1024)
+    if size <= 0 or size > max_bytes:
+        return {"ok": False, "error": "file too large or empty", "max_bytes": max_bytes}
+    ctype = (content_type or "application/octet-stream").strip()[:100]
+    if not (ctype.startswith("image/") or ctype.startswith("video/")):
+        return {"ok": False, "error": "only image/video evidence is accepted"}
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "-", (filename or "evidence")).strip("-")[:80] or "evidence"
+    now = datetime.datetime.utcnow()
+    date_stamp = now.strftime("%Y%m%d")
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    key = "field-evidence/%s/%s-%s" % (now.strftime("%Y/%m/%d"), os.urandom(8).hex(), safe_name)
+    endpoint = urllib.parse.urlparse(cfg["endpoint"])
+    scheme = endpoint.scheme or "https"
+    host = endpoint.netloc or endpoint.path
+    canonical_uri = "/" + urllib.parse.quote(cfg["bucket"], safe="-_.~") + "/" + urllib.parse.quote(key, safe="/-_.~")
+    credential_scope = "%s/auto/s3/aws4_request" % date_stamp
+    q = {
+        "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+        "X-Amz-Content-Sha256": "UNSIGNED-PAYLOAD",
+        "X-Amz-Credential": cfg["access_key"] + "/" + credential_scope,
+        "X-Amz-Date": amz_date,
+        "X-Amz-Expires": os.environ.get("DEYSAFE_MEDIA_UPLOAD_EXPIRES", "600"),
+        "X-Amz-SignedHeaders": "host",
+    }
+    canonical_query = "&".join("%s=%s" % (
+        urllib.parse.quote(k, safe="-_.~"), urllib.parse.quote(str(q[k]), safe="-_.~"))
+        for k in sorted(q))
+    canonical_headers = "host:%s\n" % host
+    canonical_request = "\n".join(("PUT", canonical_uri, canonical_query,
+                                   canonical_headers, "host", "UNSIGNED-PAYLOAD"))
+    string_to_sign = "\n".join(("AWS4-HMAC-SHA256", amz_date, credential_scope,
+                                hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()))
+    signature = hmac.new(_r2_signing_key(cfg["secret_key"], date_stamp),
+                         string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    upload_url = "%s://%s%s?%s&X-Amz-Signature=%s" % (scheme, host, canonical_uri, canonical_query, signature)
+    public_url = (cfg["public_url"] + "/" + urllib.parse.quote(key, safe="/-_.~")) if cfg.get("public_url") else ""
+    return {"ok": True, "configured": True, "provider": "cloudflare_r2",
+            "upload_url": upload_url, "object_key": key, "object_url": public_url,
+            "expires_in": int(q["X-Amz-Expires"]), "max_bytes": max_bytes}
 
 
 def alert_level(conf, sev):
@@ -1555,6 +1636,14 @@ class Handler(BaseHTTPRequestHandler):
             db.audit(actor, "ops_drill_create", "drill=%s type=%s" % (row.get("drill_uuid"), row.get("drill_type")))
             return self._json({"ok": True, "drill": row})
 
+        if u.path == "/api/media/presign":
+            if not self._rate_ok("/api/media/presign", 30):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            name = (data.get("name") or data.get("filename") or "evidence").strip()
+            ctype = (data.get("type") or data.get("content_type") or "").strip()
+            presigned = r2_presign_put(name, ctype, data.get("size") or 0)
+            return self._json(presigned, 200 if presigned.get("ok") else 400)
+
         if u.path == "/api/report":
             # ABU-01: throttle anonymous report spam (per caller). Bucket capacity =
             # 20/min: a tight burst (25 identical reports) trips a 429, while normal
@@ -1575,9 +1664,16 @@ class Handler(BaseHTTPRequestHandler):
                     mhash = str(media_in.get("hash") or "").strip().lower()
                     if not re.fullmatch(r"[a-f0-9]{64}", mhash):
                         mhash = ""
-                    evidence_meta = {"name": mname, "type": mtype, "size": msize, "hash": mhash}
+                    object_key = str(media_in.get("object_key") or "").strip()[:260]
+                    object_url = str(media_in.get("object_url") or "").strip()[:500]
+                    storage = str(media_in.get("storage") or "").strip()[:40]
+                    evidence_meta = {"name": mname, "type": mtype, "size": msize, "hash": mhash,
+                                     "storage": storage, "object_key": object_key,
+                                     "object_url": object_url, "uploaded": bool(media_in.get("uploaded"))}
                     media_note = " Evidence metadata: name=%s type=%s size=%s sha256=%s" % (
                         mname, mtype, msize, (mhash or "not_provided"))
+                    if object_key:
+                        media_note += " storage=%s object_key=%s" % (storage or "cloudflare_r2", object_key)
                 except Exception:
                     evidence_meta = None
             # ABU-09: constrain the incident type to the controlled vocabulary. An

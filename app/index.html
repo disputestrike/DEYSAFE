@@ -79,17 +79,30 @@
   .spk{border:none;background:transparent;font-size:17px;cursor:pointer;padding:2px 6px;line-height:1}
   .mic{border:none;background:#eef3ff;color:#1f2a44;font-size:16px;cursor:pointer;border-radius:10px;width:38px;height:38px;flex:0 0 auto;display:grid;place-items:center}
   .mic.live{background:#d92d20;color:#fff;animation:pulse 1s infinite}
+  .mic.watchmini{background:#f6fbf8;color:#0b6b4f;border:1px solid #b7e6c8}
+  .mic.watchmini.on{background:#0b6b4f;color:#fff;border-color:#0b6b4f}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
   .watch{width:100%;margin:10px 0 2px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#1f2a44}
   .watch.on{background:#0b6b4f;color:#fff;border-color:#0b6b4f}
+  .livestate{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;margin:8px 2px 0}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:#8a97a8;box-shadow:0 0 0 3px #8a97a822}
+  .live-dot.on{background:#1aa260;box-shadow:0 0 0 3px #1aa26022}
   .prowarn{margin:10px 0;padding:12px 14px;border-radius:12px;font-size:13.5px;font-weight:600;line-height:1.4}
   .outboxbadge{background:#10233f;color:#eaf0fb;border-bottom:1px solid #25406b;font-size:12.5px;font-weight:600;line-height:1.35;padding:8px 14px;text-align:center}
   .ai-intake{background:#f4f7ff;border:1px solid #dce6ff;border-radius:14px;padding:12px;margin:0 0 16px}
   .ai-intake textarea{width:100%;min-height:62px;box-sizing:border-box}
   .assistantbox{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;margin:0 0 12px}
-  .assistantbox textarea{min-height:54px}
+  .chatbar{display:grid;grid-template-columns:1fr 42px 68px;gap:8px;align-items:end}
+  .chatbar textarea{min-height:48px;max-height:96px;resize:vertical}
+  .chatbar button{height:42px;margin:0;border-radius:11px}
+  .chatmic{border:1px solid var(--line);background:#eef3ff;color:#1f2a44;font-size:18px;font-weight:800;cursor:pointer}
+  .sendbtn{border:none;background:var(--brand);color:#fff;font-weight:800;cursor:pointer}
   .mediafield{background:#fff;border:1px dashed #c8d2e1;border-radius:12px;padding:11px 12px;margin:10px 0 0}
   .mediafield input{padding:8px;border:none;background:transparent;border-radius:0}
+  .camera-strip{display:flex;align-items:center;gap:10px;margin-top:8px}
+  .camera-strip input{position:absolute;left:-9999px}
+  .camera-btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border:1px solid #d8e2f1;background:#eef4fe;color:#1559b8;border-radius:12px;padding:12px 14px;font-weight:900;cursor:pointer;flex:0 0 auto}
+  .media-summary{font-size:12.5px;color:var(--muted);line-height:1.35}
   .journeystatus{background:#fff;border:1px solid #dce6ff;border-radius:14px;padding:12px;margin-top:12px}
   .sosbig{width:100%;border:none;border-radius:16px;padding:22px 16px;margin:0 0 12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:#fff;font-size:14px;text-align:center}
   .sosbig b{font-size:20px;letter-spacing:.02em}
@@ -165,15 +178,15 @@ Check hotel address</textarea>
     <section class="view active" id="v-home">
       <div id="map"></div>
       <div class="panel">
-        <div class="srow"><input id="areaSelect" list="placelist" autocomplete="off" placeholder="Type your town or area…" aria-label="Your area" /><button id="micBtn" class="mic" onclick="startVoice()" title="Speak a place" aria-label="Voice input">🎤</button><span class="pill" id="lvpill">—</span></div>
+        <div class="srow"><input id="areaSelect" list="placelist" autocomplete="off" placeholder="Live map starting… or type an area" aria-label="Your area" /><button id="micBtn" class="mic" onclick="startVoice()" title="Speak a place" aria-label="Voice input">🎤</button><button id="watchBtn" class="mic watchmini" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me">🛡</button><span class="pill" id="lvpill">—</span></div>
+        <div class="livestate"><span id="liveDot" class="live-dot"></span><span id="liveState">Waiting for live location permission</span></div>
         <div class="guide" id="guide"></div>
         <div id="areaReport"></div>
         <div class="assistantbox">
           <label class="f" style="margin-top:0">Ask DeySafe</label>
           <textarea id="aiCommand" placeholder="e.g. Abuja to Kaduna, or armed robbery near Oshodi, or my brother is missing in Kankara"></textarea>
-          <div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic('aiCommand')">Speak</button><button class="btn" onclick="runAssistant()">Go</button></div>
+          <div class="chatbar"><span></span><button class="chatmic" onclick="nlMic('aiCommand')" title="Speak to DeySafe" aria-label="Speak to DeySafe">🎙</button><button class="sendbtn" onclick="runAssistant()">Send</button></div>
         </div>
-        <button id="watchBtn" class="watch" onclick="toggleWatch()">🛡 Warn me of danger near me</button>
         <div class="chips">
           <button onclick="go('report')">⚠ Report danger</button>
           <button onclick="go('sos')">🆘 Help</button>
@@ -214,8 +227,7 @@ Check hotel address</textarea>
       <textarea id="rDesc" placeholder="e.g. Armed men on motorbikes stopping vehicles"></textarea>
       <div class="mediafield">
         <label class="f" style="margin-top:0">Camera / video evidence</label>
-        <input id="rMedia" type="file" accept="image/*,video/*" capture="environment" onchange="previewMediaMeta()" />
-        <div class="note" id="mediaNote" style="text-align:left;margin:6px 2px 0">Optional. DeySafe records a hash and file facts with your report; raw upload storage is kept restricted until production storage is configured.</div>
+        <div class="camera-strip"><label class="camera-btn" for="rMedia">📷 Add video</label><input id="rMedia" type="file" accept="image/*,video/*" capture="environment" onchange="previewMediaMeta()" /><div class="media-summary" id="mediaNote">Optional. Video uploads to Cloudflare R2 when keys are configured; otherwise DeySafe still stores a hash and file facts.</div></div>
       </div>
       <button class="btn" id="reportBtn" onclick="sendReport()">Submit — anonymously</button>
       <div class="ok" id="okBox"></div>
@@ -305,7 +317,8 @@ const ORD={GREEN:0,YELLOW:1,ORANGE:2,RED:3};
 // backend currently ignores it, so this is forward-compatible and harmless.
 const LIST_LIMIT=500;
 const qLimit=(extra)=>'?limit='+LIST_LIMIT+(extra?('&'+extra):'');
-let map,incLayer,missLayer,routeLayer,areaLayer,triLayer,heatLayer,HEAT_ON=false,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
+let map,incLayer,missLayer,routeLayer,areaLayer,triLayer,heatLayer,meLayer,HEAT_ON=false,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
+let LIVE_WATCH=null,LIVE_FIRST=true,LIVE_POS=null;
 
 function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
 function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>'+e+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});}
@@ -313,7 +326,7 @@ function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>
 function initMap(){
   map=L.map('map',{zoomControl:true,attributionControl:false}).setView([9.2,8.2],6);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd'}).addTo(map);
-  incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);areaLayer=L.layerGroup().addTo(map);triLayer=L.layerGroup().addTo(map);heatLayer=L.layerGroup().addTo(map);
+  incLayer=L.layerGroup().addTo(map);missLayer=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);areaLayer=L.layerGroup().addTo(map);triLayer=L.layerGroup().addTo(map);heatLayer=L.layerGroup().addTo(map);meLayer=L.layerGroup().addTo(map);
   var Ctrl=L.Control.extend({options:{position:'bottomright'},onAdd:function(){
     var d=L.DomUtil.create('div','locctrl');
     var b1=L.DomUtil.create('button','',d);b1.innerHTML='📍';b1.title='Center on my location (private)';
@@ -637,9 +650,32 @@ function locateMe(){
   toast('📍 Finding you — stays on your device…');
   navigator.geolocation.getCurrentPosition(function(pos){
     var lat=pos.coords.latitude,lng=pos.coords.longitude,r=riskAtClient(lat,lng,60);
+    updateLivePosition(lat,lng,pos.coords.accuracy,true);
     showArea('Your location',r,lat,lng,true,true);sayArea('your location',r);
   },function(err){toast('Location off — type your area instead');$('#areaSelect').focus();},
   {enableHighAccuracy:true,timeout:8000,maximumAge:30000});}
+function updateLivePosition(lat,lng,accuracy,recenter){
+  LIVE_POS={lat:lat,lng:lng,accuracy:accuracy||0,ts:Date.now()};
+  var dot=$('#liveDot'),state=$('#liveState');
+  if(dot)dot.classList.add('on');
+  if(state)state.textContent='Live location on · updates on the map';
+  if(meLayer){meLayer.clearLayers();
+    L.circle([lat,lng],{radius:Math.max(25,accuracy||35),color:'#1559b8',weight:1,fillColor:'#1d6fe0',fillOpacity:.10}).addTo(meLayer);
+    L.marker([lat,lng],{icon:missIcon('●')}).addTo(meLayer).bindPopup('You are here · private to this phone');
+  }
+  checkProximity(lat,lng);
+  if(recenter&&map){try{map.setView([lat,lng],14);}catch(e){}}
+}
+function startLiveLocation(){
+  if(!navigator.geolocation){var s=$('#liveState');if(s)s.textContent='Live location unavailable on this browser';return;}
+  if(LIVE_WATCH!=null)return;
+  LIVE_WATCH=navigator.geolocation.watchPosition(function(pos){
+    updateLivePosition(pos.coords.latitude,pos.coords.longitude,pos.coords.accuracy,LIVE_FIRST);
+    LIVE_FIRST=false;
+  },function(){
+    var dot=$('#liveDot'),state=$('#liveState');if(dot)dot.classList.remove('on');if(state)state.textContent='Tap the map location button or allow location to show where you are';
+  },{enableHighAccuracy:true,maximumAge:10000,timeout:20000});
+}
 function resetView(){if(map){try{map.setView([9.2,8.2],6);}catch(e){}}}
 // --- Voice INPUT (speech-to-text). Chrome/Edge/Android only; progressive enhancement.
 let RECOG=null;
@@ -706,13 +742,13 @@ function checkProximity(lat,lng){
 }
 function toggleWatch(){
   var btn=$('#watchBtn');
-  if(WATCH!=null){navigator.geolocation.clearWatch(WATCH);WATCH=null;if(btn){btn.classList.remove('on');btn.textContent='🛡 Warn me of danger near me';}$('#proWarn').style.display='none';toast('Proactive alerts off');return;}
+  if(WATCH!=null){navigator.geolocation.clearWatch(WATCH);WATCH=null;if(btn){btn.classList.remove('on');btn.textContent='🛡';}$('#proWarn').style.display='none';toast('Proactive alerts off');return;}
   if(!navigator.geolocation){toast('Location not supported here');return;}
   ANNOUNCED.clear();
   WATCH=navigator.geolocation.watchPosition(function(p){checkProximity(p.coords.latitude,p.coords.longitude);},
-    function(){toast('Turn on location to get proactive alerts');if(btn){btn.classList.remove('on');btn.textContent='🛡 Warn me of danger near me';}WATCH=null;},
+    function(){toast('Turn on location to get proactive alerts');if(btn){btn.classList.remove('on');btn.textContent='🛡';}WATCH=null;},
     {enableHighAccuracy:true,maximumAge:15000,timeout:20000});
-  if(btn){btn.classList.add('on');btn.textContent='🛡 Watching '+WATCH_KM+' km — alerts ON';}
+  if(btn){btn.classList.add('on');btn.textContent='🛡';}
   toast('🛡 Proactive alerts ON — I\'ll warn you of danger within '+WATCH_KM+' km as you move. Your location stays on your device.');
 }
 // --- AI intake: speak/type plain language -> /api/intake -> pre-fill the form.
@@ -891,7 +927,7 @@ async function loadReadiness(){
 }
 async function mediaMetaFromInput(){
   var el=$('#rMedia'),f=el&&el.files&&el.files[0];if(!f)return null;
-  var meta={name:f.name||'capture',type:f.type||'application/octet-stream',size:f.size||0,hash:''};
+  var meta={name:f.name||'capture',type:f.type||'application/octet-stream',size:f.size||0,hash:'',uploaded:false};
   try{
     if(f.size<=12000000&&window.crypto&&crypto.subtle){
       var buf=await f.arrayBuffer();
@@ -901,21 +937,34 @@ async function mediaMetaFromInput(){
   }catch(e){}
   return meta;
 }
+async function uploadEvidenceIfAny(meta){
+  var el=$('#rMedia'),f=el&&el.files&&el.files[0];if(!f||!meta)return meta;
+  try{
+    var p=await fetch('/api/media/presign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:meta.name,type:meta.type,size:meta.size,hash:meta.hash})}).then(x=>x.json());
+    meta.storage='cloudflare_r2';meta.storage_configured=!!(p&&p.configured);
+    if(!p||!p.ok||!p.configured){meta.uploaded=false;meta.upload_note='Cloudflare R2 not configured yet';return meta;}
+    var up=await fetch(p.upload_url,{method:'PUT',body:f});
+    meta.uploaded=up.ok;meta.object_key=p.object_key||'';meta.object_url=p.object_url||'';
+    if(!up.ok)meta.upload_error='R2 upload failed with '+up.status;
+  }catch(e){meta.uploaded=false;meta.upload_error='Upload failed; check R2 CORS/settings';}
+  return meta;
+}
 async function previewMediaMeta(){
   var note=$('#mediaNote'),meta=await mediaMetaFromInput();if(!note)return;
-  if(!meta){note.textContent='Optional. DeySafe records a hash and file facts with your report; raw upload storage is kept restricted until production storage is configured.';return;}
-  note.textContent='Attached: '+meta.name+' · '+Math.round((meta.size||0)/1024)+' KB · '+(meta.type||'file')+(meta.hash?' · hash ready':' · hash skipped for large file');
+  if(!meta){note.textContent='Optional. Video uploads to Cloudflare R2 when keys are configured; otherwise DeySafe still stores a hash and file facts.';return;}
+  note.textContent='Ready: '+meta.name+' · '+Math.round((meta.size||0)/1024)+' KB · '+(meta.type||'file')+(meta.hash?' · hash ready':' · hash skipped for large file');
 }
 async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').focus();return;}
   const place=$('#rPlace').value;
-  const media=await mediaMetaFromInput();
+  let media=await mediaMetaFromInput();
+  if(media){var note=$('#mediaNote');if(note)note.textContent='Uploading evidence safely...';media=await uploadEvidenceIfAny(media);if(note)note.textContent=media.uploaded?'Video uploaded to Cloudflare R2. Submitting report...':((media.upload_note||media.upload_error||'Evidence metadata saved; upload not configured yet')+'. Submitting report...');}
   const r=await postOrQueue('/api/report',{type:window.RTYPE,place:place,description:d,media:media});
   const o=$('#okBox');o.style.display='block';
   if(r.__queued){ // OFF-01: saved on device, will send when back online
     o.innerHTML=`📥 No connection — your report for “${esc(place)}” is <b>saved on this device</b> and will send automatically when you are back online. You can keep using the app.`;
     $('#rDesc').value='';return;}
   var unver=r.ok&&(r.location_unverified===true||(r.risk&&r.risk.location_unverified===true)||r.coords_confidence==='unverified');
-  var ev=media?' Evidence fingerprint saved with the report.':'';
+  var ev=media?(media.uploaded?' Evidence uploaded and fingerprint saved.':' Evidence fingerprint saved; raw upload pending storage/CORS setup.'):'';
   o.innerHTML=r.ok?(unver?`✓ Report received, but we couldn't verify “${esc(place)}” on the map — it isn't placed yet. Open the map and drop a pin on the exact spot.${ev}`:`✓ Report received. ${esc(place)} is now <b>${esc(r.risk&&r.risk.level)}</b>.${ev}`):'⚠ '+esc(r.error||'failed');
   if(r.ok){$('#rDesc').value='';if($('#rMedia'))$('#rMedia').value='';previewMediaMeta();loadData();loadLevel();}}
 // --- Emergency SOS: AUTOMATIC (alarm + share location) or HOLD & SPEAK (auto-send on dead air).
@@ -1008,7 +1057,7 @@ function sosActivate(extra){
       function(){var w=$('#sosWhere');if(w)w.textContent='Turn on location so people can find you.';},{enableHighAccuracy:true,maximumAge:4000,timeout:15000});
   }
   sosCreateEvent(extra);
-  if(SOS_SILENT)setTimeout(function(){if(SOS_ON)panicLock();},3500);
+  setTimeout(function(){if(SOS_ON)panicLock();},SOS_SILENT?1200:8000);
   if(!SOS_SILENT)speak('S O S activated.'+(extra?(' '+extra+'.'):' ')+'Sharing your location.');
 }
 function sosAuto(){sosActivate('');}
@@ -1047,8 +1096,9 @@ $('#areaSelect').onchange=function(){loadLevel(true);};
 // OFF-01: drain the device outbox the moment we come back online; reflect state live.
 window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back online — sending anything saved on your device…');flushOutbox();});
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
+document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_ON)panicLock();});
 
-(async function(){initMap();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace'].forEach(attachPlaceSuggest);await loadLevel();await loadData();await loadReadiness();
+(async function(){initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace'].forEach(attachPlaceSuggest);await loadLevel();await loadData();await loadReadiness();
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();flushOutbox(); // send anything saved on a previous offline visit
   setTimeout(()=>map.invalidateSize(),120);
