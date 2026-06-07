@@ -396,7 +396,7 @@ class DeySafeHandler(BaseHTTPRequestHandler):
         # --- SHIELD / Operator Console endpoints ------------------------------
         if u.path in ("/api/queue", "/api/verify", "/api/audit", "/api/metrics"):
             # AUTH-01: enforce operator auth for these endpoints.
-            if not security.is_operator(self, db):
+            if not (self._authed() and self._auth_enabled()):
                 return self._json({"error": "unauthorized"}, 401)
 
             if u.path == "/api/queue":
@@ -467,7 +467,7 @@ class DeySafeHandler(BaseHTTPRequestHandler):
         if u.path == "/api/missing":
             # FIND-01: missing person search.
             # RED-01: redacts names/PII for anonymous callers; shows full for operators.
-            is_op = security.is_operator(self, db)
+            is_op = self._authed() and self._auth_enabled()
             place = q.get("place", [None])[0]
             rows = db.get_missing(place=place)
             
@@ -598,7 +598,7 @@ class DeySafeHandler(BaseHTTPRequestHandler):
         if u.path == "/api/verify":
             # AUTH-01: the human publish gate is operator-only. Also the most
             # important lock — it promotes an event to a public RED alert.
-            if not security.is_operator(self, db):
+            if not (self._authed() and self._auth_enabled()):
                 return self._json({"error": "unauthorized"}, 401)
 
             rid = data.get("id")
