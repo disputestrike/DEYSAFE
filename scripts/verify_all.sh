@@ -43,6 +43,7 @@ run_validator "validate_security.py"
 run_validator "validate_response.py"
 run_validator "validate_quality.py"
 run_validator "validate_product.py"
+run_validator "validate_personal_beta.py"
 
 echo "=========================================="
 echo "FINAL RESULTS"

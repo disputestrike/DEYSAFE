@@ -33,12 +33,13 @@ without consent, never auto-acts, and never cues force.
 - Map-first home (Leaflet) with GREEN / YELLOW / ORANGE / RED severity.
 - **Geofenced area report** — type *any* town/village (free-text geocoding via OpenStreetMap, no key) → a written report of incidents within range + a "drill-fence" circle.
 - **WakaSafe** — type any *from -> to* once; road route risk when available, clearly labeled corridor fallback when not, automatic map render, spoken summary, foreground Journey Guard, warnings, check-ins, and arrival handling.
+- **Profile / Safety Vault** — phone OTP session, Safety PIN, Duress PIN, server-side guardian vault, push-alert test/confirm, and MySafe places/routes. Guardian PII is not stored in browser localStorage.
 - **📍 Locate-me** (Google-Maps style, on-device) + **🛡 proactive proximity warnings** (Waze-style: warns of danger near you as you move).
 - **Voice in & out** — speak "am I safe in Kaduna" / "Lagos to Kano"; it reads the report back.
-- **SOS** — *Automatic* (alarm + on-device location + shareable link) or *Hold-&-Speak* (auto-sends after dead air), with silent mode and a decoy privacy lock.
+- **SOS** — *Automatic* (alarm + on-device location + shareable link) or *Hold-&-Speak* (auto-sends after dead air), with silent mode, Safety Vault guardian escalation, PIN-gated closure, Duress PIN, and a decoy privacy lock.
 - **Camera/video evidence** — attach an image/video fingerprint and file facts to an anonymous report; optional Cloudflare R2 upload is available when storage keys and CORS are configured.
 - **AI evidence review** — visible image/video triage from the home screen: validates media, captures custody facts, uses AI for written context when keys are present, and clearly flags that pixel/frame-level vision is not wired until a vision adapter is added.
-- **SafeMeet** — create a high-risk meeting session, auto-watch arrival in the foreground, record check-ins, and flag anomalies.
+- **SafeMeet** — say/type the meeting once, AI fills the form, then the phone auto-watches arrival in the foreground, records check-ins, and flags anomalies.
 - **Report danger** (any town → geocoded, human-gated incident), **police-misconduct** category + **know-your-rights** card, **community channels** (area-tagged posts).
 
 **FindMe — missing persons**
@@ -80,7 +81,10 @@ python validate.py            # 56 checks: endpoints + chaos + functional
 | `CEREBRAS_MODEL` | Override the model name (default `llama-3.3-70b`). |
 | `AT_USERNAME`, `AT_API_KEY` | Africa's Talking — turns on **outbound** SMS. |
 | `CLOUDFLARE_R2_*`, `R2_*` | Optional Cloudflare R2 direct browser upload for image/video evidence. See `.env.example`. |
+| `DEYSAFE_SECRET` | Required in production for OTP/session/PIN HMACs. |
+| `DEYSAFE_OTP_ECHO` | `1` only in validation/demo if you need the OTP returned by the API. |
 | `DEYSAFE_BEACON_SECRET` | Signs beacon relay envelopes before FindMe/Bluetooth pilot use. |
+| `DEYSAFE_VAPID_PUBLIC_KEY`, `DEYSAFE_VAPID_PRIVATE_KEY` | Web Push subscription/testing. Without these, the app only records permission/test intent. |
 | `DEMO_MODE` | `0` for production/no synthetic data; local demo defaults may seed examples. |
 | `PORT` | Server port (default 4500). |
 
@@ -99,8 +103,8 @@ python validate.py            # 56 checks: endpoints + chaos + functional
 
 ## Honest scope (where we really are)
 **✅ Built & working:** everything above in the web + server stack when the local gates are green.
-**◑ Partial:** AI (built; needs a key — verify on the deployment) · SMS/USSD *send* (needs Africa's Talking) · audit log (data only, no UI) · NDPA retention schedule.
-**☐ Not built / native:** the native app (background **Bluetooth mesh** scanner + real-time **push-to-talk**) · push/WhatsApp send · user accounts/reputation · satellite + 72-h forecast · the production Next.js/Supabase stack · NRT integration.
+**◑ Partial:** AI (built; needs a key — verify on the deployment) · SMS/USSD *send* (needs Africa's Talking) · Web Push provider delivery (needs VAPID + receipt proof) · audit log (data only, no UI) · NDPA retention schedule.
+**☐ Not built / native:** the native app (background **Bluetooth mesh** scanner + real-time **push-to-talk**) · user reputation · satellite + 72-h forecast · the production Next.js/Supabase stack · NRT integration.
 
 We've out-*designed* the incumbents (Ushahidi / Zello / Govia ideas folded in); we have **not** yet out-*proven* them — that needs real deployment, verified data, operators, and the native client.
 

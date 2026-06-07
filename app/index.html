@@ -166,7 +166,7 @@
     <div class="logo"><img src="/assets/brand/deysafe-icon-192.png" alt="" /></div>
     <div class="brand"><b>DeySafe</b><span>Know before you waka</span></div>
     <div class="chip" id="chip">—</div>
-    <button id="settingsBtn" class="installbtn" onclick="go('settings')" title="Settings" aria-label="Settings">Settings</button>
+    <button id="settingsBtn" class="installbtn" onclick="go('settings')" title="Profile" aria-label="Profile">Profile</button>
     <button id="lockBtn" class="installbtn lockbtn" onclick="panicLock()" title="Privacy lock" aria-label="Privacy lock">Lock</button>
     <button id="installBtn" class="installbtn" style="display:none" onclick="installApp()">Install</button>
   </header>
@@ -225,6 +225,26 @@ Check hotel address</textarea>
       <button class="btn" onclick="checkRoute()">Start WakaSafe</button>
       <div id="routeBox"></div>
       <p class="note">Routes render on the map automatically. Journey Guard starts with the route, sends private foreground check-ins when possible, and marks arrival automatically when your phone reaches the destination.</p>
+      <div class="case">
+        <div class="r1"><b>MySafe places and daily routes</b><button class="btn sec" style="width:auto;margin:0;padding:8px 10px" onclick="go('settings')">Profile</button></div>
+        <p class="note" style="text-align:left;margin:8px 0">Save home, work, school, hotel, and commute routes once. WakaSafe can then start the right guard quickly without hardcoded locations.</p>
+        <div class="srow">
+          <input id="safeAlias" placeholder="Alias, e.g. Home" />
+          <input id="safePlace" list="placelist" autocomplete="off" placeholder="Place in Nigeria" />
+        </div>
+        <button class="btn sec" onclick="addMySafePlace()">Save place</button>
+        <div id="mysafePlaces" class="kv"></div>
+        <div class="srow" style="margin-top:10px">
+          <input id="routeOrigin" placeholder="From alias" />
+          <input id="routeDest" placeholder="To alias" />
+        </div>
+        <div class="srow">
+          <input id="routeDays" placeholder="Days, e.g. weekdays" />
+          <input id="routeWindow" placeholder="Leave window, e.g. 7-8am" />
+        </div>
+        <button class="btn sec" onclick="addMySafeRoute()">Save recurring route</button>
+        <div id="mysafeRoutes" class="kv"></div>
+      </div>
       <div id="journeyBox" class="journeystatus" style="display:none"></div>
     </section>
 
@@ -256,19 +276,14 @@ Check hotel address</textarea>
     <section class="view pad" id="v-sos">
       <h2 class="t">Emergency SOS</h2>
       <div id="sosHome">
-        <label class="silentrow"><input type="checkbox" id="sosSilentToggle" onchange="renderSosButtons()" /><span><b>🤫 Silent mode</b> — no alarm or flashing. Best during an active abduction. Still saves your SOS, alerts your trusted circle, and prepares your location to share.</span></label>
+        <label class="silentrow"><input type="checkbox" id="sosSilentToggle" onchange="renderSosButtons()" /><span><b>🤫 Silent mode</b> — no alarm or flashing. Best during an active abduction. Still saves your SOS, queues Safety Vault guardians, and prepares your location to share.</span></label>
         <button class="sosbig auto" onclick="sosAuto()"><span class="bigemoji">🔴</span><b>AUTOMATIC</b><small id="sosAutoSub">Alarm + prepare your live location to share — no typing</small></button>
         <button class="sosbig voice" onclick="sosVoice()"><span class="bigemoji">🎙️</span><b>HOLD &amp; SPEAK</b><small id="sosVoiceSub">Say what's happening — it's prepared to share when you go quiet</small></button>
-        <p class="note"><b>You must send it.</b> DeySafe saves a durable SOS, asks the operator room to alert the trusted circle YOU added, and prepares your SOS + location to share. Only YOU choose who to share with by tapping share. It does not auto-deliver to authorities and never auto-dispatches armed responders.</p>
-        <details class="rights" id="trustedWrap"><summary>👥 Trusted circle — who we alert for you</summary>
-          <p style="margin:6px 0 8px;color:var(--muted)">Add the people who should be alerted when you raise an SOS. Stored privately on this device; the operator room sends to them on your behalf. Add their phone (with country code, e.g. +234…) or WhatsApp.</p>
-          <input id="tcName" placeholder="Name (e.g. Mama, Brother John)" />
-          <div class="srow" style="margin-top:8px">
-            <select id="tcChannel" style="flex:0 0 130px"><option value="sms">SMS</option><option value="whatsapp">WhatsApp</option></select>
-            <input id="tcAddress" placeholder="+2348012345678" inputmode="tel" />
-          </div>
-          <button class="btn sec" style="margin-top:8px" onclick="addTrusted()">＋ Add to my circle</button>
+        <p class="note"><b>You must send it.</b> DeySafe saves a durable SOS, asks the operator room to alert the Safety Vault guardians YOU added, and prepares your SOS + location to share. Only YOU choose who to share with by tapping share. It does not auto-deliver to authorities and never auto-dispatches armed responders.</p>
+        <details class="rights" id="trustedWrap" open><summary>Safety Vault guardians</summary>
+          <p style="margin:6px 0 8px;color:var(--muted)">Guardian details live in the server Safety Vault, not localStorage. This phone only shows a redacted count so a stolen device does not expose your people.</p>
           <div id="tcList" style="margin-top:10px"></div>
+          <button class="btn sec" style="margin-top:8px" onclick="go('settings')">Open Safety Vault</button>
         </details>
       </div>
       <div id="sosActive" style="display:none"></div>
@@ -301,7 +316,13 @@ Check hotel address</textarea>
 
     <section class="view pad" id="v-meet">
       <h2 class="t">Safe Meet — coordinate secure meetings</h2>
-      <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Two people meeting? Share your location, confirm arrival, get risk alerts.</p>
+      <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Two people meeting? DeySafe watches the session, confirms arrival automatically, and escalates if the route or timing goes wrong.</p>
+      <div class="ai-intake">
+        <label class="f" style="margin-top:0">Say the meeting once</label>
+        <textarea id="meetNL" placeholder="Example: I am meeting a seller at Computer Village by 4pm"></textarea>
+        <div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic('meetNL')">Speak</button><button class="btn" onclick="fillSafeMeetAI()">Fill Safe Meet</button></div>
+        <div class="note" id="meetNLnote" style="text-align:left;margin:8px 2px 0"></div>
+      </div>
 
       <label class="f">Meeting type</label>
       <select id="meetType">
@@ -340,7 +361,53 @@ Check hotel address</textarea>
     </section>
 
     <section class="view pad" id="v-settings">
-      <h2 class="t">Settings</h2>
+      <h2 class="t">Profile</h2>
+      <div class="case">
+        <div class="r1"><b>Account and language</b><span class="badge" id="acctBadge">Guest</span></div>
+        <label class="f">Phone number</label><input id="phoneInput" inputmode="tel" placeholder="+234..." />
+        <div class="srow">
+          <input id="firstNameInput" placeholder="First name" />
+          <select id="langSelect"><option value="en">English</option><option value="yo">Yoruba</option><option value="ig">Igbo</option><option value="ha">Hausa</option><option value="pcm">Pidgin</option></select>
+        </div>
+        <button class="btn sec" onclick="signupStart()">Send OTP</button>
+        <div class="srow">
+          <input id="otpRef" placeholder="OTP ref" />
+          <input id="otpCode" inputmode="numeric" placeholder="6 digit OTP" />
+        </div>
+        <button class="btn" onclick="signupVerify()">Verify phone</button>
+        <div id="acctStatus" class="kv"></div>
+      </div>
+      <div class="case">
+        <div class="r1"><b>Safety PINs</b><span class="badge">private</span></div>
+        <p class="note" style="text-align:left;margin:8px 2px">Safety PIN requests SOS closure. Duress PIN makes this phone look closed while escalation stays active.</p>
+        <input id="appPin" type="password" inputmode="numeric" placeholder="App PIN" />
+        <div class="srow">
+          <input id="safetyPin" type="password" inputmode="numeric" placeholder="Safety PIN" />
+          <input id="duressPin" type="password" inputmode="numeric" placeholder="Duress PIN" />
+        </div>
+        <button class="btn sec" onclick="savePins()">Save PINs</button>
+        <div id="pinStatus" class="kv"></div>
+      </div>
+      <div class="case">
+        <div class="r1"><b>Safety Vault guardians</b><span class="badge" id="guardianBadge">0</span></div>
+        <p class="note" style="text-align:left;margin:8px 2px">Guardian names and numbers stay out of localStorage. Add them here after phone verification.</p>
+        <input id="vaultName" placeholder="Guardian name" />
+        <div class="srow">
+          <select id="vaultChannel" style="flex:0 0 130px"><option value="sms">SMS</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option></select>
+          <input id="vaultAddress" placeholder="+2348012345678" inputmode="tel" />
+        </div>
+        <input id="vaultSafetyPin" type="password" inputmode="numeric" placeholder="Safety PIN required after first guardian" />
+        <button class="btn sec" onclick="addVaultGuardian()">Add guardian</button>
+        <div id="guardianList" class="kv"></div>
+      </div>
+      <div class="case">
+        <div class="r1"><b>Web push alerts</b><span class="badge" id="pushBadge">not tested</span></div>
+        <p class="note" style="text-align:left;margin:8px 2px">DeySafe only claims browser alerts are ready after this phone receives and confirms a visible test alert.</p>
+        <button class="btn sec" onclick="enablePush()">Enable alerts</button>
+        <button class="btn sec" onclick="testPush()">Send test alert</button>
+        <button class="btn" onclick="confirmPush()">I received the alert</button>
+        <div id="pushStatus" class="kv"></div>
+      </div>
       <div class="case">
         <button class="btn sec" onclick="panicLock()">Privacy lock</button>
         <p class="note" style="text-align:left;margin:8px 2px 0">Shows a harmless notes screen while SOS, route, and contacts keep running underneath. Tap Trip Notes four times to unlock.</p>
@@ -365,7 +432,7 @@ Check hotel address</textarea>
     <button data-v="sos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg>SOS</button>
     <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>FindMe</button>
     <button id="watchBtn" class="watchnav" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z"/></svg>Warn me</button>
-    <button data-v="meet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Safe Meet</button>
+    <button data-v="meet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l6 2.2v5.2c0 3.9-2.4 6.8-6 8.6-3.6-1.8-6-4.7-6-8.6V5.2z"/><circle cx="9" cy="10" r="1.7"/><circle cx="15" cy="10" r="1.7"/><path d="M8 15c.8-1.2 1.9-1.8 4-1.8s3.2.6 4 1.8"/></svg>Safe Meet</button>
   </nav>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -381,6 +448,25 @@ const LIST_LIMIT=500;
 const qLimit=(extra)=>'?limit='+LIST_LIMIT+(extra?('&'+extra):'');
 let map,incLayer,missLayer,routeLayer,areaLayer,triLayer,heatLayer,meLayer,HEAT_ON=false,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
 let LIVE_WATCH=null,LIVE_FIRST=true,LIVE_POS=null;
+let SESSION_TOKEN='', DEVICE_ID='', USER_PROFILE=null, GUARDIAN_COUNT=0, GUARDIAN_POLICY_ID='', PUSH_SUB_ID='';
+try{SESSION_TOKEN=localStorage.getItem('ds_session')||'';DEVICE_ID=localStorage.getItem('ds_device_id')||'';PUSH_SUB_ID=localStorage.getItem('ds_push_sub')||'';}catch(e){}
+function ensureDeviceId(){if(DEVICE_ID)return DEVICE_ID;DEVICE_ID='dev_'+_uuid();try{localStorage.setItem('ds_device_id',DEVICE_ID);}catch(e){}return DEVICE_ID;}
+function setSession(token,deviceId){
+  SESSION_TOKEN=token||'';DEVICE_ID=deviceId||DEVICE_ID||ensureDeviceId();
+  try{if(SESSION_TOKEN)localStorage.setItem('ds_session',SESSION_TOKEN);else localStorage.removeItem('ds_session');localStorage.setItem('ds_device_id',DEVICE_ID);}catch(e){}
+}
+function authHeaders(){var h={'Content-Type':'application/json'};if(SESSION_TOKEN)h.Authorization='Bearer '+SESSION_TOKEN;return h;}
+function authBody(body){var b=Object.assign({},body||{});if(SESSION_TOKEN)b.session_token=SESSION_TOKEN;if(DEVICE_ID)b.device_id=DEVICE_ID;if(GUARDIAN_POLICY_ID)b.guardian_policy_id=GUARDIAN_POLICY_ID;return b;}
+async function apiJson(url,body){
+  var opt={headers:authHeaders()};
+  if(body!==undefined){opt.method='POST';opt.body=JSON.stringify(authBody(body));}
+  var r=await fetch(url,opt);
+  return r.json();
+}
+function sessionRequired(){
+  if(!SESSION_TOKEN){toast('Verify your phone in Profile first');go('settings');return true;}
+  return false;
+}
 
 function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
 function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>'+e+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});}
@@ -540,7 +626,7 @@ async function postOrQueue(url,body){
   var payload=Object.assign({client_id:(body&&body.client_id)||_uuid()},body);
   if(!navigator.onLine){var q0=outboxEnqueue(url,payload);return {__queued:true,client_id:payload.client_id,queued_id:q0.id};}
   try{
-    var res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    var res=await fetch(url,{method:'POST',headers:authHeaders(),body:JSON.stringify(authBody(payload))});
     return await res.json();
   }catch(e){
     var q=outboxEnqueue(url,payload);
@@ -557,7 +643,7 @@ async function flushOutbox(){
     for(var i=0;i<list.length;i++){
       var it=list[i];if(it.state==='SENT')continue;it.state='SYNC_PENDING';
       try{
-        var res=await fetch(it.url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(it.body)});
+        var res=await fetch(it.url,{method:'POST',headers:authHeaders(),body:JSON.stringify(authBody(it.body))});
         if(res&&res.ok){it.state='SENT';sent++;}
         else if(res&&res.status>=400&&res.status<500&&res.status!==429){it.state='SENT';sent++;} // server rejected (e.g. dup) -> stop retrying
         else{it.state='QUEUED';break;} // 5xx / 429 -> keep for later, preserve order
@@ -993,8 +1079,8 @@ async function startJourneyGuard(auto){
   var a=$('#wFrom').value.trim(),b=$('#wTo').value.trim();
   if(!a||!b){if(!auto)toast('Add from and to first');return null;}
   var eta=$('#jEta'),share=$('#jShare');
-  var body={owner_token:SOS_OWNER,from:a,to:b,expected_arrival:eta?(eta.value||''):'',share_consent:!!(share&&share.checked)};
-  var r=await fetch('/api/journey/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+  var body=authBody({owner_token:SOS_OWNER,from:a,to:b,expected_arrival:eta?(eta.value||''):'',share_consent:!!(share&&share.checked)});
+  var r=await fetch('/api/journey/start',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
   if(!r.ok){if(!auto)toast(r.error||'Could not start guard');return null;}
   renderJourney(r.journey);if(!auto)toast('Journey Guard started');return r.journey;
 }
@@ -1006,9 +1092,9 @@ async function journeyPingPayload(kind,pos,auto){
   if(!JOURNEY_ID){try{JOURNEY_ID=localStorage.getItem('ds_journey_id')||'';}catch(e){}}
   if(!JOURNEY_ID){if(!auto)toast('Start WakaSafe first');return;}
   var share=!!($('#jShare')&&$('#jShare').checked);
-  var body={journey_uuid:JOURNEY_ID,event_type:kind||'checkin',share_consent:share,battery:null,network:(navigator.onLine?'online':'offline')};
+  var body=authBody({owner_token:SOS_OWNER,journey_uuid:JOURNEY_ID,event_type:kind||'checkin',share_consent:share,battery:null,network:(navigator.onLine?'online':'offline')});
   if(share&&pos){body.lat=pos.lat;body.lng=pos.lng;}
-  var r=await fetch('/api/journey/ping',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+  var r=await fetch('/api/journey/ping',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
   if(r.ok){renderJourney(r.journey);if(!auto)toast(kind==='arrived'?'Arrived marked':'Check-in saved');}
   else if(!auto)toast(r.error||'Could not check in');
 }
@@ -1019,7 +1105,7 @@ function journeyCheckin(){journeyPing('checkin');}
 async function journeyArrive(auto){
   if(!JOURNEY_ID){try{JOURNEY_ID=localStorage.getItem('ds_journey_id')||'';}catch(e){}}
   if(!JOURNEY_ID){if(!auto)toast('Start WakaSafe first');return;}
-  var r=await fetch('/api/journey/arrive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({journey_uuid:JOURNEY_ID})}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+  var r=await fetch('/api/journey/arrive',{method:'POST',headers:authHeaders(),body:JSON.stringify(authBody({owner_token:SOS_OWNER,journey_uuid:JOURNEY_ID}))}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
   if(r.ok){renderJourney(r.journey);stopJourneyAutoWatch();toast(auto?'Arrival marked automatically':'Glad you arrived');}
   else if(!auto)toast(r.error||'Could not mark arrived');
 }
@@ -1048,23 +1134,136 @@ function renderReadiness(r){
     +(gaps?'<div style="margin-top:6px">'+gaps+'</div>':'<div style="margin-top:6px">Ready for travel checks.</div>');
 }
 async function saveReadiness(){
-  var body={owner_token:SOS_OWNER,platform:navigator.platform||'',findmy_enabled:!!($('#rdFind')&&$('#rdFind').checked),
-    findhub_enabled:!!($('#rdFind')&&$('#rdFind').checked),trusted_contacts:tcLoad().length,
+  var body=authBody({owner_token:SOS_OWNER,platform:navigator.platform||'',findmy_enabled:!!($('#rdFind')&&$('#rdFind').checked),
+    findhub_enabled:!!($('#rdFind')&&$('#rdFind').checked),trusted_contacts:GUARDIAN_COUNT,
     silent_sos:!!($('#rdSilent')&&$('#rdSilent').checked),sms_fallback:!!($('#rdSms')&&$('#rdSms').checked),
-    wearable:!!($('#rdWear')&&$('#rdWear').checked),offline_pack:!!($('#rdOffline')&&$('#rdOffline').checked)};
-  var r=await fetch('/api/readiness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+    wearable:!!($('#rdWear')&&$('#rdWear').checked),offline_pack:!!($('#rdOffline')&&$('#rdOffline').checked)});
+  var r=await fetch('/api/readiness',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
   if(r.ok){renderReadiness(r.readiness);toast('Readiness saved');}
   else toast(r.error||'Could not save readiness');
 }
 async function loadReadiness(){
   try{JOURNEY_ID=localStorage.getItem('ds_journey_id')||'';}catch(e){}
   try{
-    var r=await fetch('/api/readiness?owner_token='+encodeURIComponent(SOS_OWNER)).then(x=>x.json());
+    var r=await fetch(SESSION_TOKEN?'/api/readiness':'/api/readiness?owner_token='+encodeURIComponent(SOS_OWNER),{headers:authHeaders()}).then(x=>x.json());
     if(r&&r.readiness)renderReadiness(r.readiness);else renderReadiness(null);
   }catch(e){renderReadiness(null);}
   if(JOURNEY_ID){
     try{var j=await fetch('/api/journey?id='+encodeURIComponent(JOURNEY_ID)).then(x=>x.json());if(j&&j.journey)renderJourney(j.journey);}catch(e){}
   }
+}
+
+function renderProfile(){
+  var acct=$('#acctStatus'),badge=$('#acctBadge'),gb=$('#guardianBadge');
+  if(badge)badge.textContent=USER_PROFILE?'Verified':'Guest';
+  if(gb)gb.textContent=String(GUARDIAN_COUNT||0);
+  if(acct)acct.innerHTML=USER_PROFILE?('<b>'+esc(USER_PROFILE.first_name||'DeySafe user')+'</b><div>'+esc(USER_PROFILE.phone||'verified phone')+'</div><div>Language: '+esc(USER_PROFILE.language||'en')+'</div>'):'Verify your phone to unlock Safety Vault, PINs, push alerts, and MySafe.';
+  renderTrusted();
+}
+async function loadMe(){
+  if(!SESSION_TOKEN){renderProfile();return null;}
+  try{
+    var r=await fetch('/api/me',{headers:authHeaders()}).then(function(x){return x.json();});
+    if(!r.ok){setSession('',DEVICE_ID);USER_PROFILE=null;GUARDIAN_COUNT=0;GUARDIAN_POLICY_ID='';renderProfile();return null;}
+    USER_PROFILE=r.user||null;GUARDIAN_COUNT=Number(r.guardian_count||0);GUARDIAN_POLICY_ID=(USER_PROFILE&&USER_PROFILE.guardian_policy_id)||'';
+    renderProfile();await loadGuardians();return USER_PROFILE;
+  }catch(e){renderProfile();return null;}
+}
+async function signupStart(){
+  var phone=($('#phoneInput').value||'').trim();
+  if(!phone){$('#phoneInput').focus();return;}
+  ensureDeviceId();
+  var r=await fetch('/api/signup/start',{method:'POST',headers:authHeaders(),body:JSON.stringify({phone:phone,device_id:DEVICE_ID})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
+  var st=$('#acctStatus');if(st)st.innerHTML=r.ok?('OTP sent to '+esc(r.phone_redacted||phone)+(r.dev_otp?('<div>Demo OTP: <b>'+esc(r.dev_otp)+'</b></div>'):'') ):'Could not send OTP: '+esc(r.error||'failed');
+  if(r.ok&&$('#otpRef'))$('#otpRef').value=r.otp_ref||'';
+}
+async function signupVerify(){
+  var ref=($('#otpRef').value||'').trim(),code=($('#otpCode').value||'').trim();
+  if(!ref||!code){toast('Enter OTP ref and code');return;}
+  var r=await fetch('/api/signup/verify',{method:'POST',headers:authHeaders(),body:JSON.stringify({otp_ref:ref,code:code,first_name:($('#firstNameInput').value||'').trim(),language:($('#langSelect').value||'en'),device_id:ensureDeviceId()})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
+  if(!r.ok){toast(r.error||'OTP failed');return;}
+  setSession(r.session_token||'',r.device_id||DEVICE_ID);USER_PROFILE=r.user||null;GUARDIAN_COUNT=Number(r.guardian_count||0);GUARDIAN_POLICY_ID=(USER_PROFILE&&USER_PROFILE.guardian_policy_id)||'';
+  toast('Phone verified');renderProfile();await loadMe();await loadMySafe();await loadReadiness();
+}
+async function savePins(){
+  if(sessionRequired())return;
+  var safety=($('#safetyPin').value||'').trim(),duress=($('#duressPin').value||'').trim();
+  if(safety.length<4||duress.length<4){toast('Safety and duress PINs must be at least 4 digits');return;}
+  var r=await apiJson('/api/profile/pins',{app_pin:($('#appPin').value||'').trim(),safety_pin:safety,duress_pin:duress});
+  var el=$('#pinStatus');if(el)el.textContent=r.ok?'PINs saved. Duress and Safety PINs are active.':'Could not save PINs: '+(r.error||'failed');
+  if(r.ok){['#appPin','#safetyPin','#duressPin'].forEach(function(s){var el=$(s);if(el)el.value='';});}
+}
+function renderGuardians(list){
+  var el=$('#guardianList');if(!el)return;
+  if(!SESSION_TOKEN){el.innerHTML='Verify your phone first.';return;}
+  el.innerHTML=(list&&list.length)?list.map(function(g){return '<div class="tcitem"><span class="tcch">'+esc(g.channel||'sms')+'</span><span><b>'+esc(g.name||'Guardian')+'</b> '+esc(g.address_redacted||'')+'</span></div>';}).join(''):'No guardians yet.';
+}
+async function loadGuardians(){
+  if(!SESSION_TOKEN){renderGuardians([]);return;}
+  var r=await fetch('/api/vault/guardians',{headers:authHeaders()}).then(function(x){return x.json();}).catch(function(){return {ok:false,guardians:[]};});
+  if(r.ok){GUARDIAN_COUNT=Number(r.guardian_count||r.count||((r.guardians||[]).length));renderProfile();renderGuardians(r.guardians||[]);}
+}
+async function addVaultGuardian(){
+  if(sessionRequired())return;
+  var name=($('#vaultName').value||'').trim(),address=($('#vaultAddress').value||'').trim(),pin=($('#vaultSafetyPin').value||'').trim();
+  if(!address){$('#vaultAddress').focus();return;}
+  var r=await apiJson('/api/vault/guardians',{name:name||'Guardian',channel:$('#vaultChannel').value||'sms',address:address,safety_pin:pin,pin:pin});
+  if(!r.ok){toast(r.error||'Could not add guardian');return;}
+  ['#vaultName','#vaultAddress','#vaultSafetyPin'].forEach(function(s){var el=$(s);if(el)el.value='';});
+  GUARDIAN_COUNT=Number(r.guardian_count||r.count||GUARDIAN_COUNT+1);GUARDIAN_POLICY_ID=r.guardian_policy_id||GUARDIAN_POLICY_ID;toast('Guardian saved in Safety Vault');await loadGuardians();await loadReadiness();
+}
+function renderMySafePlaces(list){var el=$('#mysafePlaces');if(!el)return;el.innerHTML=(list&&list.length)?list.map(function(p){return '<div>'+esc(p.alias||'Place')+': '+esc(p.place||'')+'</div>';}).join(''):'No saved places yet.';}
+function renderMySafeRoutes(list){var el=$('#mysafeRoutes');if(!el)return;el.innerHTML=(list&&list.length)?list.map(function(r){return '<div>'+esc(r.origin_alias||'from')+' to '+esc(r.destination_alias||'to')+' - '+esc(r.days||'any day')+' '+esc(r.departure_window||'')+'</div>';}).join(''):'No recurring routes yet.';}
+async function loadMySafe(){
+  if(!SESSION_TOKEN){renderMySafePlaces([]);renderMySafeRoutes([]);return;}
+  var p=await fetch('/api/mysafe/places',{headers:authHeaders()}).then(function(x){return x.json();}).catch(function(){return {places:[]};});
+  var r=await fetch('/api/mysafe/routes',{headers:authHeaders()}).then(function(x){return x.json();}).catch(function(){return {routes:[]};});
+  renderMySafePlaces(p.places||[]);renderMySafeRoutes(r.routes||[]);
+}
+async function addMySafePlace(){
+  if(sessionRequired())return;
+  var alias=($('#safeAlias').value||'').trim(),place=($('#safePlace').value||'').trim();
+  if(!alias||!place){toast('Add alias and place');return;}
+  var r=await apiJson('/api/mysafe/places',{alias:alias,place:place});
+  if(!r.ok){toast(r.error||'Could not save place');return;}
+  $('#safeAlias').value='';$('#safePlace').value='';toast('MySafe place saved');loadMySafe();
+}
+async function addMySafeRoute(){
+  if(sessionRequired())return;
+  var o=($('#routeOrigin').value||'').trim(),d=($('#routeDest').value||'').trim();
+  if(!o||!d){toast('Add from and to aliases');return;}
+  var r=await apiJson('/api/mysafe/routes',{origin_alias:o,destination_alias:d,days:($('#routeDays').value||'').trim(),departure_window:($('#routeWindow').value||'').trim(),expected_arrival:'',escalation_policy:'guardian_vault'});
+  if(!r.ok){toast(r.error||'Could not save route');return;}
+  ['#routeOrigin','#routeDest','#routeDays','#routeWindow'].forEach(function(s){var el=$(s);if(el)el.value='';});toast('Recurring route saved');loadMySafe();
+}
+function urlBase64ToUint8Array(base64String){var padding='='.repeat((4-base64String.length%4)%4),base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/'),raw=atob(base64),out=new Uint8Array(raw.length);for(var i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;}
+async function enablePush(){
+  if(sessionRequired())return;
+  var st=$('#pushStatus'),badge=$('#pushBadge');if(!('Notification'in window)||!('serviceWorker'in navigator)){if(st)st.textContent='This browser cannot receive Web Push.';return;}
+  var perm=await Notification.requestPermission();if(perm!=='granted'){if(st)st.textContent='Notification permission was not granted.';return;}
+  var reg=await navigator.serviceWorker.register('/sw.js');
+  var cfg=await fetch('/api/push/config',{headers:authHeaders()}).then(function(x){return x.json();}).catch(function(){return {configured:false};});
+  var sub=null;
+  if(cfg.configured&&cfg.public_key&&reg.pushManager){
+    sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(cfg.public_key)}).catch(function(){return null;});
+  }
+  if(!sub){sub={endpoint:'local-permission://'+ensureDeviceId(),keys:{p256dh:'local',auth:'local'},permission_only:true};}
+  var r=await apiJson('/api/push/register',{subscription:sub});
+  if(r.ok){PUSH_SUB_ID=r.subscription_id||'';try{localStorage.setItem('ds_push_sub',PUSH_SUB_ID);}catch(e){}if(badge)badge.textContent='registered';if(st)st.textContent='Alert channel registered. Send and confirm a test alert before launch.';}
+  else if(st)st.textContent=r.error||'Could not register push.';
+}
+async function testPush(){
+  if(sessionRequired())return;
+  var st=$('#pushStatus');
+  try{var reg=await navigator.serviceWorker.ready;await reg.showNotification('DeySafe test alert',{body:'Confirm this in Profile to mark push alerts ready.',tag:'deysafe-test'});}catch(e){}
+  var r=await apiJson('/api/push/test',{subscription_id:PUSH_SUB_ID});
+  if(st)st.textContent=r.ok?'Test alert requested. Confirm only after you saw the browser notification.':(r.error||'Could not test push');
+}
+async function confirmPush(){
+  if(sessionRequired())return;
+  var r=await apiJson('/api/push/confirm',{subscription_id:PUSH_SUB_ID}),badge=$('#pushBadge'),st=$('#pushStatus');
+  if(r.ok){if(badge)badge.textContent='confirmed';if(st)st.textContent='This phone confirmed a visible alert.';toast('Push alerts confirmed');}
+  else if(st)st.textContent=r.error||'Could not confirm push';
 }
 async function mediaMetaFromFileInput(id){
   var el=$('#'+id),f=el&&el.files&&el.files[0];if(!f)return null;
@@ -1133,8 +1332,8 @@ async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').
   if(r.ok){$('#rDesc').value='';if($('#rMedia'))$('#rMedia').value='';previewMediaMeta();loadData();loadLevel();}}
 // --- Emergency SOS: AUTOMATIC (alarm + share location) or HOLD & SPEAK (auto-send on dead air).
 // Either can run in SILENT mode (no alarm/flash). On activate we POST /api/sos to create a
-// DURABLE event (SOS-01), show its reference, ask the server to alert the trusted circle YOU
-// added (the server does the send in SIM/real — we never fake one), and poll the event's state.
+// DURABLE event (SOS-01), show its reference, ask the server to alert Safety Vault
+// guardians (the server does the send in SIM/real — we never fake one), and poll the event's state.
 // Bright lines preserved: location is captured ON-DEVICE and only YOU share it; no auto-dispatch.
 let SOS_ON=false, sosWatch=null, sosSilence=null, sosCtx=null, sosBeepIv=null, sosMsg='';
 let SOS_SILENT=false, SOS_REF=null, SOS_UUID=null, sosPollIv=null, sosLat=null, sosLng=null, SOS_CLIENT_ID=null;
@@ -1143,21 +1342,14 @@ function _beep(){try{if(!sosCtx)return;var o=sosCtx.createOscillator(),g=sosCtx.
 function startAlarm(){try{sosCtx=new (window.AudioContext||window.webkitAudioContext)();_beep();sosBeepIv=setInterval(_beep,650);}catch(e){}document.body.classList.add('sos-flash');}
 function stopAlarm(){if(sosBeepIv){clearInterval(sosBeepIv);sosBeepIv=null;}try{if(sosCtx)sosCtx.close();}catch(e){}sosCtx=null;document.body.classList.remove('sos-flash');}
 function sosLocationMsg(lat,lng,extra){var link='https://maps.google.com/?q='+lat.toFixed(5)+','+lng.toFixed(5);return '🆘 I NEED HELP'+(extra?(' — '+extra):'')+'. My location: '+link;}
-// ----- Trusted circle (SOS-03). Stored privately on-device; mirrored to the server (best-effort)
-// so the operator room can notify them. Addresses are sensitive: rendered only in the owner's own UI.
-function tcLoad(){try{return JSON.parse(localStorage.getItem('ds_trusted')||'[]');}catch(e){return [];}}
-function tcSave(list){try{localStorage.setItem('ds_trusted',JSON.stringify(list));}catch(e){}}
-function renderTrusted(){var el=$('#tcList');if(!el)return;var list=tcLoad();
-  el.innerHTML=list.length?list.map(function(c,i){return '<div class="tcitem"><span class="tcch">'+esc(c.channel||'sms')+'</span><span><b>'+esc(c.name||'Contact')+'</b> · '+esc(c.address||'')+'</span><button class="tcx" title="Remove" onclick="removeTrusted('+i+')">✕</button></div>';}).join('')
-    :'<p class="note" style="text-align:left;margin:4px 2px 0">No one added yet. Add at least one trusted contact so we can alert them for you.</p>';}
-async function addTrusted(){var name=($('#tcName').value||'').trim(),ch=$('#tcChannel').value,addr=($('#tcAddress').value||'').trim();
-  if(!addr){$('#tcAddress').focus();toast('Add a phone or WhatsApp number');return;}
-  var list=tcLoad();list.push({name:name||'Contact',channel:ch,address:addr});tcSave(list);
-  $('#tcName').value='';$('#tcAddress').value='';renderTrusted();toast('Added to your circle');
-  // Best-effort server mirror (consented). Field endpoint; degrades cleanly if not present yet.
-  try{await fetch('/api/trusted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner_token:SOS_OWNER,name:name||'Contact',channel:ch,address:addr})});}catch(e){}}
-function removeTrusted(i){var list=tcLoad();if(i<0||i>=list.length)return;list.splice(i,1);tcSave(list);renderTrusted();
-  try{fetch('/api/trusted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner_token:SOS_OWNER,contacts:list,replace:true})});}catch(e){}}
+// ----- Safety Vault guardians (SOS-03). Guardian PII never lives in localStorage.
+function tcLoad(){return Array.from({length:GUARDIAN_COUNT},function(){return {vault:true};});}
+function tcSave(){return;}
+function renderTrusted(){var el=$('#tcList');if(!el)return;
+  el.innerHTML=GUARDIAN_COUNT>0?'<div class="tcitem"><span class="tcch">vault</span><span><b>'+GUARDIAN_COUNT+' guardian'+(GUARDIAN_COUNT===1?'':'s')+'</b> configured in Safety Vault</span></div>'
+    :'<p class="note" style="text-align:left;margin:4px 2px 0">No Safety Vault guardians configured yet. Open Profile to verify your phone and add at least one guardian.</p>';}
+async function addTrusted(){go('settings');toast('Add guardians in Safety Vault');}
+function removeTrusted(){go('settings');toast('Manage guardians in Safety Vault');}
 function renderSosButtons(){SOS_SILENT=!!($('#sosSilentToggle')&&$('#sosSilentToggle').checked);
   var a=$('#sosAutoSub'),v=$('#sosVoiceSub');
   if(a)a.textContent=SOS_SILENT?'No alarm — quietly save SOS + prepare your location to share':'Alarm + prepare your live location to share — no typing';
@@ -1168,7 +1360,7 @@ async function sosCreateEvent(extra){
   var kind=SOS_SILENT?'silent':'audible';
   // Stable per-activation id so a replayed offline SOS de-dupes server-side (never double-creates).
   if(!SOS_CLIENT_ID)SOS_CLIENT_ID=_uuid();
-  var body={mode:SOS_SILENT?'silent':'auto',kind:kind,message:(extra||'').slice(0,280),owner_token:SOS_OWNER,notify:true,contacts:tcLoad(),client_id:SOS_CLIENT_ID};
+  var body=authBody({mode:SOS_SILENT?'silent':'auto',kind:kind,message:(extra||'').slice(0,280),owner_token:SOS_OWNER,notify:true,client_id:SOS_CLIENT_ID});
   if(sosLat!=null&&sosLng!=null){body.lat=sosLat;body.lng=sosLng;}
   // OFF-01: if offline, the SOS is SAVED ON THE DEVICE and auto-sent on reconnect.
   // The victim's own share path (sosShare) never depends on this call — fail-open.
@@ -1191,9 +1383,9 @@ function renderSosStatus(status,contactState,online){
   // the worst failure mode.
   var hasCircle=false;try{hasCircle=(tcLoad()||[]).length>0;}catch(e){}
   var cs;
-  if(contactState){cs='Trusted circle: <b>'+esc(typeof contactState==='string'?contactState:'notified')+'</b>';}
-  else if(hasCircle){cs='Trusted circle: <b>being contacted…</b>';}
-  else{cs='<b style="color:var(--red,#d92d20)">No trusted circle set</b> — add contacts so they are alerted. Use the share button below now.';}
+  if(contactState){cs='Safety Vault: <b>'+esc(typeof contactState==='string'?contactState:'notified')+'</b>';}
+  else if(hasCircle){cs='Safety Vault: <b>guardian policy queued</b>';}
+  else{cs='<b style="color:var(--red,#d92d20)">No Safety Vault guardians set</b> - add guardians in Profile. Use the share button below now.';}
   el.innerHTML=refHtml+'<div class="sosstate">Status: <b>'+esc(st)+'</b> · '+cs+'</div>';
 }
 function startSosPoll(){stopSosPoll();if(!SOS_REF&&!SOS_UUID)return;
@@ -1236,11 +1428,23 @@ function sosActivate(extra){
 }
 function sosAuto(){sosActivate('');}
 function sosShare(){var msg=sosMsg||'🆘 I NEED HELP';if(navigator.share){navigator.share({title:'SOS — I need help',text:msg}).catch(function(){});}else{try{navigator.clipboard.writeText(msg);}catch(e){}toast('Copied — paste to your people');try{window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');}catch(e){}}}
-function sosStop(){SOS_ON=false;stopAlarm();stopSosPoll();if(sosWatch!=null){try{navigator.geolocation.clearWatch(sosWatch);}catch(e){}sosWatch=null;}if(sosSilence){clearTimeout(sosSilence);sosSilence=null;}
-  // Tell the server the owner cancelled (governed transition). Best-effort; no operator token here.
-  if(SOS_REF||SOS_UUID){try{fetch('/api/sos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner_token:SOS_OWNER,ref:SOS_REF,sos_uuid:SOS_UUID,cancel:true})});}catch(e){}}
+async function sosStop(){
+  var pin='';
+  if(SESSION_TOKEN){pin=prompt('Enter Safety PIN. Duress PIN will hide this screen but keep escalation active.')||'';if(!pin){toast('Safety PIN required to close SOS');return;}}
+  var r={ok:true,state:'CLOSE_REQUESTED'};
+  if(SOS_REF||SOS_UUID){
+    try{
+      r=await fetch('/api/sos',{method:'POST',headers:authHeaders(),body:JSON.stringify(authBody({owner_token:SOS_OWNER,ref:SOS_REF,sos_uuid:SOS_UUID,cancel:true,pin:pin,safety_pin:pin}))}).then(function(x){return x.json();});
+    }catch(e){r={ok:false,error:'network'};}
+    if(!r.ok){toast(r.error||'Could not request SOS closure');return;}
+  }
+  SOS_ON=false;stopAlarm();stopSosPoll();if(sosWatch!=null){try{navigator.geolocation.clearWatch(sosWatch);}catch(e){}sosWatch=null;}if(sosSilence){clearTimeout(sosSilence);sosSilence=null;}
+  var duress=!!(r.duress||String(r.state||r.status||'').toUpperCase()==='DURESS_CONFIRMED');
   SOS_REF=null;SOS_UUID=null;sosLat=null;sosLng=null;
-  $('#sosActive').style.display='none';$('#sosHome').style.display='block';toast('SOS stopped — glad you are safe');}
+  $('#sosActive').style.display='none';$('#sosHome').style.display='block';
+  if(duress){panicLock();toast('Screen closed locally');}
+  else{toast('SOS closure requested - guardian or SHIELD verification required');}
+}
 function sosVoice(){
   SOS_SILENT=!!($('#sosSilentToggle')&&$('#sosSilentToggle').checked);
   if(!voiceSupported()){toast('Voice not available — starting '+(SOS_SILENT?'Silent':'Automatic'));sosAuto();return;}
@@ -1258,7 +1462,7 @@ async function sendMissing(){const n=$('#mName').value.trim();if(!n){$('#mName')
     body:JSON.stringify({name:n,age:$('#mAge').value.trim(),place:$('#mPlace').value,exact_place:$('#mExact').value.trim(),count:$('#mCount').value,hours_ago:$('#mHours').value,
       vehicle:$('#mVeh').value.trim(),clothing:$('#mClo').value.trim(),direction:$('#mDir').value.trim(),beacon_id:($('#mBeacon')?$('#mBeacon').value.trim():'')})}).then(r=>r.json());
   const o=$('#mOk');o.style.display='block';
-  if(r.ok){o.innerHTML='✓ Search case opened. See it on the map with its search area.';['#mName','#mExact','#mVeh','#mClo','#mDir'].forEach(s=>$(s).value='');MISS=r.missing||[];drawMarkers();renderHome();renderMissList();}
+  if(r.ok){o.innerHTML='✓ Search case opened. See it on the map with its public search area after review.';['#mName','#mExact','#mVeh','#mClo','#mDir'].forEach(s=>$(s).value='');await loadData();renderMissList();}
   else o.innerHTML='⚠ '+esc(r.error||'failed');}
 
 function go(v){switchTab(v);document.querySelectorAll('nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));}
@@ -1273,7 +1477,7 @@ window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_ON)panicLock();});
 
-(async function(){try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace'].forEach(attachPlaceSuggest);await loadLevel();await loadData();await loadReadiness();
+(async function(){try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetPlace','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
   restoreJourney();   // re-show Journey Guard presence if a trip is in progress
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();flushOutbox(); // send anything saved on a previous offline visit
@@ -1290,9 +1494,9 @@ function stopMeetWatch(){
 function updateMeetStatus(text){var el=$('#meetStatus');if(el)el.textContent=text;}
 async function meetCheckin(status,pos,auto){
   if(!MEET_SESSION)return {ok:false};
-  var body={owner_token:SOS_OWNER,session_uuid:MEET_SESSION,status:status||'manual',network:(navigator.onLine?'online':'offline')};
+  var body=authBody({owner_token:SOS_OWNER,session_uuid:MEET_SESSION,status:status||'manual',network:(navigator.onLine?'online':'offline')});
   if(pos){body.lat=pos.lat;body.lng=pos.lng;body.accuracy=pos.accuracy||0;}
-  var r=await fetch('/api/safemeet/checkin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+  var r=await fetch('/api/safemeet/checkin',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
   if(r.ok){
     var st=(r.session_status||'in_progress').replace(/_/g,' ');
     updateMeetStatus(st+(auto?' · automatic':''));
@@ -1316,16 +1520,30 @@ function startMeetWatch(lat,lng){
   updateMeetStatus('watching for arrival automatically');
 }
 
+async function fillSafeMeetAI(){
+  var txt=($('#meetNL').value||'').trim(),note=$('#meetNLnote');
+  if(!txt){$('#meetNL').focus();return;}
+  if(note)note.textContent='Reading meeting details...';
+  var r=await fetch('/api/intake',{method:'POST',headers:authHeaders(),body:JSON.stringify(authBody({mode:'meet',text:txt}))}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
+  if(!r.ok){if(note)note.textContent=r.error||'Could not read meeting details';return;}
+  var f=r.fields||{};
+  if(f.meeting_type&&$('#meetType'))$('#meetType').value=f.meeting_type;
+  if(f.meeting_place&&$('#meetPlace'))$('#meetPlace').value=f.meeting_place;
+  if(f.meeting_address&&$('#meetAddress'))$('#meetAddress').value=f.meeting_address;
+  if(f.expected_arrival&&$('#meetETA'))$('#meetETA').value=f.expected_arrival;
+  if(note)note.textContent='SafeMeet filled. Check it once, then start the watch.';
+}
+
 async function startSafeMeet() {
   const type = $('#meetType').value;
   const place = ($('#meetPlace').value || '').trim();
   const addr = ($('#meetAddress').value || '').trim();
   if (!place) { toast('Enter meeting location'); return; }
   const coords = PLACE_COORDS[place] || (LIVE_POS?[LIVE_POS.lat,LIVE_POS.lng]:[null,null]);
-  const body = {owner_token:SOS_OWNER,meeting_type:type,meeting_place:place,meeting_address:addr,
-    meeting_lat:coords[0],meeting_lng:coords[1],expected_arrival:$('#meetETA').value||''};
+  const body = authBody({owner_token:SOS_OWNER,meeting_type:type,meeting_place:place,meeting_address:addr,
+    meeting_lat:coords[0],meeting_lng:coords[1],expected_arrival:$('#meetETA').value||''});
   const r = await fetch('/api/safemeet/start', {
-    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
+    method:'POST',headers:authHeaders(),body:JSON.stringify(body)
   }).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
   if(r.ok){
     MEET_SESSION=r.session_uuid;
@@ -1360,7 +1578,7 @@ function renderMeetActive(data) {
 async function endSafeMeet() {
   if(!MEET_SESSION)return;
   const sid=MEET_SESSION;
-  const r=await fetch('/api/safemeet/end',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner_token:SOS_OWNER,session_uuid:sid})}).then(x=>x.json()).catch(()=>({ok:false}));
+  const r=await fetch('/api/safemeet/end',{method:'POST',headers:authHeaders(),body:JSON.stringify(authBody({owner_token:SOS_OWNER,session_uuid:sid}))}).then(x=>x.json()).catch(()=>({ok:false}));
   stopMeetWatch();MEET_SESSION=null;
   var box=$('#meetActive');if(box)box.style.display='none';
   loadMeetList();
@@ -1374,13 +1592,13 @@ async function inviteMeetPerson() {
 
   const r = await fetch('/api/safemeet/invite', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
+    headers: authHeaders(),
+    body: JSON.stringify(authBody({
       owner_token: SOS_OWNER,
       session_uuid: MEET_SESSION,
       invite_to_token: token,
       channel: 'direct'
-    })
+    }))
   }).then(x => x.json()).catch(() => ({ok: false}));
 
   toast(r.ok?('Invite code: '+(r.invite_token||token)):'Invite could not be recorded');
@@ -1390,7 +1608,7 @@ async function loadMeetList() {
   var el = $('#meetList');
   if (!el) return;
   try {
-    var r = await fetch('/api/safemeet/list?owner_token=' + encodeURIComponent(SOS_OWNER)).then(x => x.json());
+    var r = await fetch(SESSION_TOKEN?'/api/safemeet/list':'/api/safemeet/list?owner_token=' + encodeURIComponent(SOS_OWNER),{headers:authHeaders()}).then(x => x.json());
     var sessions = (r && r.sessions) || [];
     if (!sessions.length) { el.innerHTML = '<p class="note">No active meetings.</p>'; return; }
     el.innerHTML = sessions.map(function(s) {

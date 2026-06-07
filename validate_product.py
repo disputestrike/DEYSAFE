@@ -163,6 +163,20 @@ check("Readiness moved into settings instead of cluttering WakaSafe",
       'id="v-settings"' in app_html and "Phone Safety Readiness" in app_html
       and "settingsBtn" in app_html,
       "settings/readiness markers missing")
+check("Profile contains phone OTP, Safety PINs, and server Safety Vault",
+      "/api/signup/start" in app_html and "/api/profile/pins" in app_html
+      and "/api/vault/guardians" in app_html and "Safety Vault guardians" in app_html
+      and "ds_trusted" not in app_html,
+      "profile/vault markers missing or local guardian storage still present")
+check("MySafe places/routes and Web Push receipt testing are wired",
+      "/api/mysafe/places" in app_html and "/api/mysafe/routes" in app_html
+      and "/api/push/config" in app_html and "/api/push/test" in app_html
+      and "I received the alert" in app_html,
+      "mysafe/push markers missing")
+check("SafeMeet has voice-first AI intake and automatic watch posture",
+      "meetNL" in app_html and "fillSafeMeetAI" in app_html
+      and "watching for arrival automatically" in app_html,
+      "SafeMeet AI/auto markers missing")
 time.sleep(1.0)  # Wait for rate limit reset
 s, j, raw = call("POST", "/api/report", {
     "type": "armed_robbery",

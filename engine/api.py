@@ -50,6 +50,8 @@ import beaconsign  # BLE-01: signed rotating beacon envelope (HMAC + replay guar
 import scheduler   # DATA-01: periodic ingest worker (default OFF; started from main())
 import safety      # Product-safety layer: Journey Guard/readiness/cases/evidence/network
 import triangulate # TRI-01: server-side reachability-ring / Venn search-zone engine (FindMe)
+import identity    # Citizen phone OTP/session/PIN/Safety Vault helpers
+import safetytick  # Server-side stale-device/overdue journey checks
 
 # --- Phase 0 config ----------------------------------------------------------
 # Operator auth (AUTH-01/06). Two ways to enable a locked posture, both fail-OPEN
@@ -231,23 +233,16 @@ def sos_notify_message(ev):
 def _sos_contact_targets(data, db):
     """Resolve the trusted-circle recipients for an SOS notify.
 
-    Prefers the contacts the client posted with the SOS (mirrors what the field
-    app holds on-device); falls back to the server-side circle stored for this
-    owner_token (SOS-03). Returns a list of {channel,address}-style dicts that
-    broadcast.fan_out understands. Never returns the raw owner_token.
+    The hostile-device model forbids sending a plaintext guardian list from the
+    phone during an SOS. Prefer the opaque guardian_policy_id stored server-side;
+    legacy owner_token fallback remains for demo/backward compatibility only.
+    Returns {channel,address} targets for broadcast, never to the client.
     """
-    contacts = data.get("contacts")
-    if isinstance(contacts, list) and contacts:
-        out = []
-        for c in contacts:
-            if isinstance(c, dict):
-                addr = c.get("address") or c.get("to") or c.get("phone")
-                if addr:
-                    out.append({"address": addr, "channel": (c.get("channel") or SOS_DEFAULT_CHANNEL)})
-            elif c:
-                out.append({"address": c, "channel": SOS_DEFAULT_CHANNEL})
-        if out:
-            return out
+    policy_id = (data.get("guardian_policy_id") or "").strip()
+    if policy_id:
+        rows = db.guardian_targets_for_policy(policy_id)
+        if rows:
+            return rows
     # Fall back to the server-mirrored circle for this owner.
     owner = (data.get("owner_token") or "").strip()
     rows = db.trusted_for(owner) if owner else []
@@ -614,6 +609,45 @@ def media_analysis_triage(media, context=""):
             "vision_note": "Pixel/frame-level vision is not wired in this build; this endpoint does metadata, storage, chain-of-custody, and text-context triage.",
         },
     }
+
+
+def production_mode():
+    return (os.environ.get("ENVIRONMENT") or os.environ.get("DEYSAFE_ENV") or "").strip().lower() in (
+        "prod", "production", "live")
+
+
+def production_config_report():
+    errors = []
+    warnings = []
+    if DEMO_MODE:
+        errors.append("DEMO_MODE must be 0 outside local demo")
+    if not os.environ.get("DATABASE_URL", "").strip():
+        errors.append("DATABASE_URL/Postgres is required for production")
+    if os.environ.get("DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() not in ("1", "true", "yes", "on"):
+        errors.append("DEYSAFE_REQUIRE_POSTGRES=1 is required for production")
+    if len(identity.secret()) < 24:
+        errors.append("DEYSAFE_SECRET must be configured with at least 24 characters")
+    if not os.environ.get("DEYSAFE_BEACON_SECRET", "").strip():
+        errors.append("DEYSAFE_BEACON_SECRET is required before BLE/FindMe beacon use")
+    if not (OPERATOR_TOKEN or auth.auth_enabled()):
+        errors.append("OPERATOR_TOKEN or DEYSAFE_OPERATORS is required")
+    if not (os.environ.get("DEYSAFE_VAPID_PRIVATE_KEY") and os.environ.get("DEYSAFE_VAPID_PUBLIC_KEY")):
+        if os.environ.get("DEYSAFE_PUSH_DISABLED", "").strip() != "1":
+            warnings.append("Web Push keys are missing; set DEYSAFE_PUSH_DISABLED=1 if intentionally disabled")
+    if not (os.environ.get("AT_API_KEY") and os.environ.get("AT_USERNAME")):
+        if os.environ.get("DEYSAFE_SMS_DISABLED", "").strip() != "1":
+            warnings.append("SMS provider keys are missing; set DEYSAFE_SMS_DISABLED=1 if intentionally disabled")
+    if not all(_r2_config().get(k) for k in ("endpoint", "bucket", "access_key", "secret_key")):
+        if os.environ.get("DEYSAFE_STORAGE_DISABLED", "").strip() != "1":
+            warnings.append("R2 evidence storage is missing; set DEYSAFE_STORAGE_DISABLED=1 if intentionally disabled")
+    return {"production_mode": production_mode(), "fail_closed": production_mode(),
+            "errors": errors, "warnings": warnings, "ok": not errors}
+
+
+def enforce_production_config():
+    rep = production_config_report()
+    if rep["production_mode"] and not rep["ok"]:
+        raise RuntimeError("Production configuration is unsafe: " + "; ".join(rep["errors"]))
 
 
 def alert_level(conf, sev):
@@ -1103,20 +1137,15 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- operator authentication (AUTH-01/02/06) ----------------------------
     def _bearer(self):
-        # Pull the operator credential from Authorization: Bearer, the
-        # X-Operator-Token header, or a ?token= query param (for review.html).
+        # Pull the operator credential from headers only. Query-string tokens are
+        # intentionally not accepted: they leak through logs, history, screenshots,
+        # and referrers.
         h = self.headers.get("Authorization", "")
         if h.lower().startswith("bearer "):
             return h[7:].strip()
         t = self.headers.get("X-Operator-Token")
         if t:
             return t.strip()
-        try:
-            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            if q.get("token"):
-                return q["token"][0].strip()
-        except Exception:
-            pass
         return ""
 
     def _operator(self):
@@ -1149,6 +1178,30 @@ class Handler(BaseHTTPRequestHandler):
         if not op:
             return False
         return auth.has_role(op.get("role", ""), role)
+
+    def _session_token(self, data=None):
+        data = data or {}
+        h = self.headers.get("Authorization", "")
+        if h.lower().startswith("bearer "):
+            tok = h[7:].strip()
+            if tok.startswith("dsu."):
+                return tok
+        t = self.headers.get("X-DeySafe-Session") or self.headers.get("X-Owner-Session")
+        if t:
+            return t.strip()
+        return (data.get("session_token") or data.get("session") or "").strip()
+
+    def _field_user(self, db, data=None):
+        tok = self._session_token(data or {})
+        return db.session_user(tok) if tok else None
+
+    def _owner_allowed(self, row, data, user=None):
+        if not row:
+            return False
+        if user and row.get("owner_token") == user.get("user_uuid"):
+            return True
+        owner = (data.get("owner_token") or "").strip()
+        return bool(owner and hmac.compare_digest(owner, row.get("owner_token") or ""))
 
     def _static(self, path):
         rel = os.path.normpath((path.lstrip("/") or "index.html")).replace("\\", "/")
@@ -1194,11 +1247,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "incidents": len(public_incidents(db)),
                                "queue": len(review_queue(db)), "missing": len(db.all_missing()),
                                "demo": DEMO_MODE, "auth": self._auth_enabled(),
+                               "launch_posture": production_config_report(),
                                "database": {"backend": db.backend(),
-                                            "postgres_configured": bool(os.environ.get("DATABASE_URL")),
-                                            "postgres_required": os.environ.get(
-                                                "DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() in (
-                                                "1", "true", "yes", "on")}})
+                                             "postgres_configured": bool(os.environ.get("DATABASE_URL")),
+                                             "postgres_required": os.environ.get(
+                                                 "DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() in (
+                                                 "1", "true", "yes", "on")}})
+        if u.path == "/api/me":
+            user = self._field_user(db, {})
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            return self._json({"ok": True, "user": identity.public_user(user),
+                               "guardian_count": db.guardian_count(user_uuid=user.get("user_uuid"))})
         if u.path == "/api/incidents":
             # PERF-02: paginated (limit/offset) with total + next_offset, list still
             # under "incidents" so existing clients are unaffected.
@@ -1232,6 +1292,11 @@ class Handler(BaseHTTPRequestHandler):
                                "count": len(names), "open_search": True})
         if u.path == "/api/ai-status":
             return self._json({"ai": ai.available(), "provider": ai.provider(), "keys": ai.key_count(), "sms": sms.available()})
+        if u.path == "/api/push/config":
+            public_key = os.environ.get("DEYSAFE_VAPID_PUBLIC_KEY", "").strip()
+            return self._json({"ok": True, "configured": bool(public_key),
+                               "public_key": public_key,
+                               "note": "Web Push can subscribe only after a VAPID public key is configured."})
         if u.path == "/api/risk":
             q = urllib.parse.parse_qs(u.query)
             if q.get("lat") and q.get("lng"):
@@ -1354,8 +1419,11 @@ class Handler(BaseHTTPRequestHandler):
             # local token; no global list exists on the public surface.
             q = urllib.parse.parse_qs(u.query)
             owner = (q.get("owner_token", [""])[0] or q.get("owner", [""])[0]).strip()
+            user = self._field_user(db, {})
+            if user:
+                owner = user.get("user_uuid")
             if not owner:
-                return self._json({"ok": False, "error": "owner_token required"}, 400)
+                return self._json({"ok": False, "error": "session or owner_token required"}, 400)
             row = db.readiness_for(owner)
             return self._json({"ok": bool(row), "readiness": readiness_view(row),
                                "gaps": (row or {}).get("gaps", [])})
@@ -1441,6 +1509,23 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/safety-points":
             rows = [safety.safety_point_public(r) for r in db.public_safety_points(self._limit(u))]
             return self._json({"ok": True, "points": rows})
+        if u.path == "/api/vault/guardians":
+            user = self._field_user(db, {})
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            rows = [identity.public_guardian(r) for r in db.list_guardians(user.get("user_uuid"))]
+            return self._json({"ok": True, "guardian_policy_id": user.get("guardian_policy_id"),
+                               "guardians": rows, "count": len(rows)})
+        if u.path == "/api/mysafe/places":
+            user = self._field_user(db, {})
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            return self._json({"ok": True, "places": [identity.public_place(r) for r in db.list_mysafe_places(user.get("user_uuid"))]})
+        if u.path == "/api/mysafe/routes":
+            user = self._field_user(db, {})
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            return self._json({"ok": True, "routes": [identity.public_route(r) for r in db.list_mysafe_routes(user.get("user_uuid"))]})
         if u.path in ("/api/sentinels", "/api/mesh/devices", "/api/mesh/relays",
                       "/api/trackers", "/api/ops-agreements", "/api/ops-drills",
                       "/api/ops-readiness"):
@@ -1470,9 +1555,10 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/safemeet/list":
             # FIELD: owner-scoped list for high-risk meeting sessions.
             q = urllib.parse.parse_qs(u.query)
-            owner = (q.get("owner_token", [""])[0] or "").strip()
+            user = self._field_user(db, {})
+            owner = user.get("user_uuid") if user else (q.get("owner_token", [""])[0] or "").strip()
             if not owner:
-                return self._json({"ok": False, "error": "owner_token required"}, 400)
+                return self._json({"ok": False, "error": "session or owner_token required"}, 400)
             rows = db.get_safemeet_session_by_token(owner, limit=self._limit(u, 50))
             sessions = [safety.safemeet_session_public(r) for r in rows]
             return self._json({"ok": True, "sessions": sessions, "count": len(sessions)})
@@ -1482,7 +1568,8 @@ class Handler(BaseHTTPRequestHandler):
             # require the local owner token unless this is an authenticated operator.
             q = urllib.parse.parse_qs(u.query)
             sid = (q.get("session_uuid", [""])[0] or q.get("id", [""])[0] or "").strip()
-            owner = (q.get("owner_token", [""])[0] or "").strip()
+            user = self._field_user(db, {})
+            owner = user.get("user_uuid") if user else (q.get("owner_token", [""])[0] or "").strip()
             row = db.get_safemeet_session(sid) if sid else None
             if not row:
                 return self._json({"ok": False, "error": "not found"}, 404)
@@ -1632,13 +1719,138 @@ class Handler(BaseHTTPRequestHandler):
             data = {}
         db = DB(DB_PATH)
 
+        if u.path == "/api/signup/start":
+            if not self._rate_ok("/api/signup/start", 12):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            try:
+                ch = db.create_otp_challenge(data.get("phone") or "")
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
+            out = {"ok": True, "otp_ref": ch["otp_ref"], "expires_at": ch["expires_at"],
+                   "phone_redacted": identity.redact_phone(ch["phone"])}
+            if DEMO_MODE or os.environ.get("DEYSAFE_OTP_ECHO", "").strip() == "1":
+                out["dev_otp"] = ch["code"]
+            db.audit("field", "signup_start", "phone=%s" % identity.redact_phone(ch["phone"]))
+            return self._json(out)
+
+        if u.path == "/api/signup/verify":
+            if not self._rate_ok("/api/signup/verify", 20):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            res, err = db.consume_otp(data.get("otp_ref"), data.get("code"),
+                                      first_name=data.get("first_name") or "",
+                                      language=data.get("language") or "en",
+                                      device_id=data.get("device_id") or "")
+            if not res:
+                return self._json({"ok": False, "error": err or "verify failed"}, 400)
+            user = res["user"]
+            db.audit("field", "signup_verify", "user=%s" % user.get("user_uuid"))
+            return self._json({"ok": True, "session_token": res["session_token"],
+                               "device_id": res["device_id"],
+                               "user": identity.public_user(user)})
+
+        if u.path == "/api/profile/pins":
+            user = self._field_user(db, data)
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            app_pin = str(data.get("app_pin") or "")
+            safety_pin = str(data.get("safety_pin") or "")
+            duress_pin = str(data.get("duress_pin") or "")
+            if not (len(safety_pin) >= 4 and len(duress_pin) >= 4):
+                return self._json({"ok": False, "error": "safety_pin and duress_pin must be at least 4 digits"}, 400)
+            if safety_pin == duress_pin:
+                return self._json({"ok": False, "error": "safety and duress PINs must be different"}, 400)
+            db.set_user_pins(user.get("user_uuid"), app_pin=app_pin, safety_pin=safety_pin, duress_pin=duress_pin)
+            db.audit("field", "pins_set", "user=%s" % user.get("user_uuid"))
+            return self._json({"ok": True, "pins": {"app": bool(app_pin), "safety": True, "duress": True}})
+
+        if u.path == "/api/vault/guardians":
+            user = self._field_user(db, data)
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            # Safety PIN step-up is required once the user configured one.
+            pin_kind = db.classify_pin(user.get("user_uuid"), data.get("safety_pin") or "")
+            if db.guardian_count(user_uuid=user.get("user_uuid")) > 0 and pin_kind != "safety":
+                return self._json({"ok": False, "error": "safety PIN required"}, 403)
+            addr = (data.get("address") or "").strip()
+            if not addr:
+                return self._json({"ok": False, "error": "address required"}, 400)
+            row = db.add_guardian(user.get("user_uuid"), user.get("guardian_policy_id"),
+                                  data.get("name") or "Guardian",
+                                  data.get("channel") or SOS_DEFAULT_CHANNEL, addr)
+            db.audit("field", "guardian_add", "user=%s channel=%s" % (user.get("user_uuid"), row.get("channel")))
+            return self._json({"ok": True, "guardian": identity.public_guardian(row),
+                               "count": db.guardian_count(user_uuid=user.get("user_uuid")),
+                               "guardian_policy_id": user.get("guardian_policy_id")})
+
+        if u.path == "/api/mysafe/places":
+            user = self._field_user(db, data)
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            alias = (data.get("alias") or "").strip()
+            place = (data.get("place") or "").strip()
+            if not alias or not place:
+                return self._json({"ok": False, "error": "alias and place required"}, 400)
+            g = geocode(place, db=db)
+            row = db.add_mysafe_place(user.get("user_uuid"), alias, (g or {}).get("name") or place,
+                                      (g or {}).get("lat"), (g or {}).get("lng"))
+            return self._json({"ok": True, "place": identity.public_place(row)})
+
+        if u.path == "/api/mysafe/routes":
+            user = self._field_user(db, data)
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            row = db.add_mysafe_route(user.get("user_uuid"), data.get("origin_alias") or "",
+                                      data.get("destination_alias") or "", data.get("days") or "weekdays",
+                                      data.get("departure_window") or "", data.get("expected_arrival") or "",
+                                      data.get("escalation_policy") or "guardian")
+            return self._json({"ok": True, "route": identity.public_route(row)})
+
+        if u.path == "/api/push/register":
+            user = self._field_user(db, data)
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            sub = data.get("subscription") if isinstance(data.get("subscription"), dict) else {}
+            if not sub.get("endpoint"):
+                return self._json({"ok": False, "error": "push subscription endpoint required"}, 400)
+            row = db.upsert_push_subscription(user.get("user_uuid"), user.get("device_id") or data.get("device_id") or "", sub)
+            return self._json({"ok": True, "subscription_id": row.get("sub_uuid"), "status": row.get("status")})
+
+        if u.path == "/api/push/test":
+            user = self._field_user(db, data)
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            sub_uuid = (data.get("subscription_id") or data.get("sub_uuid") or "").strip()
+            push_ready = bool(os.environ.get("DEYSAFE_VAPID_PRIVATE_KEY") and os.environ.get("DEYSAFE_VAPID_PUBLIC_KEY"))
+            sim = DEMO_MODE or os.environ.get("DEYSAFE_PUSH_SIM", "").strip() == "1"
+            if sub_uuid:
+                db.mark_push_test(sub_uuid, confirmed=False, status=("sim_test_sent" if sim else ("provider_ready" if push_ready else "unconfigured")))
+            return self._json({"ok": True, "provider": "web_push", "configured": push_ready,
+                               "sim": sim, "status": "sim_test_sent" if sim else ("provider_ready" if push_ready else "unconfigured"),
+                               "note": "Browser must confirm receipt after a visible notification."})
+
+        if u.path == "/api/push/confirm":
+            user = self._field_user(db, data)
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            row = db.mark_push_test((data.get("subscription_id") or data.get("sub_uuid") or "").strip(),
+                                    confirmed=True, status="confirmed")
+            return self._json({"ok": bool(row), "confirmed": bool(row)})
+
+        if u.path == "/api/safety-tick":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            return self._json(safetytick.tick(db))
+
         if u.path == "/api/readiness":
             # FIELD/owner: readiness checklist saved by the user's local owner token.
             if not self._rate_ok("/api/readiness", 40):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
-            owner = (data.get("owner_token") or data.get("owner") or "").strip()
+            user = self._field_user(db, data)
+            owner = user.get("user_uuid") if user else (data.get("owner_token") or data.get("owner") or "").strip()
             if not owner:
-                return self._json({"ok": False, "error": "owner_token required"}, 400)
+                return self._json({"ok": False, "error": "session or owner_token required"}, 400)
+            if user:
+                data["trusted_contacts"] = db.guardian_count(user_uuid=user.get("user_uuid"))
             row = db.upsert_readiness(owner, data)
             db.audit("field", "readiness_update", "owner=%s score=%s" % (owner[:8], row.get("readiness_score")))
             return self._json({"ok": True, "readiness": readiness_view(row), "gaps": row.get("gaps") or []})
@@ -1648,11 +1860,12 @@ class Handler(BaseHTTPRequestHandler):
             # raw pings are stored only when share_consent is explicit.
             if not self._rate_ok("/api/journey/start", 25):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
-            owner = (data.get("owner_token") or "").strip()
+            user = self._field_user(db, data)
+            owner = user.get("user_uuid") if user else (data.get("owner_token") or "").strip()
             from_raw = (data.get("from") or data.get("from_place") or data.get("start") or "").strip()
             to_raw = (data.get("to") or data.get("to_place") or data.get("end") or "").strip()
             if not owner or not from_raw or not to_raw:
-                return self._json({"ok": False, "error": "owner_token, from, and to required"}, 400)
+                return self._json({"ok": False, "error": "session/owner_token, from, and to required"}, 400)
             ga = geocode(from_raw, db=db)
             gb = geocode(to_raw, db=db)
             if not ga or not gb:
@@ -1690,6 +1903,9 @@ class Handler(BaseHTTPRequestHandler):
             row = db.journey_by_uuid(jid) if jid else None
             if not row:
                 return self._json({"ok": False, "error": "unknown journey"}, 404)
+            user = self._field_user(db, data)
+            if not self._owner_allowed(row, data, user):
+                return self._json({"ok": False, "error": "journey ownership required"}, 403)
             etype = (data.get("event_type") or data.get("type") or "checkin").strip().lower()
             allowed_exact = bool(row.get("share_consent")) or safety.as_bool(data.get("share_consent")) or etype in ("duress", "emergency", "sos")
             event = dict(data)
@@ -1706,7 +1922,13 @@ class Handler(BaseHTTPRequestHandler):
             if not self._rate_ok("/api/journey/arrive", 40):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
             jid = (data.get("journey_uuid") or data.get("id") or "").strip()
-            row = db.close_journey(jid, "arrived") if jid else None
+            row0 = db.journey_by_uuid(jid) if jid else None
+            if not row0:
+                return self._json({"ok": False, "error": "unknown journey"}, 404)
+            user = self._field_user(db, data)
+            if not self._owner_allowed(row0, data, user):
+                return self._json({"ok": False, "error": "journey ownership required"}, 403)
+            row = db.close_journey(jid, "arrived")
             if not row:
                 return self._json({"ok": False, "error": "unknown journey"}, 404)
             db.record_journey_event(jid, {"event_type": "arrived", "note": "owner marked arrived"})
@@ -1718,10 +1940,11 @@ class Handler(BaseHTTPRequestHandler):
             # offline-first when the client only sends a place label.
             if not self._rate_ok("/api/safemeet/start", 30):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
-            owner = (data.get("owner_token") or "").strip()
+            user = self._field_user(db, data)
+            owner = user.get("user_uuid") if user else (data.get("owner_token") or "").strip()
             place = (data.get("meeting_place") or data.get("place") or "").strip()
             if not owner or not place:
-                return self._json({"ok": False, "error": "owner_token and meeting_place required"}, 400)
+                return self._json({"ok": False, "error": "session/owner_token and meeting_place required"}, 400)
             lat, lng = _float_or_none(data.get("meeting_lat")), _float_or_none(data.get("meeting_lng"))
             if lat is None or lng is None:
                 g = geocode(place, db=db)
@@ -1757,7 +1980,8 @@ class Handler(BaseHTTPRequestHandler):
             # guessed session UUID cannot write to somebody else's meeting.
             if not self._rate_ok("/api/safemeet/checkin", 90):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
-            owner = (data.get("owner_token") or "").strip()
+            user = self._field_user(db, data)
+            owner = user.get("user_uuid") if user else (data.get("owner_token") or "").strip()
             sid = (data.get("session_uuid") or data.get("id") or "").strip()
             row = db.get_safemeet_session(sid) if sid else None
             if not row:
@@ -1807,7 +2031,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/safemeet/end":
             if not self._rate_ok("/api/safemeet/end", 40):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
-            owner = (data.get("owner_token") or "").strip()
+            user = self._field_user(db, data)
+            owner = user.get("user_uuid") if user else (data.get("owner_token") or "").strip()
             sid = (data.get("session_uuid") or data.get("id") or "").strip()
             row = db.get_safemeet_session(sid) if sid else None
             if not row:
@@ -1826,7 +2051,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/safemeet/invite":
             if not self._rate_ok("/api/safemeet/invite", 40):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
-            owner = (data.get("owner_token") or "").strip()
+            user = self._field_user(db, data)
+            owner = user.get("user_uuid") if user else (data.get("owner_token") or "").strip()
             sid = (data.get("session_uuid") or data.get("id") or "").strip()
             row = db.get_safemeet_session(sid) if sid else None
             if not row:
@@ -2231,14 +2457,28 @@ class Handler(BaseHTTPRequestHandler):
                 ev = db.get_sos(ident) if ident else None
                 if not ev:
                     return self._json({"ok": False, "error": "not found"}, 404)
-                nxt = response.next_state(ev.get("state"), "close")
-                if nxt:
-                    db.update_sos_state(ev["sos_uuid"], nxt, closed_at=self._now())
-                db.audit("field", "sos_cancel", "ref=%s state=%s" % (ev.get("handoff_ref"), nxt or ev.get("state")))
+                user = self._field_user(db, data)
+                owner = user.get("user_uuid") if user else (data.get("owner_token") or "").strip()
+                if ev.get("reporter_hint") and owner and ev.get("reporter_hint") != owner:
+                    return self._json({"ok": False, "error": "SOS ownership required"}, 403)
+                pin_kind = db.classify_pin(user.get("user_uuid"), data.get("pin") or data.get("safety_pin") or "") if user else ""
+                if user and pin_kind == "duress":
+                    nxt = "DURESS_CONFIRMED"
+                    contact_state = "duress closure shown locally; escalation continues"
+                elif user and pin_kind == "safety":
+                    nxt = "CLOSE_REQUESTED"
+                    contact_state = "closure requested; guardian or SHIELD verification required"
+                elif (not user) and DEMO_MODE and owner:
+                    nxt = "CLOSE_REQUESTED"
+                    contact_state = "closure requested in demo mode"
+                else:
+                    return self._json({"ok": False, "error": "Safety PIN required for closure request"}, 403)
+                db.update_sos_state(ev["sos_uuid"], nxt, contact_state=contact_state)
+                db.audit("field", "sos_close_request", "ref=%s state=%s" % (ev.get("handoff_ref"), nxt))
                 ev = db.get_sos(ev["sos_uuid"])
                 return self._json({"ok": True, "id": ev.get("sos_uuid"), "sos_uuid": ev.get("sos_uuid"),
-                                   "ref": ev.get("handoff_ref"), "state": ev.get("state"),
-                                   "status": ev.get("state")})
+                                    "ref": ev.get("handoff_ref"), "state": ev.get("state"),
+                                    "status": ev.get("state"), "duress": nxt == "DURESS_CONFIRMED"})
 
             # -- field-side state nudge (e.g. owner marks themselves safe) ----
             ident = (data.get("sos_uuid") or data.get("id") or data.get("sos_id") or data.get("uuid") or "").strip()
@@ -2247,16 +2487,23 @@ class Handler(BaseHTTPRequestHandler):
                 ev = db.get_sos(ident)
                 if not ev:
                     return self._json({"ok": False, "error": "not found"}, 404)
+                user = self._field_user(db, data)
+                owner = user.get("user_uuid") if user else (data.get("owner_token") or "").strip()
+                if ev.get("reporter_hint") and owner and ev.get("reporter_hint") != owner:
+                    return self._json({"ok": False, "error": "SOS ownership required"}, 403)
                 # Map a desired terminal/again state to the field-safe event.
                 FIELD_EVENTS = {"SAFE": "mark_safe", "RESOLVED": "mark_safe",
-                                "CLOSED": "close", "CIRCLE_NOTIFIED": "notify_circle"}
+                                "CLOSED": "close_request", "CIRCLE_NOTIFIED": "notify_circle"}
                 evt = FIELD_EVENTS.get(want_state)
-                nxt = response.next_state(ev.get("state"), evt) if evt else None
+                if evt == "close_request":
+                    nxt = "CLOSE_REQUESTED"
+                else:
+                    nxt = response.next_state(ev.get("state"), evt) if evt else None
                 if not nxt:
                     return self._json({"ok": False, "error": "transition not allowed from field"}, 400)
                 extra = {}
-                if nxt == response.SOS_CLOSED:
-                    extra["closed_at"] = self._now()
+                if nxt == "CLOSE_REQUESTED":
+                    extra["contact_state"] = "closure requested; verification required"
                 db.update_sos_state(ev["sos_uuid"], nxt, **extra)
                 db.audit("field", "sos_update", "ref=%s %s->%s" % (ev.get("handoff_ref"), ev.get("state"), nxt))
                 ev = db.get_sos(ev["sos_uuid"])
@@ -2268,6 +2515,9 @@ class Handler(BaseHTTPRequestHandler):
             sos_uuid = response.new_id()
             ref = db.new_ref()
             mode = (data.get("mode") or data.get("kind") or "auto").strip()
+            user = self._field_user(db, data)
+            owner = user.get("user_uuid") if user else (data.get("owner_token") or "").strip()
+            policy_id = user.get("guardian_policy_id") if user else (data.get("guardian_policy_id") or "").strip()
             try:
                 lat = float(data["lat"]) if data.get("lat") is not None else None
                 lng = float(data["lng"]) if data.get("lng") is not None else None
@@ -2277,7 +2527,7 @@ class Handler(BaseHTTPRequestHandler):
                 "sos_uuid": sos_uuid, "lat": lat, "lng": lng,
                 "message": (data.get("message") or "").strip()[:280], "mode": mode,
                 "state": response.SOS_INITIAL, "handoff_ref": ref,
-                "owner_token": (data.get("owner_token") or "").strip(),
+                "owner_token": owner,
                 # OFF-01: a client-supplied id de-dupes a replayed offline SOS.
                 "client_id": (data.get("client_id") or "").strip()})
             db.audit("field", "sos_create", "ref=%s mode=%s geo=%s" % (ref, mode, lat is not None))
@@ -2290,7 +2540,7 @@ class Handler(BaseHTTPRequestHandler):
             notify = data.get("notify")
             notify = True if notify is None else bool(notify)
             ev_for_msg = {"handoff_ref": ref, "message": (data.get("message") or ""), "lat": lat, "lng": lng}
-            targets = _sos_contact_targets(data, db) if notify else []
+            targets = _sos_contact_targets(dict(data, guardian_policy_id=policy_id, owner_token=owner), db) if notify else []
             if targets:
                 msg = sos_notify_message(ev_for_msg)
                 summary = broadcast.fan_out(targets, msg, channel=SOS_DEFAULT_CHANNEL)
@@ -2317,13 +2567,14 @@ class Handler(BaseHTTPRequestHandler):
                                "contact_state": contact_state, "notified": contact_state})
 
         if u.path == "/api/trusted":
-            # FIELD (public + rate-limited): a field user mirrors their trusted
-            # circle (SOS-03) so the operator room can reach them. Stored SERVER-
-            # SIDE ONLY — never projected on any public GET (PRIV-01). Two shapes:
-            #   single : {owner_token, name, channel, address}
-            #   bulk   : {owner_token, contacts:[...], replace:true}
+            # Deprecated legacy mirror. Real guardian configuration lives in the
+            # protected Safety Vault (/api/vault/guardians). Outside demo mode this
+            # endpoint refuses writes so attackers cannot replace guardians with a
+            # stolen owner token.
             if not self._rate_ok("/api/trusted", 30):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
+            if not DEMO_MODE:
+                return self._json({"ok": False, "error": "Safety Vault session required"}, 403)
             owner = (data.get("owner_token") or "").strip()
             if not owner:
                 return self._json({"ok": False, "error": "owner_token required"}, 400)
@@ -2481,9 +2732,14 @@ class Handler(BaseHTTPRequestHandler):
             mode = (data.get("mode") or "auto").strip().lower()
             if not text:
                 return self._json({"ok": False, "error": "text required"}, 400)
-            if mode not in ("report", "missing"):
+            if mode not in ("report", "missing", "meet", "safemeet"):
                 low = text.lower()
-                mode = "missing" if any(w in low for w in ("missing", "abducted", "kidnapp", "find my", "my son", "my daughter", "my child", "disappear", "last seen", "not seen")) else "report"
+                if any(w in low for w in ("missing", "abducted", "kidnapp", "find my", "my son", "my daughter", "my child", "disappear", "last seen", "not seen")):
+                    mode = "missing"
+                elif any(w in low for w in ("meeting", "meet ", "meet at", "date", "marketplace", "transaction", "seller", "buyer")):
+                    mode = "meet"
+                else:
+                    mode = "report"
             used_ai = False
             if mode == "missing":
                 res = ai.extract_missing(text) if ai.available() else None
@@ -2501,6 +2757,32 @@ class Handler(BaseHTTPRequestHandler):
                     fields = {"name": "", "age": "", "count": 1, "place": gp.get("location_name", ""),
                               "exact_place": "", "hours_ago": 1, "description": text,
                               "vehicle": "", "clothing": "", "direction": ""}
+            elif mode in ("meet", "safemeet"):
+                low = text.lower()
+                gp = geoparse.geoparse({"title": "", "text": text}) or {}
+                meeting_type = "personal"
+                if any(w in low for w in ("online date", "date", "dating")):
+                    meeting_type = "date"
+                elif any(w in low for w in ("marketplace", "buy", "buyer", "sell", "seller", "transaction", "swap")):
+                    meeting_type = "transaction"
+                elif any(w in low for w in ("business", "client", "contract", "work")):
+                    meeting_type = "business"
+                tm = re.search(r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*(am|pm)?\b", text, re.I)
+                eta = ""
+                if tm:
+                    hour = int(tm.group(1))
+                    minute = tm.group(2) or "00"
+                    suffix = (tm.group(3) or "").lower()
+                    if suffix == "pm" and hour < 12:
+                        hour += 12
+                    if suffix == "am" and hour == 12:
+                        hour = 0
+                    eta = "%02d:%s" % (hour, minute)
+                fields = {"meeting_type": meeting_type,
+                          "meeting_place": gp.get("location_name", ""),
+                          "meeting_address": gp.get("location_name", ""),
+                          "expected_arrival": eta,
+                          "user_notes": text}
             else:
                 res = ai.classify(text) if ai.available() else None
                 if isinstance(res, dict) and not res.get("error") and res.get("is_incident"):
@@ -2602,20 +2884,21 @@ class Handler(BaseHTTPRequestHandler):
             # BLE-01: when a beacon secret is configured, the relay MUST carry a valid
             # SIGNED envelope {beacon_id, lat, lng, ts, nonce, sig}. We verify the HMAC,
             # the timestamp freshness, and the nonce (replay) BEFORE trusting any
-            # coordinate — a forged/stale/replayed relay is rejected with 400 and never
-            # becomes a sighting. With NO secret set (the default, incl. all gates) this
-            # is a no-op so the existing crowd-relay behaviour + tests are unchanged.
+            # coordinate. Outside demo, missing secret fails closed.
             beacon_secret = os.environ.get("DEYSAFE_BEACON_SECRET", "")
+            if not beacon_secret and not DEMO_MODE:
+                return self._json({"ok": False, "error": "beacon signing is not configured"}, 503)
             if beacon_secret:
                 ok_sig, reason = beaconsign.verify(
                     {"beacon_id": bid, "lat": data.get("lat"), "lng": data.get("lng"),
                      "ts": data.get("ts"), "nonce": data.get("nonce"),
-                     "sig": data.get("sig") or data.get("signature")},
-                    beacon_secret)
+                      "sig": data.get("sig") or data.get("signature")},
+                    beacon_secret, replay_seen=db.beacon_nonce_seen)
                 if not ok_sig:
                     db.audit("beacon", "relay_rejected", "reason=%s" % reason)
                     return self._json({"ok": False, "error": "beacon signature invalid",
-                                       "reason": reason}, 400)
+                                        "reason": reason}, 400)
+                db.remember_beacon_nonce(data.get("nonce"), bid)
                 # BLE-02: the envelope may carry a ROTATING ephemeral id; if it maps to a
                 # registered stable beacon for the current epoch, resolve to it so the
                 # real id is never required on the wire. Falls through to the raw id.
@@ -2645,11 +2928,13 @@ class Handler(BaseHTTPRequestHandler):
             db.insert_sighting({"case_id": case["id"], "place": "Bluetooth relay", "lat": lat, "lng": lng,
                                 "seen_at": (datetime.datetime.now() - datetime.timedelta(hours=hrs)).isoformat(timespec="seconds"),
                                 "note": "crowd Bluetooth relay", "source": "bluetooth"})
-            db.audit("beacon", "relay", "case={}".format(case["id"]))
-            # BLE-02: the relay caller is authenticated here, so the full (restricted)
-            # view is appropriate; never the beacon_id-bearing public payload.
-            return self._json({"ok": True, "matched": True,
-                               "missing": missing_with_radius(db, restricted=True)})
+            receipt = "BCR-%s" % hashlib.sha256(
+                ("%s|%s|%s|%s" % (bid, lat, lng, self._now())).encode("utf-8")
+            ).hexdigest()[:10].upper()
+            db.audit("beacon", "relay", "case={} receipt={}".format(case["id"], receipt))
+            # Receipt only: a relay caller is not entitled to restricted case data.
+            return self._json({"ok": True, "matched": True, "receipt_ref": receipt,
+                               "review": "sighting queued for SHIELD review"})
 
         if u.path == "/api/missing":
             # ABU-01: throttle case-creation spam (per caller).
@@ -2677,14 +2962,13 @@ class Handler(BaseHTTPRequestHandler):
                                           "direction": (data.get("direction") or "").strip(),
                                           "beacon_id": (data.get("beacon_id") or "").strip()})
             db.audit("api", "missing_report", "place={} count={}".format(place, cnt))
-            # PRIV-01: the POST response echoes the submitter's OWN case in full (you
-            # may see what you just filed). The PUBLIC scrape surface is GET /api/missing,
-            # which IS redacted for anonymous callers. So the privacy boundary is the
-            # GET list, not this confirmation echo.
-            return self._json({"ok": True, "case_ref": case_ref,
+            # PRIV-01: public case creation returns a receipt only. It must never
+            # return the missing-person database or restricted details for other
+            # cases.
+            return self._json({"ok": True, "case_ref": case_ref, "case_id": case_ref,
+                               "receipt": {"case_ref": case_ref, "place": place, "count": cnt},
                                "location_unverified": not verified,
-                               "coords_confidence": ("unverified" if not verified else "gazetteer"),
-                               "missing": missing_with_radius(db, restricted=True)})
+                               "coords_confidence": ("unverified" if not verified else "gazetteer")})
 
         if u.path == "/api/verify":
             # AUTH-01: the human publish gate is operator-only. Also the most
@@ -2878,6 +3162,7 @@ def _ingest_live_once(db=None):
 
 
 def main():
+    enforce_production_config()
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     ensure_seed(DB(DB_PATH))
     port = int(os.environ.get("PORT", "4500"))

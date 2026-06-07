@@ -71,3 +71,38 @@ self.addEventListener('fetch', function (event) {
       .catch(function () { return caches.match(req); })
   );
 });
+
+self.addEventListener('push', function (event) {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch (e) {
+    payload = { title: 'DeySafe alert', body: event.data ? event.data.text() : '' };
+  }
+  const title = payload.title || 'DeySafe alert';
+  const options = {
+    body: payload.body || 'Open DeySafe to review your safety status.',
+    icon: '/assets/brand/deysafe-icon-192.png',
+    badge: '/assets/brand/deysafe-favicon.png',
+    tag: payload.tag || 'deysafe-alert',
+    data: { url: payload.url || '/' },
+    requireInteraction: !!payload.requireInteraction
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clients) {
+      for (const client of clients) {
+        if ('focus' in client) {
+          client.navigate(targetUrl).catch(function () {});
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(targetUrl);
+    })
+  );
+});

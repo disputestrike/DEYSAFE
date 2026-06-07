@@ -12,6 +12,7 @@ import os
 import sys
 import sqlite3
 import hashlib
+import hmac
 import json
 import datetime
 
@@ -39,6 +40,12 @@ try:
     import safety
 except Exception:  # pragma: no cover - keep db importable even if safety.py absent
     safety = None
+
+try:
+    # Citizen identity/session + Safety Vault + MySafe/PWA push schema.
+    import identity
+except Exception:  # pragma: no cover - keep db importable even if identity.py absent
+    identity = None
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 REQUIRE_POSTGRES = os.environ.get("DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() in (
@@ -202,6 +209,9 @@ _EXTRA_TABLES = {
 if safety:
     _EXTRA_TABLES["safemeet_sessions"] = (safety.SAFEMEET_SQLITE, safety.SAFEMEET_PG)
     _EXTRA_TABLES["safemeet_checkins"] = (safety.SAFEMEET_CHECKINS_SQLITE, safety.SAFEMEET_CHECKINS_PG)
+if identity:
+    for _n, _pair in identity.IDENTITY_TABLES.items():
+        _EXTRA_TABLES[_n] = _pair
 
 
 def now_iso():
@@ -377,7 +387,8 @@ class DB:
         duplicating their schema text in db.py."""
         if self.pg:
             cur = self.conn.cursor()
-            cur.execute(pg_ddl)
+            for stmt in [s.strip() for s in pg_ddl.split(";") if s.strip()]:
+                cur.execute(stmt)
             cur.close()
         else:
             self.conn.executescript(sqlite_ddl)
@@ -1090,6 +1101,217 @@ class DB:
     def _bool(v):
         return 1 if (safety.as_bool(v) if safety else bool(v)) else 0
 
+    # --- Citizen identity / Safety Vault ------------------------------------
+    def create_otp_challenge(self, phone):
+        if identity is None:
+            raise RuntimeError("identity module unavailable")
+        p = identity.normalize_phone(phone)
+        if not p or len(p) < 8:
+            raise ValueError("valid phone required")
+        ref = identity.new_id("otp")
+        code = identity.otp_code()
+        now = now_iso()
+        exp = (datetime.datetime.now() + datetime.timedelta(minutes=identity.OTP_TTL_MINUTES)).isoformat(timespec="seconds")
+        self._run(
+            "INSERT INTO otp_challenges (otp_ref, phone_hash, phone_display, otp_hash, created_at, expires_at, attempts)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (ref, identity.phone_hash(p), p, identity.otp_hash(ref, code), now, exp, 0))
+        return {"otp_ref": ref, "code": code, "expires_at": exp, "phone": p}
+
+    def consume_otp(self, otp_ref, code, first_name="", language="en", device_id=""):
+        if identity is None:
+            raise RuntimeError("identity module unavailable")
+        ref = (otp_ref or "").strip()
+        row = self._one("SELECT * FROM otp_challenges WHERE otp_ref=?", (ref,))
+        if not row:
+            return None, "invalid_otp"
+        if row.get("consumed_at"):
+            return None, "otp_used"
+        exp = row.get("expires_at") or ""
+        try:
+            if datetime.datetime.now() > datetime.datetime.fromisoformat(exp):
+                return None, "otp_expired"
+        except Exception:
+            return None, "otp_expired"
+        attempts = int(row.get("attempts") or 0) + 1
+        self._run("UPDATE otp_challenges SET attempts=? WHERE otp_ref=?", (attempts, ref))
+        if attempts > 6:
+            return None, "too_many_attempts"
+        if not hmac.compare_digest(identity.otp_hash(ref, code), row.get("otp_hash") or ""):
+            return None, "invalid_otp"
+        now = now_iso()
+        ph = row.get("phone_hash")
+        user = self._one("SELECT * FROM citizen_users WHERE phone_hash=?", (ph,))
+        if not user:
+            user_uuid = identity.new_id("user")
+            policy_id = identity.new_id("gp")
+            self._run(
+                "INSERT INTO citizen_users (user_uuid, phone_hash, phone_display, first_name, language,"
+                " guardian_policy_id, created_at, verified_at, status) VALUES (?,?,?,?,?,?,?,?,?)",
+                (user_uuid, ph, row.get("phone_display"), (first_name or "").strip()[:60],
+                 (language or "en").strip()[:12], policy_id, now, now, "active"))
+            user = self._one("SELECT * FROM citizen_users WHERE user_uuid=?", (user_uuid,))
+        else:
+            self._run("UPDATE citizen_users SET first_name=?, language=?, verified_at=?, status='active' WHERE user_uuid=?",
+                      ((first_name or user.get("first_name") or "").strip()[:60],
+                       (language or user.get("language") or "en").strip()[:12], now, user.get("user_uuid")))
+            user = self._one("SELECT * FROM citizen_users WHERE user_uuid=?", (user.get("user_uuid"),))
+        self._run("UPDATE otp_challenges SET consumed_at=? WHERE otp_ref=?", (now, ref))
+        did = (device_id or identity.new_id("dev")).strip()[:80]
+        token = identity.session_token(user.get("user_uuid"), did)
+        payload = identity.parse_session_token(token) or {}
+        self._run(
+            "INSERT INTO personal_sessions (session_hash, user_uuid, device_id, created_at, expires_at, last_seen_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (identity.session_hash(token), user.get("user_uuid"), did, now,
+             datetime.datetime.fromtimestamp(int(payload.get("exp") or identity.utc_epoch())).isoformat(timespec="seconds"), now))
+        return {"user": user, "session_token": token, "device_id": did}, ""
+
+    def session_user(self, token):
+        if identity is None:
+            return None
+        payload = identity.parse_session_token(token)
+        if not payload:
+            return None
+        sh = identity.session_hash(token)
+        row = self._one("SELECT * FROM personal_sessions WHERE session_hash=? AND revoked_at IS NULL", (sh,))
+        if not row:
+            return None
+        try:
+            if datetime.datetime.now() > datetime.datetime.fromisoformat(row.get("expires_at")):
+                return None
+        except Exception:
+            return None
+        user = self._one("SELECT * FROM citizen_users WHERE user_uuid=? AND status='active'", (payload.get("u"),))
+        if not user:
+            return None
+        self._run("UPDATE personal_sessions SET last_seen_at=? WHERE session_hash=?", (now_iso(), sh))
+        user["device_id"] = payload.get("d") or row.get("device_id")
+        return user
+
+    def set_user_pins(self, user_uuid, app_pin="", safety_pin="", duress_pin=""):
+        if identity is None:
+            return None
+        row = self._one("SELECT * FROM user_pins WHERE user_uuid=?", (user_uuid,))
+        vals = {
+            "app_pin_hash": identity.pin_hash(user_uuid, app_pin, "app") if app_pin else (row or {}).get("app_pin_hash"),
+            "safety_pin_hash": identity.pin_hash(user_uuid, safety_pin, "safety") if safety_pin else (row or {}).get("safety_pin_hash"),
+            "duress_pin_hash": identity.pin_hash(user_uuid, duress_pin, "duress") if duress_pin else (row or {}).get("duress_pin_hash"),
+        }
+        if row:
+            self._run("UPDATE user_pins SET app_pin_hash=?, safety_pin_hash=?, duress_pin_hash=?, updated_at=? WHERE user_uuid=?",
+                      (vals["app_pin_hash"], vals["safety_pin_hash"], vals["duress_pin_hash"], now_iso(), user_uuid))
+        else:
+            self._run("INSERT INTO user_pins (user_uuid, app_pin_hash, safety_pin_hash, duress_pin_hash, updated_at)"
+                      " VALUES (?,?,?,?,?)",
+                      (user_uuid, vals["app_pin_hash"], vals["safety_pin_hash"], vals["duress_pin_hash"], now_iso()))
+        return self._one("SELECT * FROM user_pins WHERE user_uuid=?", (user_uuid,))
+
+    def classify_pin(self, user_uuid, pin):
+        if identity is None:
+            return ""
+        row = self._one("SELECT * FROM user_pins WHERE user_uuid=?", (user_uuid,))
+        if not row:
+            return ""
+        if identity.verify_pin(user_uuid, pin, row.get("duress_pin_hash"), "duress"):
+            return "duress"
+        if identity.verify_pin(user_uuid, pin, row.get("safety_pin_hash"), "safety"):
+            return "safety"
+        if identity.verify_pin(user_uuid, pin, row.get("app_pin_hash"), "app"):
+            return "app"
+        return ""
+
+    def guardian_count(self, user_uuid=None, owner_token=None):
+        if user_uuid:
+            r = self._one("SELECT COUNT(*) AS c FROM guardian_contacts WHERE user_uuid=? AND active=1", (user_uuid,))
+            return int((r or {}).get("c") or 0)
+        if owner_token:
+            return len(self.trusted_for(owner_token))
+        return 0
+
+    def add_guardian(self, user_uuid, policy_id, name, channel, address):
+        if identity is None:
+            return None
+        gid = identity.new_id("guard")
+        now = now_iso()
+        addr = (address or "").strip()[:120]
+        self._run(
+            "INSERT INTO guardian_contacts (guardian_uuid, user_uuid, policy_id, name, channel, address,"
+            " address_hash, verified, active, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (gid, user_uuid, policy_id, (name or "Guardian").strip()[:80],
+             (channel or "sms").strip()[:24], addr, identity.hmac_hex("guardian", addr),
+             0, 1, now, now))
+        return self._one("SELECT * FROM guardian_contacts WHERE guardian_uuid=?", (gid,))
+
+    def list_guardians(self, user_uuid):
+        return self._all("SELECT * FROM guardian_contacts WHERE user_uuid=? AND active=1 ORDER BY id", (user_uuid,))
+
+    def guardian_targets_for_policy(self, policy_id):
+        rows = self._all("SELECT * FROM guardian_contacts WHERE policy_id=? AND active=1 ORDER BY id", (policy_id,))
+        return [{"address": r.get("address"), "channel": r.get("channel") or "sms"} for r in rows if r.get("address")]
+
+    def upsert_push_subscription(self, user_uuid, device_id, subscription):
+        if identity is None:
+            return None
+        raw = json.dumps(subscription or {}, sort_keys=True, separators=(",", ":"))
+        endpoint = (subscription or {}).get("endpoint") or ""
+        eh = identity.hmac_hex("push", endpoint or raw)
+        existing = self._one("SELECT * FROM push_subscriptions WHERE user_uuid=? AND endpoint_hash=?", (user_uuid, eh))
+        now = now_iso()
+        if existing:
+            self._run("UPDATE push_subscriptions SET subscription_json=?, device_id=?, status='registered' WHERE id=?",
+                      (raw, device_id, existing.get("id")))
+            return self._one("SELECT * FROM push_subscriptions WHERE id=?", (existing.get("id"),))
+        sid = identity.new_id("push")
+        self._run(
+            "INSERT INTO push_subscriptions (sub_uuid, user_uuid, device_id, endpoint_hash, subscription_json, created_at, status)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (sid, user_uuid, device_id, eh, raw, now, "registered"))
+        return self._one("SELECT * FROM push_subscriptions WHERE sub_uuid=?", (sid,))
+
+    def mark_push_test(self, sub_uuid, confirmed=False, status="test_sent"):
+        col = "last_confirmed_at" if confirmed else "last_test_at"
+        self._run("UPDATE push_subscriptions SET %s=?, status=? WHERE sub_uuid=?" % col,
+                  (now_iso(), status, sub_uuid))
+        return self._one("SELECT * FROM push_subscriptions WHERE sub_uuid=?", (sub_uuid,))
+
+    def add_mysafe_place(self, user_uuid, alias, place, lat=None, lng=None):
+        pid = identity.new_id("place") if identity else self._uid()
+        self._run("INSERT INTO mysafe_places (place_uuid, user_uuid, alias, place, lat, lng, created_at, active)"
+                  " VALUES (?,?,?,?,?,?,?,1)",
+                  (pid, user_uuid, (alias or "").strip()[:40], (place or "").strip()[:160], lat, lng, now_iso()))
+        return self._one("SELECT * FROM mysafe_places WHERE place_uuid=?", (pid,))
+
+    def list_mysafe_places(self, user_uuid):
+        return self._all("SELECT * FROM mysafe_places WHERE user_uuid=? AND active=1 ORDER BY id", (user_uuid,))
+
+    def add_mysafe_route(self, user_uuid, origin_alias, destination_alias, days, departure_window, expected_arrival, escalation_policy="guardian"):
+        rid = identity.new_id("route") if identity else self._uid()
+        self._run("INSERT INTO mysafe_routes (route_uuid, user_uuid, origin_alias, destination_alias, days,"
+                  " departure_window, expected_arrival, escalation_policy, created_at, active)"
+                  " VALUES (?,?,?,?,?,?,?,?,?,1)",
+                  (rid, user_uuid, (origin_alias or "").strip()[:40], (destination_alias or "").strip()[:40],
+                   (days or "").strip()[:80], (departure_window or "").strip()[:40],
+                   (expected_arrival or "").strip()[:40], (escalation_policy or "guardian").strip()[:40], now_iso()))
+        return self._one("SELECT * FROM mysafe_routes WHERE route_uuid=?", (rid,))
+
+    def list_mysafe_routes(self, user_uuid):
+        return self._all("SELECT * FROM mysafe_routes WHERE user_uuid=? AND active=1 ORDER BY id", (user_uuid,))
+
+    def beacon_nonce_seen(self, nonce):
+        if not nonce:
+            return False
+        return self._one("SELECT nonce FROM beacon_nonces WHERE nonce=?", (nonce,)) is not None
+
+    def remember_beacon_nonce(self, nonce, beacon_id=""):
+        if not nonce:
+            return
+        try:
+            self._run("INSERT INTO beacon_nonces (nonce, beacon_id, seen_at) VALUES (?,?,?)",
+                      (str(nonce).strip()[:120], str(beacon_id or "").strip()[:120], now_iso()))
+        except Exception:
+            pass
+
     # --- Phone Safety Readiness --------------------------------------------
     def upsert_readiness(self, owner_token, data):
         owner = (owner_token or "").strip()
@@ -1220,6 +1442,21 @@ class DB:
         self._run("UPDATE journey_sessions SET state=?, updated_at=?, anomaly_level=?, anomaly_reason=? WHERE journey_uuid=?",
                   (state, now_iso(), "normal", "", journey_uuid))
         return self.journey_by_uuid(journey_uuid)
+
+    def set_journey_anomaly(self, journey_uuid, level, reason, state=None):
+        sets = ["updated_at=?", "anomaly_level=?", "anomaly_reason=?"]
+        vals = [now_iso(), level, reason]
+        if state:
+            sets.append("state=?")
+            vals.append(state)
+        vals.append(journey_uuid)
+        self._run("UPDATE journey_sessions SET %s WHERE journey_uuid=?" % ", ".join(sets), vals)
+        return self.journey_by_uuid(journey_uuid)
+
+    def active_journeys(self, limit=500):
+        return self._all(
+            "SELECT * FROM journey_sessions WHERE state NOT IN ('arrived','closed','cancelled','CLOSED_VERIFIED')"
+            " ORDER BY id DESC LIMIT %d" % int(limit))
 
     # --- SHIELD case workspace ---------------------------------------------
     def create_shield_case(self, d):
@@ -1517,6 +1754,11 @@ class DB:
             "SELECT * FROM safemeet_sessions WHERE owner_token=? ORDER BY id DESC LIMIT ?",
             (owner_token, int(limit))
         )
+
+    def active_safemeets(self, limit=500):
+        return self._all(
+            "SELECT * FROM safemeet_sessions WHERE state NOT IN ('completed','cancelled','closed')"
+            " ORDER BY id DESC LIMIT %d" % int(limit))
     
     def update_safemeet_session(self, session_uuid, updates):
         """Update a SafeMeet session (check-ins, state changes, anomalies)."""

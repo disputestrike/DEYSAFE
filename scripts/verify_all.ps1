@@ -16,7 +16,8 @@ $gates = @(
   "validate_security.py",
   "validate_response.py",
   "validate_quality.py",
-  "validate_product.py"
+  "validate_product.py",
+  "validate_personal_beta.py"
 )
 
 $envKeys = @(
