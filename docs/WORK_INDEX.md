@@ -38,6 +38,7 @@ This is the findability map for the current repository. Use it when work feels s
 | Stay safer during a risky meeting | SafeMeet session, auto-arrival check-in, periodic pings, anomaly flags | `app/index.html`, `engine/api.py` `/api/safemeet/*`, `engine/safety.py`, `engine/db.py` |
 | Operator verification | SHIELD console, queue, evidence, GeoTrace, audit | `app/review.html`, `engine/api.py`, `engine/db.py` |
 | Install on phone | PWA manifest, service worker, app icons | `app/manifest.json`, `app/sw.js`, `app/assets/brand/` |
+| Keep the Desktop copy updated | Local mirror sync after GitHub push | `scripts/sync_desktop_mirror.ps1` -> `C:\Users\benxp\OneDrive\Desktop\DEYSAFE-main` |
 
 ## Still Not Magic
 
