@@ -52,6 +52,14 @@ CREATE TABLE IF NOT EXISTS signals (
   source_name TEXT, kind TEXT, title TEXT, text TEXT, url TEXT, lang TEXT,
   published_at TEXT, ingested_at TEXT, raw_hash TEXT UNIQUE
 );
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT, place TEXT, description TEXT,
+  lat REAL, lng REAL,
+  status TEXT, score REAL, risk_level INTEGER DEFAULT 1,
+  reporter_id TEXT,
+  created_at TEXT, updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS incidents (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   incident_uuid TEXT, event_version INTEGER,
@@ -104,6 +112,14 @@ CREATE TABLE IF NOT EXISTS signals (
   published_at TEXT, ingested_at TEXT, raw_hash TEXT UNIQUE,
   lat DOUBLE PRECISION, lng DOUBLE PRECISION, location_name TEXT, state TEXT,
   gtype TEXT, gseverity INTEGER
+);
+CREATE TABLE IF NOT EXISTS reports (
+  id SERIAL PRIMARY KEY,
+  type TEXT, place TEXT, description TEXT,
+  lat DOUBLE PRECISION, lng DOUBLE PRECISION,
+  status TEXT, score REAL, risk_level INTEGER DEFAULT 1,
+  reporter_id TEXT,
+  created_at TEXT, updated_at TEXT
 );
 CREATE TABLE IF NOT EXISTS incidents (
   id SERIAL PRIMARY KEY,
@@ -596,8 +612,24 @@ class DB:
         return self._all(
             "SELECT * FROM missing WHERE status IN ('active','located','recovered') ORDER BY id DESC")
 
-    def get_missing(self, case_id):
-        # ABU-10: existence check so a sighting can't be bound to a phantom case.
+    def get_missing(self, case_id=None, place=None):
+        """Dual-mode accessor.
+
+        Called with a positional ``case_id`` (int) by internal helpers (ABU-10
+        existence check, sighting binding) and with ``place=<name>`` by the API
+        layer to list active cases optionally filtered by place.  When both are
+        absent the full active-case list is returned (same as all_missing).
+        """
+        # List mode: place filter or full list (API: GET /api/missing).
+        if case_id is None:
+            sql = "SELECT * FROM missing WHERE status != 'found'"
+            params = []
+            if place:
+                sql += " AND lower(place)=lower(?)"
+                params.append(place)
+            sql += " ORDER BY id DESC"
+            return self._all(sql, tuple(params))
+        # Single-row mode: ABU-10 existence check by numeric id.
         try:
             cid = int(case_id)
         except Exception:
@@ -646,6 +678,210 @@ class DB:
 
     def all_incidents(self):
         return self._all("SELECT * FROM incidents ORDER BY confidence DESC")
+
+    # ======================================================================
+    # REPORT STORE (user-submitted reports — separate from the corroboration
+    # pipeline's `incidents` table).  These are the rows created by POST
+    # /api/report and read by GET /api/incidents, /api/queue, /api/risk, etc.
+    # ======================================================================
+
+    def insert_report(self, r):
+        """Persist a new user-submitted report.  Returns the new row id.
+
+        Accepts a dict with keys: type, place, description, lat, lng, status,
+        score, reporter_id.  risk_level is derived from status so the public
+        feed can sort/filter without re-joining the decisions table.
+        """
+        status_risk = {
+            "verified": 4, "needs_human_review": 3,
+            "corroborated": 2, "candidate_unverified": 1, "dismissed": 0,
+        }
+        risk = status_risk.get(r.get("status", ""), 1)
+        ts = now_iso()
+        return self._insert(
+            "INSERT INTO reports (type, place, description, lat, lng, status, score,"
+            " risk_level, reporter_id, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (r.get("type"), r.get("place"), r.get("description"),
+             r.get("lat"), r.get("lng"), r.get("status", "candidate_unverified"),
+             r.get("score", 0), risk, r.get("reporter_id"), ts, ts))
+
+    def update_report_status(self, rid, status, operator=None):
+        """Update the status (and derived risk_level) of a report by id.
+
+        Called by the operator verify gate (POST /api/verify).  Also records
+        the operator id in updated_at for the audit trail (the audit() call is
+        the caller's responsibility).
+        """
+        status_risk = {
+            "verified": 4, "needs_human_review": 3,
+            "corroborated": 2, "candidate_unverified": 1, "dismissed": 0,
+        }
+        risk = status_risk.get(status, 1)
+        self._run(
+            "UPDATE reports SET status=?, risk_level=?, updated_at=? WHERE id=?",
+            (status, risk, now_iso(), rid))
+
+    def get_report(self, rid):
+        """Get a single report/incident by numeric id.  Returns dict or None."""
+        if rid is None:
+            return None
+        try:
+            return self._one("SELECT * FROM reports WHERE id=?", (int(rid),))
+        except Exception:
+            return None
+
+    def get_reports(self, status=None, place=None):
+        """Return reports filtered by status and/or place.
+
+        ``status`` may be a single string or a tuple/list of strings (e.g. the
+        REVIEW tuple from api.py).  Returns a list of dicts, newest first.
+        """
+        sql = "SELECT * FROM reports WHERE 1=1"
+        params = []
+        if status is not None:
+            if isinstance(status, (list, tuple)):
+                placeholders = ",".join("?" for _ in status)
+                sql += " AND status IN (%s)" % placeholders
+                params.extend(status)
+            else:
+                sql += " AND status=?"
+                params.append(status)
+        if place:
+            sql += " AND lower(place)=lower(?)"
+            params.append(place)
+        sql += " ORDER BY id DESC"
+        return self._all(sql, tuple(params))
+
+    def get_audit_logs(self, limit=50):
+        """Return the most recent audit log entries, newest first."""
+        return self._all(
+            "SELECT * FROM audit ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def get_nearby_incidents(self, lat, lng, radius=50):
+        """Return active reports within ``radius`` km of (lat, lng).
+
+        Uses a simple bounding-box pre-filter (fast, index-friendly) followed
+        by a Python-side haversine check so the result set is accurate to the
+        kilometre without requiring PostGIS or a spatial extension.
+        """
+        import math
+        try:
+            lat = float(lat)
+            lng = float(lng)
+            radius = float(radius)
+        except (TypeError, ValueError):
+            return []
+
+        # 1 degree of latitude ≈ 111 km; longitude shrinks by cos(lat).
+        lat_delta = radius / 111.0
+        lng_delta = radius / max(111.0 * math.cos(math.radians(lat)), 0.001)
+
+        rows = self._all(
+            "SELECT * FROM reports"
+            " WHERE lat IS NOT NULL AND lng IS NOT NULL"
+            " AND status NOT IN ('dismissed')"
+            " AND lat BETWEEN ? AND ?"
+            " AND lng BETWEEN ? AND ?",
+            (lat - lat_delta, lat + lat_delta,
+             lng - lng_delta, lng + lng_delta))
+
+        # Haversine refinement — drop corners of the bounding box.
+        R = 6371.0  # Earth radius in km
+        out = []
+        for r in rows:
+            try:
+                rlat = float(r["lat"])
+                rlng = float(r["lng"])
+                dlat = math.radians(rlat - lat)
+                dlng = math.radians(rlng - lng)
+                a = (math.sin(dlat / 2) ** 2
+                     + math.cos(math.radians(lat))
+                     * math.cos(math.radians(rlat))
+                     * math.sin(dlng / 2) ** 2)
+                dist = R * 2 * math.asin(math.sqrt(a))
+                if dist <= radius:
+                    out.append(r)
+            except Exception:
+                pass
+        return out
+
+    def get_location(self, place_name):
+        """Look up a place name in the geo_cache table.
+
+        Returns a dict with lat/lng/source/display/confidence or None when the
+        name has not been cached yet.  Comparison is case-insensitive.
+        """
+        if not place_name:
+            return None
+        return self._one(
+            "SELECT * FROM geo_cache WHERE lower(query)=lower(?)",
+            (place_name.strip(),))
+
+    def get_journey(self, jid):
+        """Resolve a journey by journey_uuid or numeric row id.
+
+        Returns a dict (the journey_sessions row) or None.
+        """
+        if not jid:
+            return None
+        row = self._one(
+            "SELECT * FROM journey_sessions WHERE journey_uuid=?", (jid,))
+        if row:
+            return row
+        try:
+            return self._one(
+                "SELECT * FROM journey_sessions WHERE id=?", (int(jid),))
+        except Exception:
+            return None
+
+    def get_sos_event(self, sid):
+        """Resolve an SOS event by sos_uuid, handoff_ref, or numeric row id.
+
+        Delegates to the existing get_sos() resolver (uuid then ref) and falls
+        back to a numeric id lookup so the API can use whichever identifier it
+        holds.
+        """
+        if not sid:
+            return None
+        row = self.get_sos(sid)
+        if row:
+            return row
+        try:
+            return self._one(
+                "SELECT * FROM sos_events WHERE id=?", (int(sid),))
+        except Exception:
+            return None
+
+    def get_sos_deliveries(self, sos_id):
+        """Return delivery receipts for an SOS event keyed by its numeric id.
+
+        The deliveries table stores sos_uuid (the human-facing UUID), so we
+        resolve the uuid from the numeric id first, then delegate to the
+        existing deliveries_for_sos() helper.
+        """
+        if sos_id is None:
+            return []
+        # sos_id may already be a uuid string (api passes ev["id"] which is the
+        # numeric row id from insert_sos_event, but get_sos_event returns the
+        # full row so ev["id"] is the integer PK).
+        try:
+            row = self._one("SELECT sos_uuid FROM sos_events WHERE id=?",
+                            (int(sos_id),))
+            if row and row.get("sos_uuid"):
+                return self.deliveries_for_sos(row["sos_uuid"])
+        except Exception:
+            pass
+        # Fallback: treat sos_id as a uuid directly.
+        return self.deliveries_for_sos(str(sos_id))
+
+    def is_ok(self):
+        """Lightweight health check.  Returns True when the DB is reachable."""
+        try:
+            self._one("SELECT 1 AS ok")
+            return True
+        except Exception:
+            return False
 
     def all_signals(self):
         return self._all("SELECT * FROM signals")
