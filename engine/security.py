@@ -141,6 +141,59 @@ def audit_hash(prev_hash, row_dict):
     return hashlib.sha256((prev + canon).encode("utf-8")).hexdigest()
 
 
+# --- operator authentication helpers (AUTH-01) ------------------------------
+def get_operator_id(handler):
+    """Extract operator ID from request headers.
+
+    Checks X-Operator-Token (static token mode) first, then
+    Authorization: Bearer (session token mode). Returns the token/id string,
+    or None if neither header is present.
+    """
+    # Try X-Operator-Token header first (static shared token)
+    token = handler.headers.get("X-Operator-Token", "").strip()
+    if token:
+        return token
+
+    # Try Authorization: Bearer header (session token from auth.py login)
+    auth = handler.headers.get("Authorization", "").strip()
+    if auth.startswith("Bearer "):
+        return auth[7:]  # Strip "Bearer " prefix
+
+    return None
+
+
+def is_operator(handler, db):
+    """Check if the request is from an authenticated operator.
+
+    Returns True if the request carries a valid operator credential:
+      1. A static OPERATOR_TOKEN env-var match (simplest deploy).
+      2. A signed session token issued by auth.py (full roster deploy).
+    Returns False if no credential is present or the credential is invalid.
+    """
+    import os
+
+    op_id = get_operator_id(handler)
+    if not op_id:
+        return False
+
+    # 1. Check against static OPERATOR_TOKEN if set.
+    static_token = os.environ.get("OPERATOR_TOKEN", "").strip()
+    if static_token and op_id == static_token:
+        return True
+
+    # 2. Check against auth.py session tokens (roster-based deploy).
+    try:
+        import auth as _auth
+        if _auth.auth_enabled():
+            identity = _auth.identity(op_id)
+            if identity is not None:
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
 # --- self-test ---------------------------------------------------------------
 if __name__ == "__main__":
     # uuid
