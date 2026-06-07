@@ -104,6 +104,10 @@
   .camera-strip input{position:absolute;left:-9999px}
   .camera-btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border:1px solid #d8e2f1;background:#eef4fe;color:#1559b8;border-radius:12px;padding:12px 14px;font-weight:900;cursor:pointer;flex:0 0 auto}
   .media-summary{font-size:12.5px;color:var(--muted);line-height:1.35}
+  .assistantbox.evidence-ai{border-color:#b9d6f8;background:#f8fbff}
+  .evidence-ai textarea{width:100%;min-height:54px;box-sizing:border-box;margin-top:10px}
+  .evidence-actions{display:grid;grid-template-columns:1fr 110px;gap:8px;margin-top:8px}
+  .evidence-actions .btn{margin:0}
   .journeystatus{background:#fff;border:1px solid #dce6ff;border-radius:14px;padding:12px;margin-top:12px}
   .sosbig{width:100%;border:none;border-radius:16px;padding:22px 16px;margin:0 0 12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:#fff;font-size:14px;text-align:center}
   .sosbig b{font-size:20px;letter-spacing:.02em}
@@ -192,6 +196,12 @@ Check hotel address</textarea>
         <div class="livestate"><span id="liveDot" class="live-dot"></span><span id="liveState">Waiting for live location permission</span><span class="pill" id="lvpill" style="margin-left:auto">—</span></div>
         <div class="guide" id="guide"></div>
         <div id="areaReport"></div>
+        <div class="assistantbox evidence-ai" id="aiEvidenceBox">
+          <label class="f" style="margin-top:0">AI evidence review</label>
+          <div class="camera-strip"><label class="camera-btn" for="aiMedia">Add image/video</label><input id="aiMedia" type="file" accept="image/*,video/*" capture="environment" onchange="previewAiEvidence()" /><div class="media-summary" id="aiMediaNote">Select an image or video for evidence triage. Reports still attach raw evidence from the Report tab.</div></div>
+          <textarea id="aiMediaContext" placeholder="What should DeySafe look for? Example: plate number, roadblock, weapon, faces, location clues, police badge, vehicle color"></textarea>
+          <div class="evidence-actions"><button class="btn sec" onclick="analyzeEvidence()">Analyze evidence</button><button class="btn" onclick="go('report')">Report</button></div>
+        </div>
         <div class="assistantbox">
           <label class="f" style="margin-top:0">Ask DeySafe</label>
           <textarea id="aiCommand" placeholder="e.g. Abuja to Kaduna, or armed robbery near Oshodi, or my brother is missing in Kankara"></textarea>
@@ -1056,8 +1066,8 @@ async function loadReadiness(){
     try{var j=await fetch('/api/journey?id='+encodeURIComponent(JOURNEY_ID)).then(x=>x.json());if(j&&j.journey)renderJourney(j.journey);}catch(e){}
   }
 }
-async function mediaMetaFromInput(){
-  var el=$('#rMedia'),f=el&&el.files&&el.files[0];if(!f)return null;
+async function mediaMetaFromFileInput(id){
+  var el=$('#'+id),f=el&&el.files&&el.files[0];if(!f)return null;
   var meta={name:f.name||'capture',type:f.type||'application/octet-stream',size:f.size||0,hash:'',uploaded:false};
   try{
     if(f.size<=12000000&&window.crypto&&crypto.subtle){
@@ -1068,6 +1078,7 @@ async function mediaMetaFromInput(){
   }catch(e){}
   return meta;
 }
+async function mediaMetaFromInput(){return mediaMetaFromFileInput('rMedia');}
 async function uploadEvidenceIfAny(meta){
   var el=$('#rMedia'),f=el&&el.files&&el.files[0];if(!f||!meta)return meta;
   try{
@@ -1084,6 +1095,28 @@ async function previewMediaMeta(){
   var note=$('#mediaNote'),meta=await mediaMetaFromInput();if(!note)return;
   if(!meta){note.textContent='Optional. Video uploads to Cloudflare R2 when keys are configured; otherwise DeySafe still stores a hash and file facts.';return;}
   note.textContent='Ready: '+meta.name+' · '+Math.round((meta.size||0)/1024)+' KB · '+(meta.type||'file')+(meta.hash?' · hash ready':' · hash skipped for large file');
+}
+async function previewAiEvidence(){
+  var note=$('#aiMediaNote'),meta=await mediaMetaFromFileInput('aiMedia');if(!note)return;
+  if(!meta){note.textContent='Select an image or video for evidence triage. Reports still attach raw evidence from the Report tab.';return;}
+  note.textContent='Ready for triage: '+meta.name+' · '+Math.round((meta.size||0)/1024)+' KB · '+(meta.type||'file')+(meta.hash?' · hash ready':' · hash skipped for large file');
+}
+async function analyzeEvidence(){
+  var note=$('#aiMediaNote'),meta=await mediaMetaFromFileInput('aiMedia');
+  if(!note)return;
+  if(!meta){note.textContent='Choose an image or video first.';return;}
+  note.textContent='Analyzing evidence intake...';
+  var context=($('#aiMediaContext')&&$('#aiMediaContext').value||'').trim();
+  try{
+    var r=await fetch('/api/media/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({media:meta,context:context})}).then(x=>x.json());
+    if(!r.ok){note.textContent=r.error||'Evidence analysis failed';return;}
+    var a=r.analysis||{}, checks=(a.checks||[]).slice(0,4).map(function(c){return '<div> - '+esc(c)+'</div>';}).join('');
+    var suggested=a.suggested_report&&a.suggested_report.place?('<div><b>Suggested place:</b> '+esc(a.suggested_report.place)+'</div>'):'';
+    note.innerHTML='<b>Evidence triage:</b> '+esc(a.summary||'Evidence accepted for triage.')
+      +suggested
+      +(checks?'<div style="margin-top:6px">'+checks+'</div>':'')
+      +'<div style="margin-top:6px"><b>Vision AI:</b> '+(r.vision_ready?'configured':'not configured yet')+'. <b>Next:</b> '+esc(a.next_step||'Attach it to a report for SHIELD review.')+'</div>';
+  }catch(e){note.textContent='Could not reach evidence AI endpoint.';}
 }
 async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').focus();return;}
   const place=$('#rPlace').value;

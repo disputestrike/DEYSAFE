@@ -143,6 +143,10 @@ check("Report screen exposes camera/video evidence capture metadata",
       'id="rMedia"' in app_html and "capture=\"environment\"" in app_html
       and "mediaMetaFromInput" in app_html,
       "media capture markers missing")
+check("Home screen exposes AI evidence review for image/video triage",
+      'id="aiMedia"' in app_html and "AI evidence review" in app_html
+      and "analyzeEvidence" in app_html and "/api/media/analyze" in app_html,
+      "AI evidence review markers missing")
 check("Cloudflare R2 browser evidence upload path is wired",
       "/api/media/presign" in app_html and "uploadEvidenceIfAny" in app_html
       and "CLOUDFLARE_R2_BUCKET" in env_example,
@@ -179,6 +183,16 @@ check("POST /api/media/presign exposes key-gated Cloudflare R2 upload contract",
       s == 200 and j.get("ok") is True and j.get("provider") == "cloudflare_r2"
       and "configured" in j,
       "status=%s raw=%s" % (s, raw[:200]))
+s, j, raw = call("POST", "/api/media/analyze", {
+    "media": {"name": "checkpoint.jpg", "type": "image/jpeg", "size": 2048,
+              "hash": "b" * 64},
+    "context": "Police checkpoint near Ikeja bridge, blue Hilux and badge visible",
+}, want_token=False)
+check("POST /api/media/analyze gives honest evidence AI triage without faking vision",
+      s == 200 and j.get("ok") is True and j.get("provider") == "deysafe_media_triage"
+      and j.get("vision_ready") is False and (j.get("analysis") or {}).get("next_step")
+      and (j.get("analysis") or {}).get("suggested_report") is not None,
+      "status=%s raw=%s" % (s, raw[:240]))
 
 
 # A. Phone Safety Readiness

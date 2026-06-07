@@ -37,6 +37,7 @@ without consent, never auto-acts, and never cues force.
 - **Voice in & out** — speak "am I safe in Kaduna" / "Lagos to Kano"; it reads the report back.
 - **SOS** — *Automatic* (alarm + on-device location + shareable link) or *Hold-&-Speak* (auto-sends after dead air), with silent mode and a decoy privacy lock.
 - **Camera/video evidence** — attach an image/video fingerprint and file facts to an anonymous report; optional Cloudflare R2 upload is available when storage keys and CORS are configured.
+- **AI evidence review** — visible image/video triage from the home screen: validates media, captures custody facts, uses AI for written context when keys are present, and clearly flags that pixel/frame-level vision is not wired until a vision adapter is added.
 - **SafeMeet** — create a high-risk meeting session, auto-watch arrival in the foreground, record check-ins, and flag anomalies.
 - **Report danger** (any town → geocoded, human-gated incident), **police-misconduct** category + **know-your-rights** card, **community channels** (area-tagged posts).
 
@@ -49,7 +50,7 @@ without consent, never auto-acts, and never cues force.
 **Intelligence engine + SHIELD console**
 - Ingest (samples + **live Nigerian news RSS**) → geo-parse → corroborate → **human gate** → tiered alerts.
 - Operator triage queue, one-click **live scrape**, Verify / Dismiss, auto **decay** (stale incidents age off the map).
-- **Real AI** (Cerebras round-robin, key-gated) extracts incidents from news + powers natural-language intake. Falls back to rule-based with no key.
+- **Real AI** (Cerebras round-robin, key-gated) extracts incidents from news + powers natural-language intake and evidence-context triage. Falls back to rule-based with no key; computer-vision analysis is a separate pending adapter.
 
 **Reach**
 - In-app alerts + **SMS inbound + USSD menu** (Ushahidi-style basic-phone access). Outbound SMS is key-gated (Africa's Talking).

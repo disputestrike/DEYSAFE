@@ -19,7 +19,7 @@ This is the findability map for the current repository. Use it when work feels s
 | Area | What happened | Corrective action |
 |---|---|---|
 | API contract drift | A later restore-style merge replaced the stronger API with a smaller handler while the app still called newer endpoints. | Restored the hardened API behavior and kept the useful static file serving. |
-| Video evidence | App had Cloudflare R2 upload UI but the current API no longer served `/api/media/presign`. | Restored `/api/media/presign` and report evidence metadata handling. |
+| Video evidence | App had Cloudflare R2 upload UI but the current API no longer served `/api/media/presign`, and the AI review path was buried/missing from the home workflow. | Restored `/api/media/presign`, report evidence metadata handling, and a visible AI evidence review panel backed by `/api/media/analyze`. |
 | Journey Guard | App expected `/api/journey/start`, `/api/journey/ping`, and `/api/journey/arrive` to return redacted journey state. | Restored richer Journey Guard endpoints and public-safe projections. |
 | SafeMeet | Branch work added UI but was not fully wired and had DB insert placeholder bugs. | Added owner-scoped SafeMeet API endpoints, fixed DB inserts, added server-side check-ins/end/invite/anomaly flags, and enabled foreground auto-watch in the app. |
 | Branding | Logos were outside the repo and not connected to PWA install assets. | Added PWA icon, favicon, apple-touch icon, and brand assets under `app/assets/brand/`. |
@@ -33,6 +33,7 @@ This is the findability map for the current repository. Use it when work feels s
 | Know if a road trip is risky | WakaSafe route scan, automatic map rendering, Journey Guard | `app/index.html`, `engine/api.py` `/api/route`, `/api/journey/*`, `engine/routing.py` |
 | Get help without angering a captor | SOS, silent mode, privacy decoy lock, trusted-circle share | `app/index.html`, `engine/api.py` `/api/sos`, `engine/response.py`, `engine/broadcast.py` |
 | Report danger with video | Report form, camera/video evidence, hash metadata, optional Cloudflare R2 upload | `app/index.html`, `engine/api.py` `/api/media/presign`, `/api/report` |
+| Ask DeySafe to review image/video evidence | Home AI evidence panel, media validation, custody facts, text-context triage, honest no-vision flag | `app/index.html`, `engine/api.py` `/api/media/analyze` |
 | Find a missing person | FindMe case, sightings, Venn search zone, movement cone | `app/index.html`, `engine/api.py` `/api/missing`, `/api/sighting`, `/api/triangulate`, `engine/triangulate.py` |
 | Stay safer during a risky meeting | SafeMeet session, auto-arrival check-in, periodic pings, anomaly flags | `app/index.html`, `engine/api.py` `/api/safemeet/*`, `engine/safety.py`, `engine/db.py` |
 | Operator verification | SHIELD console, queue, evidence, GeoTrace, audit | `app/review.html`, `engine/api.py`, `engine/db.py` |

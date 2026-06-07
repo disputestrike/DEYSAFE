@@ -537,6 +537,85 @@ def r2_presign_put(filename, content_type, size):
             "expires_in": int(q["X-Amz-Expires"]), "max_bytes": max_bytes}
 
 
+def media_analysis_triage(media, context=""):
+    if not isinstance(media, dict):
+        return {"ok": False, "error": "image/video evidence required"}
+    try:
+        size = int(media.get("size") or 0)
+    except Exception:
+        size = 0
+    max_bytes = int(float(os.environ.get("DEYSAFE_MEDIA_MAX_MB", "80")) * 1024 * 1024)
+    if size <= 0 or size > max_bytes:
+        return {"ok": False, "error": "file too large or empty", "max_bytes": max_bytes}
+    mtype = re.sub(r"[^A-Za-z0-9_./+-]", "", str(media.get("type") or "application/octet-stream"))[:100]
+    if not (mtype.startswith("image/") or mtype.startswith("video/")):
+        return {"ok": False, "error": "only image/video evidence is accepted"}
+    name = re.sub(r"[^A-Za-z0-9_. -]", "", str(media.get("name") or "capture"))[:80] or "capture"
+    mhash = str(media.get("hash") or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", mhash):
+        mhash = ""
+    cfg = _r2_config()
+    storage_ready = all(cfg.get(k) for k in ("endpoint", "bucket", "access_key", "secret_key"))
+    uploaded = bool(media.get("uploaded"))
+    context = re.sub(r"\s+", " ", str(context or "")).strip()[:1200]
+    used_text_ai = False
+    suggested_report = {}
+    checks = [
+        "File type accepted: %s" % ("video" if mtype.startswith("video/") else "image"),
+        "Evidence size captured: %s KB" % int(round(size / 1024.0)),
+    ]
+    if mhash:
+        checks.append("SHA-256 fingerprint captured for chain-of-custody matching")
+    else:
+        checks.append("Hash missing or skipped; select a smaller file if chain-of-custody proof is needed")
+    if uploaded:
+        checks.append("Raw evidence already uploaded to object storage")
+    elif storage_ready:
+        checks.append("Cloudflare R2 upload is configured; submit a report to attach raw evidence")
+    else:
+        checks.append("Cloudflare R2 is not configured; DeySafe can store file facts and hash only")
+    if context:
+        if ai.available():
+            res = ai.classify(context)
+            if isinstance(res, dict) and not res.get("error"):
+                used_text_ai = True
+                sug = res.get("incident_type") or ""
+                suggested_report = {
+                    "type": (security.valid_type(sug) if sug else ""),
+                    "place": res.get("location_text") or "",
+                    "description": res.get("summary") or context,
+                }
+        if not suggested_report:
+            gp = geoparse.geoparse({"title": "", "text": context}) or {}
+            suggested_report = {
+                "type": security.valid_type(gp.get("type") or "") if gp.get("type") else "",
+                "place": gp.get("location_name", ""),
+                "description": context,
+            }
+    vision_provider_declared = bool(os.environ.get("DEYSAFE_VISION_PROVIDER", "").strip())
+    media_kind = "video" if mtype.startswith("video/") else "image"
+    summary = ("%s evidence accepted for DeySafe triage: %s, %s KB." %
+               (media_kind.capitalize(), name, int(round(size / 1024.0))))
+    return {
+        "ok": True,
+        "provider": "deysafe_media_triage",
+        "vision_ready": False,
+        "vision_provider_declared": vision_provider_declared,
+        "storage_ready": storage_ready,
+        "ai_on": ai.available(),
+        "ai_used": used_text_ai,
+        "media": {"name": name, "type": mtype, "size": size, "hash": mhash,
+                  "uploaded": uploaded, "object_key": str(media.get("object_key") or "")[:260]},
+        "analysis": {
+            "summary": summary,
+            "checks": checks,
+            "suggested_report": suggested_report,
+            "next_step": "Attach this evidence in Report danger so SHIELD can review the report and custody facts.",
+            "vision_note": "Pixel/frame-level vision is not wired in this build; this endpoint does metadata, storage, chain-of-custody, and text-context triage.",
+        },
+    }
+
+
 def alert_level(conf, sev):
     if conf >= 90 or sev:
         return 4
@@ -1964,6 +2043,17 @@ class Handler(BaseHTTPRequestHandler):
                 "owner": data.get("owner") or actor})
             db.audit(actor, "ops_drill_create", "drill=%s type=%s" % (row.get("drill_uuid"), row.get("drill_type")))
             return self._json({"ok": True, "drill": row})
+
+        if u.path == "/api/media/analyze":
+            if not self._rate_ok("/api/media/analyze", 30):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            media_in = data.get("media") if isinstance(data.get("media"), dict) else None
+            triage = media_analysis_triage(media_in, data.get("context") or "")
+            if triage.get("ok"):
+                m = triage.get("media") or {}
+                db.audit("api", "media_analyze", "type=%s size=%s vision=%s" % (
+                    m.get("type"), m.get("size"), triage.get("vision_ready")))
+            return self._json(triage, 200 if triage.get("ok") else 400)
 
         if u.path == "/api/media/presign":
             if not self._rate_ok("/api/media/presign", 30):
