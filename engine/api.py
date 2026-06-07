@@ -502,6 +502,41 @@ class DeySafeHandler(BaseHTTPRequestHandler):
             deliveries = db.get_sos_deliveries(ev["id"])
             return self._json(public_sos_view(ev, deliveries))
 
+        # --- SafeMeet (Phase 4) -----------------------------------------------
+        if u.path == "/api/safemeet/session":
+            # MEET-04: Get SafeMeet session details.
+            session_uuid = q.get("session_uuid", [None])[0]
+            if not session_uuid:
+                return self._json({"error": "missing session_uuid"}, 400)
+            session = db.get_safemeet_session(session_uuid)
+            if not session:
+                return self._json({"error": "not found"}, 404)
+            checkins = db.get_safemeet_checkins(session_uuid, limit=50)
+            pub_session = safety.safemeet_session_public(session) if safety else session
+            pub_checkins = [safety.safemeet_checkin_public(c) for c in checkins] if safety else checkins
+            risk_assessment = {
+                "risk_level": session.get("risk_level", "medium"),
+                "state": session.get("state", "scheduled"),
+                "missed_checkins": session.get("missed_checkins", 0),
+                "duress_triggered": bool(session.get("duress_triggered")),
+                "location_changed": bool(session.get("location_changed")),
+            }
+            return self._json({
+                "ok": True,
+                "session": pub_session,
+                "checkins": pub_checkins,
+                "risk_assessment": risk_assessment,
+            })
+
+        if u.path == "/api/safemeet/list":
+            # MEET-05: List active SafeMeet sessions for an owner.
+            owner_token = q.get("owner_token", [None])[0]
+            if not owner_token:
+                return self._json({"error": "missing owner_token"}, 400)
+            rows = db.get_safemeet_session_by_token(owner_token, limit=20)
+            sessions = [safety.safemeet_session_public(r) for r in rows] if safety else rows
+            return self._json({"ok": True, "sessions": sessions})
+
         # --- Static Frontend Fallback -----------------------------------------
         if not u.path.startswith("/api/"):
             return self._static(u.path)
@@ -646,6 +681,97 @@ class DeySafeHandler(BaseHTTPRequestHandler):
             if not jid: return self._json({"error": "missing id"}, 400)
             res = safety.update_journey(db, jid, data)
             return self._json({"ok": res})
+
+        # --- SafeMeet (Phase 4) -----------------------------------------------
+        if u.path == "/api/safemeet/start":
+            # MEET-01: Create a new SafeMeet session.
+            owner_token = (data.get("owner_token") or "").strip()
+            meeting_place = (data.get("meeting_place") or "").strip()
+            if not owner_token:
+                return self._json({"error": "missing owner_token"}, 400)
+            if not meeting_place:
+                return self._json({"error": "missing meeting_place"}, 400)
+
+            row = db.insert_safemeet_session({
+                "owner_token": owner_token,
+                "meeting_type": (data.get("meeting_type") or "business").strip(),
+                "meeting_place": meeting_place,
+                "meeting_address": (data.get("meeting_address") or "").strip(),
+                "meeting_lat": _float_or_none(data.get("meeting_lat")),
+                "meeting_lng": _float_or_none(data.get("meeting_lng")),
+                "expected_arrival": (data.get("expected_arrival") or "").strip(),
+            })
+            if not row:
+                return self._json({"error": "could not create session"}, 500)
+
+            session_ref = (row.get("session_uuid") or "")[:8].upper()
+            db.audit("api", "safemeet_started",
+                     "uuid={} place={}".format(row.get("session_uuid"), meeting_place))
+            return self._json({
+                "ok": True,
+                "session_uuid": row.get("session_uuid"),
+                "session_ref": session_ref,
+                "risk_level": row.get("risk_level", "medium"),
+                "meeting_place": row.get("meeting_place"),
+            })
+
+        if u.path == "/api/safemeet/checkin":
+            # MEET-02: Record arrival / location check-in.
+            owner_token = (data.get("owner_token") or "").strip()
+            session_uuid = (data.get("session_uuid") or "").strip()
+            if not owner_token or not session_uuid:
+                return self._json({"error": "missing owner_token or session_uuid"}, 400)
+
+            session = db.get_safemeet_session(session_uuid)
+            if not session:
+                return self._json({"error": "session not found"}, 404)
+            if session.get("owner_token") != owner_token:
+                return self._json({"error": "unauthorized"}, 403)
+
+            checkin = db.insert_safemeet_checkin({
+                "session_id": session["id"],
+                "checkin_type": (data.get("status") or "manual").strip(),
+                "lat": _float_or_none(data.get("lat")),
+                "lng": _float_or_none(data.get("lng")),
+                "note": (data.get("note") or "").strip(),
+            })
+
+            # Transition session to in_progress on first arrival check-in.
+            status_val = (data.get("status") or "").strip()
+            if status_val == "arrived" and session.get("state") == "scheduled":
+                db.update_safemeet_session(session_uuid, {
+                    "state": "in_progress",
+                    "actual_arrival": datetime.datetime.now().isoformat(timespec="seconds"),
+                })
+
+            updated = db.get_safemeet_session(session_uuid)
+            db.audit("api", "safemeet_checkin",
+                     "uuid={} status={}".format(session_uuid, status_val))
+            return self._json({
+                "ok": True,
+                "checkin_id": checkin.get("checkin_uuid") if checkin else None,
+                "session_status": (updated or session).get("state"),
+            })
+
+        if u.path == "/api/safemeet/invite":
+            # MEET-03: Send an invite to another person to join the meeting.
+            owner_token = (data.get("owner_token") or "").strip()
+            session_uuid = (data.get("session_uuid") or "").strip()
+            invite_to_token = (data.get("invite_to_token") or "").strip()
+            if not owner_token or not session_uuid:
+                return self._json({"error": "missing owner_token or session_uuid"}, 400)
+
+            session = db.get_safemeet_session(session_uuid)
+            if not session:
+                return self._json({"error": "session not found"}, 404)
+            if session.get("owner_token") != owner_token:
+                return self._json({"error": "unauthorized"}, 403)
+
+            raw = "{}|{}".format(session_uuid, invite_to_token or client_id)
+            invite_token = hashlib.sha256(raw.encode()).hexdigest()[:12].upper()
+            db.audit("api", "safemeet_invite",
+                     "uuid={} channel={}".format(session_uuid, data.get("channel", "direct")))
+            return self._json({"ok": True, "invite_token": invite_token})
 
         self.send_error(404)
 
