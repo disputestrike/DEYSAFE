@@ -1,5 +1,11 @@
-const SHELL_CACHE = 'deysafe-shell-20260606';
-const SHELL_URLS = ['/', '/index.html', '/manifest.json', '/icon.svg', '/review.html'];
+const SHELL_CACHE = 'deysafe-shell-20260606-brand';
+const SHELL_URLS = [
+  '/', '/index.html', '/manifest.json', '/review.html',
+  '/assets/brand/deysafe-icon-192.png',
+  '/assets/brand/deysafe-icon-512.png',
+  '/assets/brand/deysafe-apple-touch.png',
+  '/assets/brand/deysafe-favicon.png'
+];
 
 self.addEventListener('install', function (event) {
   event.waitUntil(

@@ -104,12 +104,21 @@ check("GET /api/route exposes auto-renderable road/fallback route metadata",
       "status=%s mode=%s waypoints=%s raw=%s" % (s, j.get("route_mode"), len(j.get("waypoints") or []), raw[:160]))
 app_path = os.path.join(os.path.dirname(__file__), "app", "index.html")
 sw_path = os.path.join(os.path.dirname(__file__), "app", "sw.js")
+manifest_path = os.path.join(os.path.dirname(__file__), "app", "manifest.json")
+gitignore_path = os.path.join(os.path.dirname(__file__), ".gitignore")
+env_example_path = os.path.join(os.path.dirname(__file__), ".env.example")
 try:
     app_html = open(app_path, encoding="utf-8").read()
     sw_js = open(sw_path, encoding="utf-8").read()
+    manifest_json = open(manifest_path, encoding="utf-8").read()
+    gitignore_txt = open(gitignore_path, encoding="utf-8").read()
+    env_example = open(env_example_path, encoding="utf-8").read()
 except Exception:
     app_html = ""
     sw_js = ""
+    manifest_json = ""
+    gitignore_txt = ""
+    env_example = ""
 check("PWA install path is wired in the browser app",
       "beforeinstallprompt" in app_html and "installApp" in app_html
       and "serviceWorker.register('/sw.js')" in app_html,
@@ -134,6 +143,18 @@ check("Report screen exposes camera/video evidence capture metadata",
       'id="rMedia"' in app_html and "capture=\"environment\"" in app_html
       and "mediaMetaFromInput" in app_html,
       "media capture markers missing")
+check("Cloudflare R2 browser evidence upload path is wired",
+      "/api/media/presign" in app_html and "uploadEvidenceIfAny" in app_html
+      and "CLOUDFLARE_R2_BUCKET" in env_example,
+      "R2 upload markers/env docs missing")
+check("DeySafe PWA branding assets are wired into manifest, shell cache, and header",
+      "deysafe-icon-192.png" in app_html and "deysafe-icon-192.png" in manifest_json
+      and "deysafe-icon-512.png" in manifest_json and "deysafe-favicon.png" in sw_js,
+      "branding assets missing")
+check("Repository hygiene ignores runtime artifacts without Markdown fences",
+      "```" not in gitignore_txt and ".env" in gitignore_txt and "__pycache__/" in gitignore_txt
+      and ".verify-logs/" in gitignore_txt and "!.env.example" in gitignore_txt,
+      "gitignore hygiene markers missing")
 check("Readiness moved into settings instead of cluttering WakaSafe",
       'id="v-settings"' in app_html and "Phone Safety Readiness" in app_html
       and "settingsBtn" in app_html,
@@ -149,6 +170,15 @@ s, j, raw = call("POST", "/api/report", {
 check("POST /api/report preserves camera/video evidence fingerprint metadata",
       s == 200 and j.get("ok") is True and (j.get("evidence_meta") or {}).get("hash") == "a" * 64,
       "status=%s evidence=%s raw=%s" % (s, j.get("evidence_meta"), raw[:160]))
+s, j, raw = call("POST", "/api/media/presign", {
+    "name": "clip.mp4",
+    "type": "video/mp4",
+    "size": 1000,
+}, want_token=False)
+check("POST /api/media/presign exposes key-gated Cloudflare R2 upload contract",
+      s == 200 and j.get("ok") is True and j.get("provider") == "cloudflare_r2"
+      and "configured" in j,
+      "status=%s raw=%s" % (s, raw[:200]))
 
 
 # A. Phone Safety Readiness
@@ -208,7 +238,53 @@ check("GET /api/journeys with token returns operator list",
       s == 200 and isinstance(j.get("journeys"), list), "status=%s" % s)
 
 
-# C. SHIELD cases
+# C. SafeMeet
+check("SafeMeet frontend uses real API and foreground auto-watch",
+      'id="v-meet"' in app_html and "/api/safemeet/start" in app_html
+      and "startMeetWatch" in app_html and "/api/safemeet/end" in app_html,
+      "SafeMeet UI/API markers missing")
+s, j, raw = call("POST", "/api/safemeet/start", {
+    "owner_token": owner,
+    "meeting_type": "transaction",
+    "meeting_place": "Kaduna",
+    "meeting_address": "Central market gate",
+    "meeting_lat": 10.5105,
+    "meeting_lng": 7.4165,
+    "expected_arrival": "12:30",
+}, want_token=False)
+meet = j.get("session") or {}
+sid = j.get("session_uuid") or meet.get("session_uuid")
+check("POST /api/safemeet/start creates a stored risk-scored meeting session",
+      s == 200 and j.get("ok") is True and sid and meet.get("owner_token") is None
+      and meet.get("risk_level") in ("low", "medium", "high", "critical"),
+      "status=%s sid=%s raw=%s" % (s, sid, raw[:180]))
+s, j, raw = call("POST", "/api/safemeet/checkin", {
+    "owner_token": owner,
+    "session_uuid": sid,
+    "status": "arrived",
+    "lat": 10.5107,
+    "lng": 7.4168,
+    "accuracy": 20,
+}, want_token=False)
+check("POST /api/safemeet/checkin records arrival and returns anomaly assessment",
+      s == 200 and j.get("ok") is True and j.get("session_status") in ("in_progress", "scheduled")
+      and isinstance(j.get("anomalies"), dict),
+      "status=%s raw=%s" % (s, raw[:180]))
+s, j, raw = call("GET", "/api/safemeet/list?owner_token=" + owner, want_token=False)
+check("GET /api/safemeet/list is owner-scoped and redacted",
+      s == 200 and any((m.get("session_uuid") == sid and "owner_token" not in m)
+                       for m in (j.get("sessions") or [])),
+      "status=%s raw=%s" % (s, raw[:180]))
+s, j, raw = call("POST", "/api/safemeet/end", {
+    "owner_token": owner,
+    "session_uuid": sid,
+}, want_token=False)
+check("POST /api/safemeet/end completes the meeting on the server",
+      s == 200 and j.get("ok") is True and (j.get("session") or {}).get("state") == "completed",
+      "status=%s raw=%s" % (s, raw[:180]))
+
+
+# D. SHIELD cases
 s, j, raw = call("POST", "/api/cases", {
     "case_type": "journey",
     "subject_ref": jid,

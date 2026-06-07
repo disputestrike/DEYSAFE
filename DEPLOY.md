@@ -4,8 +4,8 @@ Pure-Python (standard-library-only) web app — one web process, no build step. 
 on **SQLite** out of the box and on **PostgreSQL** when `DATABASE_URL` is set.
 
 ## 1. Deploy
-1. Push `guardian-ng/` to GitHub (or `railway up`).
-2. Railway → **New Project → Deploy from repo** (root = `guardian-ng`).
+1. Push `DEYSAFE/` to GitHub (or `railway up` from this folder).
+2. Railway → **New Project → Deploy from repo** (root = `DEYSAFE`).
 3. Railway runs the `Procfile`: `web: python engine/api.py`. The server binds
    `0.0.0.0:$PORT` automatically and Railway gives you a public HTTPS URL.
 

@@ -55,7 +55,7 @@ def _parse_date(s):
 def fetch_rss(url, name, limit=25, timeout=8):
     out = []
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "guardian-ng/0.1"})
+        req = urllib.request.Request(url, headers={"User-Agent": "deysafe/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             root = ET.fromstring(r.read())
         for it in root.findall(".//item")[:limit]:

@@ -4,15 +4,16 @@
 *its status*, *how it's validated*, and *the result*. We build, measure, and accept work
 against this document.
 
-**Launch compliance crosswalk:** see `docs/LAUNCH_COMPLIANCE_CROSSWALK.md` for
-the public-release matrix, PWA install instructions, route/voice corrections,
-real-data gates, and corrective actions.
+**Work index:** see `docs/WORK_INDEX.md` for the current branch/commit/file map,
+what was recovered, and what still needs proof. **Launch compliance crosswalk:**
+see `docs/LAUNCH_COMPLIANCE_CROSSWALK.md` for the public-release matrix, PWA
+install instructions, route/voice corrections, real-data gates, and corrective actions.
 
 **Engineering process (every change):** MONITOR (run the gate) → CORRECT (fix fails) →
 MEASURE (pass rate) → ADJUST. Nothing is "done" until it's in the matrix AND passes its gate.
 
 **Run the automated gate:** `powershell -ExecutionPolicy Bypass -File scripts\verify_all.ps1`.
-**Last full local run: 2026-06-06 -> 139 passed / 0 failed** (56 core + 17 security + 19 response + 17 quality + 30 product).
+**Last full local run: 2026-06-06 -> 148 passed / 0 failed** (56 core + 17 security + 19 response + 17 quality + 39 product).
 Postgres verification is encoded in `scripts\verify_all.ps1 -Postgres -DatabaseUrl "<url>"` and must be run against Railway or a disposable Postgres database before production promotion.
 
 Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your account/key · ⛔ excluded by a safety bright-line
@@ -51,12 +52,13 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | **Proactive proximity warnings** (Waze/Google style) — watch location as you move, warn of danger within 40 km (banner + voice), dedup; **GPS stays ON-DEVICE** | user "Waze proactive warning" | `index` `toggleWatch`/`checkProximity`/`proWarn` (`watchPosition`, client-side) | ✅ | browser: near-Kaduna → fires kidnapping warning, dedupes, 0 errors | PASS |
 | Action buttons 2×2 grid (no sideways scroll) | user feedback | `index .chips` | ✅ | manual | PASS |
 | Responsive desktop (no page-scroll) | user feedback | `index @media` (`#v-home.active`) | ✅ | manual | PASS |
-| Installable PWA (manifest + install prompt) | Doc P7 | `app/manifest.json` + `index.installApp` | ✅ | product gate | PASS |
+| Installable PWA (manifest + install prompt + DeySafe icons) | Doc P7 + logo assets | `app/manifest.json` + `app/assets/brand/` + `index.installApp` | built | product gate | PASS when gate green |
 | Service worker (offline shell, live API network-first) | launch fix | `app/sw.js` | ✅ | product gate | PASS |
 | **SOS** — Automatic (alarm + on-device location + share link) / Hold-&-Speak (dead-air auto-send + AI) | DeySafe add + user | `index` `sosAuto`/`sosVoice`/`sosActivate` | ✅ (send-to-stored-circle needs a channel ⛔ no armed auto-dispatch) | browser: alarm+location+share, 0 errors | PASS |
 | **Privacy/decoy lock (kill switch)** — hides the app behind harmless Trip Notes after silent SOS or manual lock; **PERSISTS across reload/reopen** | user coercion safety | `index.panicLock`/`panicUnlock` (`localStorage ds_locked`) + boot re-lock | ✅ client-side, persistent, verified live | `validate_product.py` decoy markers + `ds_locked` set on lock / cleared on covert unlock / re-applied at boot | PASS |
 | **Policing accountability** (Govia) — "report bad policing" category + know-your-rights card | user research | `api` TYPES `police_misconduct` + index `.rights` | ✅ | gate: type available; browser grid+card | PASS |
-| **Camera/video evidence capture metadata** — attach image/video hash + file facts to an anonymous report | user evidence ask | `index.rMedia`/`mediaMetaFromInput` + `/api/report` `evidence_meta` | ✅ metadata; raw storage pending | `validate_product.py` | PASS |
+| **Camera/video evidence capture + optional Cloudflare R2 upload** — attach image/video hash + file facts to an anonymous report; upload raw evidence when storage keys/CORS are configured | user evidence ask | `index.rMedia`/`mediaMetaFromInput`/`uploadEvidenceIfAny` + `/api/media/presign` + `/api/report` `evidence_meta` | built, R2 key-gated | `validate_product.py` media/R2 checks | PASS when gate green |
+| **SafeMeet** — high-risk meeting session with foreground auto-arrival watch, periodic check-ins, owner-scoped session API, anomaly flags, and server-side completion | user supplied SafeMeet ideas | `app/index.html` `v-meet`/`startMeetWatch` + `/api/safemeet/start`/`checkin`/`list`/`session`/`end`/`invite` + `engine/safety.py` + `engine/db.py` | built | `validate_product.py` SafeMeet section | PASS when gate green |
 | **Community channels** (Zello, light) — area-tagged posts + 🎤 dictation, newest-first feed, XSS-safe | user research | `db.channel` + `api` `/api/channel` + index `renderChannels` | ✅ | gate: post/feed/empty; browser escape | PASS |
 
 ### C. FindMe — missing persons
@@ -123,6 +125,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 | Guardian Mesh software records (consent-scoped devices) | user mesh idea | `mesh_devices`, `mesh_relays`, `/api/mesh/devices`, `/api/mesh/relays` | built (registry) | `validate_product.py` mesh section | PASS when gate green |
 | Hardware tracker registry (stable IDs hashed; public projection omits stable hash) | user DeySafe Tag / tracker idea | `tracker_devices`, `/api/trackers` | built (registry) | `validate_product.py` tracker section | PASS when gate green |
 | Ops agreements and drills for responder handoff, drills, escalation coverage | user weak ops gaps | `ops_agreements`, `ops_drills`, `/api/ops-agreements`, `/api/ops-drills`, `/api/ops-readiness` | built | `validate_product.py` ops section | PASS when gate green |
+| Work index / repo hygiene | user "can't find the work" | `docs/WORK_INDEX.md`, `.gitignore`, `.env.example` | built | `validate_product.py` hygiene markers + Git status | PASS when gate green |
 
 ## 2. Compliance & safety bright-lines (QC gate)
 | Requirement | Status | Evidence |
@@ -145,7 +148,7 @@ Legend: ✅ built & validated · ◑ partial · ☐ not built · 🔑 needs your
 ## 3. NOT built yet (honest scope — ~a third of the master doc done)
 Production stack (Next.js + Supabase/PostGIS + Vercel) · **house-level GPS precision** (✅ typed places now resolve ANYWHERE in Nigeria via OSM/Nominatim — the 48-town wall is gone — but pins are town-centroid accurate, not house-number) · ✅ **report→incident now geocodes** (a typed report of ANY town creates a human-gated `candidate_unverified` map incident) · ✅ **live news → AI extraction wired** (when a Cerebras key is set, news the gazetteer can't place is AI-read → geocoded → mapped; capped 30/pull; **needs your key to prove**) · user accounts & auth · reputation system · live push/WhatsApp/SMS · satellite SAR/VIIRS pipeline · 72-hour risk forecast · NRT integration · scheduled cron scrapers · Telegram/Facebook/YouTube monitors · predictive model · evidentiary chain-of-custody.
 
-**Recently completed (this session):** ✅ Strava movement-prediction + danger heatmap · ✅ SMS/USSD reach (receive now, send key-gated) · ✅ Bluetooth crowd-relay BACKEND (AirTag model) · ✅ SOS redesign · ✅ policing accountability · ✅ community channels · ✅ **server-side triangulation** (`engine/triangulate.py` + `/api/triangulate` + `drawBackendTriangulation`, verified live) · ✅ **classifier precision DATA-05** (geoparse word-boundary/strong-signal/negative-suppression, verified live) · ✅ **persistent coercion kill-switch** (`ds_locked`, verified live) · ✅ **first-class visible Journey Guard** (persistent banner + reload restore, verified live) · ✅ **road-route cache + retry** · ✅ **outbound delivery provider layer** (`broadcast.py`: AT SMS / WhatsApp Cloud / OneSignal, key-gated).
+**Recently completed (this session):** ✅ Strava movement-prediction + danger heatmap · ✅ SMS/USSD reach (receive now, send key-gated) · ✅ Bluetooth crowd-relay BACKEND (AirTag model) · ✅ SOS redesign · ✅ policing accountability · ✅ community channels · ✅ **server-side triangulation** (`engine/triangulate.py` + `/api/triangulate` + `drawBackendTriangulation`, verified live) · ✅ **classifier precision DATA-05** (geoparse word-boundary/strong-signal/negative-suppression, verified live) · ✅ **persistent coercion kill-switch** (`ds_locked`, verified live) · ✅ **first-class visible Journey Guard** (persistent banner + reload restore, verified live) · ✅ **road-route cache + retry** · ✅ **outbound delivery provider layer** (`broadcast.py`: AT SMS / WhatsApp Cloud / OneSignal, key-gated) · restored hardened API after branch drift · integrated SafeMeet with owner-scoped API and auto-watch · wired DeySafe PWA branding assets · added `docs/WORK_INDEX.md` for findability.
 
 **Gated on YOU / native:** an AI key (verify live on Railway) · **Africa's Talking** acct (`AT_USERNAME`/`AT_API_KEY`) → turns ON SMS/USSD *send* via the now-built `broadcast.py` layer · `WHATSAPP_*` / `ONESIGNAL_*` → turns ON the already-built WhatsApp/push channels · `DEMO_MODE=0` + live-ingest activation for real-data · a **native app** → background BLE mesh scanner + real DeySafe Tag hardware + real-time push-to-talk · 24/7 operator staffing + signed handoff agreements · NDPA retention/erasure policy · production accounts (Supabase/Vercel).
 

@@ -1,4 +1,3 @@
-```
 # Python
 __pycache__/
 *.pyc
@@ -10,13 +9,20 @@ __pycache__/
 .env
 .env.local
 .env.*
+!.env.example
 
 # Databases
 *.db
+*.db-shm
+*.db-wal
+data/*.db
+data/*.db-*
 
 # Backup files
 *.bak*
+*.bak
 
-# Scripts
-scripts/*.sh
-```
+# Runtime logs
+.verify-logs/
+output/playwright/
+*.log

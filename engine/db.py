@@ -1476,10 +1476,10 @@ class DB:
         # Hash PINs if provided
         safe_pin_hash = None
         duress_pin_hash = None
-        if d.get("safe_pin") and security:
-            safe_pin_hash = security.hash_password(d["safe_pin"])
-        if d.get("duress_pin") and security:
-            duress_pin_hash = security.hash_password(d["duress_pin"])
+        if d.get("safe_pin"):
+            safe_pin_hash = hashlib.sha256(str(d["safe_pin"]).encode("utf-8")).hexdigest()
+        if d.get("duress_pin"):
+            duress_pin_hash = hashlib.sha256(str(d["duress_pin"]).encode("utf-8")).hexdigest()
         
         self._run(
             """INSERT INTO safemeet_sessions (
@@ -1492,7 +1492,7 @@ class DB:
                 checkin_interval_minutes, next_checkin_due,
                 state, safe_pin_hash, duress_pin_hash,
                 user_notes
-            ) VALUES (?,?, ?,?, ?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?, ?,?, ?,?, ?)""",
+            ) VALUES (?,?, ?,?, ?,?, ?,?,?,?, ?,?,?,?, ?,?, ?,?, ?,?, ?,?,?, ?)""",
             (session_uuid, owner_token, now_iso(), now_iso(),
              (d.get("meeting_type") or "").strip(), risk_level or "medium",
              (d.get("meeting_place") or "").strip(), (d.get("meeting_address") or "").strip(),
@@ -1585,7 +1585,7 @@ class DB:
                 session_id, checkin_uuid, ts, checkin_type,
                 lat, lng, location_accuracy, battery_level, network_type,
                 note, duress_flag, photo_url
-            ) VALUES (?, ?,?, ?,?, ?,?,?, ?,?, ?)""",
+            ) VALUES (?, ?,?, ?,?, ?,?,?, ?,?,?, ?)""",
             (session_id, checkin_uuid, now_iso(), (d.get("checkin_type") or "manual").strip(),
              d.get("lat"), d.get("lng"), d.get("location_accuracy"),
              d.get("battery_level"), (d.get("network_type") or "").strip(),

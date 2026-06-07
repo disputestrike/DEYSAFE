@@ -6,7 +6,8 @@
 <meta name="theme-color" content="#ffffff" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <link rel="manifest" href="/manifest.json" />
-<link rel="icon" href="/icon.svg" />
+<link rel="icon" type="image/png" href="/assets/brand/deysafe-favicon.png" />
+<link rel="apple-touch-icon" href="/assets/brand/deysafe-apple-touch.png" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <title>DeySafe — Know before you waka</title>
 <style>
@@ -18,8 +19,8 @@
   body{background:#e9edf3;color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;justify-content:center;min-height:100vh}
   .app{width:100%;max-width:460px;background:var(--bg);min-height:100vh;display:flex;flex-direction:column;position:relative}
   .top{display:flex;align-items:center;gap:10px;padding:13px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:600}
-  .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand-d));display:grid;place-items:center}
-  .logo svg{width:18px;height:18px}
+  .logo{width:32px;height:32px;border-radius:9px;background:#0d3b77;display:grid;place-items:center;overflow:hidden;flex:0 0 auto}
+  .logo img{width:32px;height:32px;display:block;object-fit:cover}
   .brand b{font-size:16px;letter-spacing:-.01em}.brand span{display:block;font-size:10.5px;color:var(--muted);margin-top:-1px}
   .chip{margin-left:auto;font-size:11px;font-weight:700;padding:5px 10px;border-radius:999px}
   .installbtn{border:1px solid var(--line);background:#fff;color:var(--brand-d);border-radius:999px;padding:6px 10px;font:inherit;font-size:11px;font-weight:800;cursor:pointer}
@@ -158,7 +159,7 @@
 <div class="app">
   <div id="demoBanner" class="demobanner" style="display:none" role="alert">⚠ DEMO DATA — DO NOT USE FOR REAL SAFETY DECISIONS</div>
   <header class="top">
-    <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z" fill="#fff"/></svg></div>
+    <div class="logo"><img src="/assets/brand/deysafe-icon-192.png" alt="" /></div>
     <div class="brand"><b>DeySafe</b><span>Know before you waka</span></div>
     <div class="chip" id="chip">—</div>
     <button id="settingsBtn" class="installbtn" onclick="go('settings')" title="Settings" aria-label="Settings">Settings</button>
@@ -288,6 +289,46 @@ Check hotel address</textarea>
       <div id="caseDetail"></div>
     </section>
 
+    <section class="view pad" id="v-meet">
+      <h2 class="t">Safe Meet — coordinate secure meetings</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Two people meeting? Share your location, confirm arrival, get risk alerts.</p>
+
+      <label class="f">Meeting type</label>
+      <select id="meetType">
+        <option value="business">Business meeting</option>
+        <option value="personal">Personal meeting</option>
+        <option value="date">Date</option>
+        <option value="transaction">Transaction (buy/sell)</option>
+      </select>
+
+      <label class="f">Where (type any place)</label>
+      <input id="meetPlace" list="placelist" autocomplete="off" placeholder="Meeting location…" />
+
+      <label class="f">Exact address / landmark</label>
+      <input id="meetAddress" placeholder="e.g. Starbucks on Lekki Phase 1" />
+
+      <label class="f">Expected arrival time</label>
+      <input id="meetETA" type="time" />
+
+      <button class="btn" onclick="startSafeMeet()">🤝 Start Safe Meet</button>
+
+      <div id="meetActive" style="display:none;margin-top:16px">
+        <div class="case">
+          <b>🤝 Safe Meet Active</b>
+          <div class="kv"><b>Session:</b> <span id="meetRef">—</span></div>
+          <div class="kv"><b>Location:</b> <span id="meetLoc">—</span></div>
+          <div class="kv"><b>Risk level:</b> <span id="meetRisk">—</span></div>
+          <div class="kv"><b>Your status:</b> <span id="meetStatus">—</span></div>
+        </div>
+        <button class="btn sec" onclick="checkInMeet()">📍 Check in (I'm here)</button>
+        <button class="btn sec" onclick="inviteMeetPerson()">👤 Invite person</button>
+        <button class="btn sec" onclick="endSafeMeet()">✓ Meeting ended</button>
+      </div>
+
+      <h2 class="t" style="margin-top:20px">Active meetings</h2>
+      <div id="meetList"></div>
+    </section>
+
     <section class="view pad" id="v-settings">
       <h2 class="t">Settings</h2>
       <div class="case">
@@ -314,6 +355,7 @@ Check hotel address</textarea>
     <button data-v="sos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg>SOS</button>
     <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>FindMe</button>
     <button id="watchBtn" class="watchnav" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z"/></svg>Warn me</button>
+    <button data-v="meet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Safe Meet</button>
   </nav>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1188,7 +1230,8 @@ async function sendMissing(){const n=$('#mName').value.trim();if(!n){$('#mName')
 
 function go(v){switchTab(v);document.querySelectorAll('nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));}
 function switchTab(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));$('#v-'+v).classList.add('active');
-  if(v==='home'){loadLevel(false);setTimeout(()=>map&&map.invalidateSize(),60);}}
+  if(v==='home'){loadLevel(false);setTimeout(()=>map&&map.invalidateSize(),60);}
+  if(v==='meet'){loadMeetList();}}
 document.querySelectorAll('nav button[data-v]').forEach(b=>b.onclick=()=>go(b.dataset.v));
 document.querySelectorAll('.seg').forEach(b=>b.onclick=()=>{document.querySelectorAll('.seg').forEach(x=>x.classList.remove('on'));b.classList.add('on');SEG=b.dataset.seg;renderHome();});
 $('#areaSelect').onchange=function(){loadLevel(true);};
@@ -1203,6 +1246,133 @@ document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_
   updateOutboxBadge();flushOutbox(); // send anything saved on a previous offline visit
   setTimeout(()=>map.invalidateSize(),120);
   if('serviceWorker'in navigator){try{navigator.serviceWorker.register('/sw.js').catch(function(){});}catch(e){}}})();
+
+// --- Safe Meet (Phase 4) ---------------------------------------------------
+let MEET_SESSION = null, MEET_WATCH = null, MEET_DEST = null, MEET_ARRIVED = false, MEET_LAST_PING = 0;
+
+function stopMeetWatch(){
+  if(MEET_WATCH!=null&&navigator.geolocation){try{navigator.geolocation.clearWatch(MEET_WATCH);}catch(e){}}
+  MEET_WATCH=null;MEET_DEST=null;MEET_ARRIVED=false;MEET_LAST_PING=0;
+}
+function updateMeetStatus(text){var el=$('#meetStatus');if(el)el.textContent=text;}
+async function meetCheckin(status,pos,auto){
+  if(!MEET_SESSION)return {ok:false};
+  var body={owner_token:SOS_OWNER,session_uuid:MEET_SESSION,status:status||'manual',network:(navigator.onLine?'online':'offline')};
+  if(pos){body.lat=pos.lat;body.lng=pos.lng;body.accuracy=pos.accuracy||0;}
+  var r=await fetch('/api/safemeet/checkin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+  if(r.ok){
+    var st=(r.session_status||'in_progress').replace(/_/g,' ');
+    updateMeetStatus(st+(auto?' · automatic':''));
+    if(!auto)toast(status==='arrived'?'Check-in recorded':'Safe Meet updated');
+  }else if(!auto){toast('Check-in failed');}
+  return r;
+}
+function startMeetWatch(lat,lng){
+  stopMeetWatch();
+  MEET_DEST=(lat!=null&&lng!=null)?[lat,lng]:null;
+  if(!navigator.geolocation){updateMeetStatus('started · turn on location for auto check-ins');return;}
+  MEET_WATCH=navigator.geolocation.watchPosition(function(p){
+    var pos={lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy||0};
+    var now=Date.now();
+    if(MEET_DEST&&!MEET_ARRIVED&&hav(pos.lat,pos.lng,MEET_DEST[0],MEET_DEST[1])<=0.6){
+      MEET_ARRIVED=true;MEET_LAST_PING=now;meetCheckin('arrived',pos,true);return;
+    }
+    if(now-MEET_LAST_PING>120000){MEET_LAST_PING=now;meetCheckin('auto_location',pos,true);}
+  },function(){updateMeetStatus('started · location permission needed for auto check-ins');},
+  {enableHighAccuracy:true,maximumAge:10000,timeout:20000});
+  updateMeetStatus('watching for arrival automatically');
+}
+
+async function startSafeMeet() {
+  const type = $('#meetType').value;
+  const place = ($('#meetPlace').value || '').trim();
+  const addr = ($('#meetAddress').value || '').trim();
+  if (!place) { toast('Enter meeting location'); return; }
+  const coords = PLACE_COORDS[place] || (LIVE_POS?[LIVE_POS.lat,LIVE_POS.lng]:[null,null]);
+  const body = {owner_token:SOS_OWNER,meeting_type:type,meeting_place:place,meeting_address:addr,
+    meeting_lat:coords[0],meeting_lng:coords[1],expected_arrival:$('#meetETA').value||''};
+  const r = await fetch('/api/safemeet/start', {
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
+  }).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
+  if(r.ok){
+    MEET_SESSION=r.session_uuid;
+    renderMeetActive(r);
+    var s=r.session||{};
+    startMeetWatch(s.meeting_lat||coords[0],s.meeting_lng||coords[1]);
+    loadMeetList();
+    toast('Safe Meet started');
+  }else{toast((r.error||'Safe Meet failed'));}
+}
+
+async function checkInMeet(){
+  if(!MEET_SESSION)return;
+  if(!navigator.geolocation){toast('Location not available');return;}
+  navigator.geolocation.getCurrentPosition(function(p){
+    meetCheckin('arrived',{lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy||0},false);
+  },function(){toast('Location unavailable; check-in skipped');},
+  {enableHighAccuracy:true,timeout:8000,maximumAge:10000});
+}
+
+function renderMeetActive(data) {
+  const box = $('#meetActive');
+  if (!box) return;
+  box.style.display = 'block';
+  var ref = $('#meetRef'), loc = $('#meetLoc'), risk = $('#meetRisk'), status = $('#meetStatus');
+  if (ref) ref.textContent = data.session_ref || (MEET_SESSION || '').slice(0, 8).toUpperCase();
+  if (loc) loc.textContent = data.meeting_place || (data.session&&data.session.meeting_place) || '-';
+  if (risk) risk.textContent = (data.risk_level || (data.session&&data.session.risk_level) || 'medium').toUpperCase();
+  if (status) status.textContent = 'watching for arrival automatically';
+}
+
+async function endSafeMeet() {
+  if(!MEET_SESSION)return;
+  const sid=MEET_SESSION;
+  const r=await fetch('/api/safemeet/end',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({owner_token:SOS_OWNER,session_uuid:sid})}).then(x=>x.json()).catch(()=>({ok:false}));
+  stopMeetWatch();MEET_SESSION=null;
+  var box=$('#meetActive');if(box)box.style.display='none';
+  loadMeetList();
+  toast(r.ok?'Safe Meet ended':'Safe Meet closed locally; server update failed');
+}
+
+async function inviteMeetPerson() {
+  if (!MEET_SESSION) return;
+  const token = prompt('Invite code or phone number:');
+  if (!token) return;
+
+  const r = await fetch('/api/safemeet/invite', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      owner_token: SOS_OWNER,
+      session_uuid: MEET_SESSION,
+      invite_to_token: token,
+      channel: 'direct'
+    })
+  }).then(x => x.json()).catch(() => ({ok: false}));
+
+  toast(r.ok?('Invite code: '+(r.invite_token||token)):'Invite could not be recorded');
+}
+
+async function loadMeetList() {
+  var el = $('#meetList');
+  if (!el) return;
+  try {
+    var r = await fetch('/api/safemeet/list?owner_token=' + encodeURIComponent(SOS_OWNER)).then(x => x.json());
+    var sessions = (r && r.sessions) || [];
+    if (!sessions.length) { el.innerHTML = '<p class="note">No active meetings.</p>'; return; }
+    el.innerHTML = sessions.map(function(s) {
+      var risk = (s.risk_level || 'medium').toUpperCase();
+      var state = (s.state || 'scheduled').replace(/_/g, ' ');
+      return '<div class="item" onclick="MEET_SESSION=\'' + esc(s.session_uuid) + '\';renderMeetActive({session_ref:\'' + esc((s.session_uuid||'').slice(0,8).toUpperCase()) + '\',meeting_place:\'' + esc(s.meeting_place||'') + '\',risk_level:\'' + esc(s.risk_level||'medium') + '\'});">'
+        + '<div class="r1"><span class="pl">🤝 ' + esc(s.meeting_place || '—') + '</span><span class="badge">' + esc(risk) + '</span></div>'
+        + '<div class="ds">' + esc(s.meeting_type || 'meeting') + ' · ' + esc(state) + '</div>'
+        + '<div class="mt">' + (s.expected_arrival ? 'ETA ' + esc(s.expected_arrival) : 'No ETA set') + '</div>'
+        + '</div>';
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<p class="note">Could not load meetings.</p>';
+  }
+}
 </script>
 </body>
 </html>

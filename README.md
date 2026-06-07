@@ -10,8 +10,9 @@ without consent, never auto-acts, and never cues force.
 - **FindMe** — missing-person triangulation.
 - **SHIELD** — the operator "situation room" + human-verification console (`/review.html`).
 
-> Status: working, deployed **prototype**. Pre-release gate: **56 / 56 passing** on
-> **both SQLite and PostgreSQL**. Not yet proven with real users/data — see *Honest scope*.
+> Status: working **prototype**. The current source-of-truth map is
+> `docs/WORK_INDEX.md`; gates must pass before public release. Not yet proven with
+> real users/data — see *Honest scope*.
 
 ---
 
@@ -35,7 +36,8 @@ without consent, never auto-acts, and never cues force.
 - **📍 Locate-me** (Google-Maps style, on-device) + **🛡 proactive proximity warnings** (Waze-style: warns of danger near you as you move).
 - **Voice in & out** — speak "am I safe in Kaduna" / "Lagos to Kano"; it reads the report back.
 - **SOS** — *Automatic* (alarm + on-device location + shareable link) or *Hold-&-Speak* (auto-sends after dead air), with silent mode and a decoy privacy lock.
-- **Camera/video evidence metadata** — attach an image/video fingerprint and file facts to an anonymous report; raw evidence storage remains restricted.
+- **Camera/video evidence** — attach an image/video fingerprint and file facts to an anonymous report; optional Cloudflare R2 upload is available when storage keys and CORS are configured.
+- **SafeMeet** — create a high-risk meeting session, auto-watch arrival in the foreground, record check-ins, and flag anomalies.
 - **Report danger** (any town → geocoded, human-gated incident), **police-misconduct** category + **know-your-rights** card, **community channels** (area-tagged posts).
 
 **FindMe — missing persons**
@@ -76,6 +78,9 @@ python validate.py            # 56 checks: endpoints + chaos + functional
 | `CEREBRAS_API_KEY_1..5` (or `CEREBRAS_API_KEY`) | Turns on real AI extraction + intake. |
 | `CEREBRAS_MODEL` | Override the model name (default `llama-3.3-70b`). |
 | `AT_USERNAME`, `AT_API_KEY` | Africa's Talking — turns on **outbound** SMS. |
+| `CLOUDFLARE_R2_*`, `R2_*` | Optional Cloudflare R2 direct browser upload for image/video evidence. See `.env.example`. |
+| `DEYSAFE_BEACON_SECRET` | Signs beacon relay envelopes before FindMe/Bluetooth pilot use. |
+| `DEMO_MODE` | `0` for production/no synthetic data; local demo defaults may seed examples. |
 | `PORT` | Server port (default 4500). |
 
 ---
@@ -87,12 +92,12 @@ python validate.py            # 56 checks: endpoints + chaos + functional
 - **Deploy:** Railway-ready (`Procfile`, binds `0.0.0.0:$PORT`, seed-if-empty). Connect the repo → it auto-deploys; add a Postgres plugin for persistence.
 
 ## Validation
-`docs/TRACEABILITY.md` is the North Star matrix (every feature -> where it lives -> status -> how it's validated). `docs/LAUNCH_COMPLIANCE_CROSSWALK.md` is the public-release crosswalk and corrective-action matrix. The gates must pass before any release.
+`docs/WORK_INDEX.md` shows where the current work lives, what was recovered, and what still needs proof. `docs/TRACEABILITY.md` is the North Star matrix (every feature -> where it lives -> status -> how it's validated). `docs/LAUNCH_COMPLIANCE_CROSSWALK.md` is the public-release crosswalk and corrective-action matrix. The gates must pass before any release.
 
 ---
 
 ## Honest scope (where we really are)
-**✅ Built & working:** everything above (web + server stack), gated 56/56, deployed.
+**✅ Built & working:** everything above in the web + server stack when the local gates are green.
 **◑ Partial:** AI (built; needs a key — verify on the deployment) · SMS/USSD *send* (needs Africa's Talking) · audit log (data only, no UI) · NDPA retention schedule.
 **☐ Not built / native:** the native app (background **Bluetooth mesh** scanner + real-time **push-to-talk**) · push/WhatsApp send · user accounts/reputation · satellite + 72-h forecast · the production Next.js/Supabase stack · NRT integration.
 
@@ -100,4 +105,4 @@ We've out-*designed* the incumbents (Ushahidi / Zello / Govia ideas folded in); 
 
 ---
 
-*Local working folder is `guardian-ng/` for historical reasons; the product and repo are **DeySafe**.*
+This repository folder is **DEYSAFE**; keep new work, docs, tests, and assets here.
