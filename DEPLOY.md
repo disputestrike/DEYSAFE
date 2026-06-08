@@ -51,6 +51,25 @@ Preferred (P0-15): mint a slow, salted PBKDF2 hash (`pbkdf2$<iters>$<salt>$<hash
 The app is safe by default: when a provider key is missing, it reports
 `unconfigured` and never fakes delivery, upload, or AI vision.
 
+## 3b. Optional Security Hardening
+
+All OFF by default so existing deploys and the gate suite are unaffected — turn them on
+for a hardened public launch.
+
+| Variable | Effect |
+|---|---|
+| `DEYSAFE_DUAL_APPROVAL` | `1` = TWO-PERSON RED approval (P0-08). `/api/verify` only *proposes*; a **different** operator must `POST /api/confirm` to publish. Needs ≥2 roster accounts. |
+| `DEYSAFE_WEBHOOK_SECRET` | Shared secret required on inbound `/api/sms` + `/api/ussd` (P0-11). Provider must send it as the `X-Webhook-Secret` header or a `?wht=` query param, else the post is rejected. Unset = fail-open (dev only). |
+| `DEYSAFE_ALLOWED_ORIGINS` | Comma-separated CORS allow-list (P0-13). Unset echoes a permissive `*` (dev); set it to your web origins in production. |
+| `DEYSAFE_MEDIA_QUOTA_PER_DAY` | Per-identity daily cap on signed evidence-upload URLs (P0-16). Default `30`. Only enforced when R2 is configured. |
+| `DEYSAFE_MEDIA_REQUIRE_SESSION` | `1` = `/api/media/presign` requires a citizen session (no anonymous uploads) when R2 is configured. |
+
+Privacy/compliance endpoints added: `POST /api/subscribe` + `/api/unsubscribe` (geofenced
+alert opt-in/out, NDPA consent), and `POST /api/erasure` (`confirm=ERASE`; admin by any
+identifier, or a citizen self-serving their own session data) for NDPA right-to-erasure.
+Graceful shutdown (P2-04) drains in-flight requests on SIGTERM so a Railway redeploy never
+hard-kills mid-write.
+
 ## 4. Verify Railway/Postgres
 
 Run the full local gate against a disposable Postgres or the Railway-provided URL:

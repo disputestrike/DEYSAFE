@@ -625,8 +625,19 @@ function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){retu
 // their action was delivered now or saved to send later.
 const OUTBOX_KEY='ds_outbox';
 function _uuid(){try{if(crypto&&crypto.randomUUID)return crypto.randomUUID();}catch(e){}return 'q_'+Math.random().toString(36).slice(2)+Date.now().toString(36);}
+// OFF-01b (P2-01): durable IndexedDB mirror of the outbox. localStorage stays the
+// SYNCHRONOUS working copy (so the proven flush logic below is untouched); IndexedDB
+// holds a copy that survives a localStorage eviction and scales far past the ~5MB cap.
+// Best-effort: if IndexedDB is unavailable the localStorage outbox alone still
+// guarantees a queued report is never lost.
+var _ds_idb=null;
+function idbOpen(){return new Promise(function(res){try{var rq=indexedDB.open('deysafe',1);rq.onupgradeneeded=function(e){try{e.target.result.createObjectStore('outbox');}catch(_){}};rq.onsuccess=function(e){_ds_idb=e.target.result;res(_ds_idb);};rq.onerror=function(){res(null);};}catch(e){res(null);}});}
+function idbPutOutbox(list){return idbOpen().then(function(db){if(db){try{db.transaction('outbox','readwrite').objectStore('outbox').put(list,'items');}catch(e){}}});}
+function idbGetOutbox(){return idbOpen().then(function(db){return new Promise(function(res){if(!db)return res(null);try{var g=db.transaction('outbox','readonly').objectStore('outbox').get('items');g.onsuccess=function(){res(g.result||null);};g.onerror=function(){res(null);};}catch(e){res(null);}});});}
 function outboxLoad(){try{return JSON.parse(localStorage.getItem(OUTBOX_KEY)||'[]');}catch(e){return [];}}
-function outboxSave(list){try{localStorage.setItem(OUTBOX_KEY,JSON.stringify(list));}catch(e){}}
+function outboxSave(list){try{localStorage.setItem(OUTBOX_KEY,JSON.stringify(list));}catch(e){}try{idbPutOutbox(list);}catch(e){}}
+// Recover queued reports from IndexedDB if localStorage was evicted/cleared between visits.
+async function outboxHydrate(){try{if(outboxCount()>0)return;var saved=await idbGetOutbox();if(saved&&saved.length){outboxSave(saved);updateOutboxBadge();}}catch(e){}}
 function outboxCount(){return outboxLoad().length;}
 function outboxEnqueue(url,body){var list=outboxLoad();var item={id:_uuid(),url:url,body:body,ts:Date.now(),state:'QUEUED'};list.push(item);outboxSave(list);updateOutboxBadge();return item;}
 // Try to send now; on a true network failure, save to the device outbox and tell the
@@ -814,6 +825,16 @@ function panicUnlock(){var d=$('#decoy');if(d)d.classList.remove('show');clearIn
 function decoyTap(){clearTimeout(DECOY_TIMER);DECOY_TAPS++;DECOY_TIMER=setTimeout(function(){DECOY_TAPS=0;},2500);if(DECOY_TAPS>=4)panicUnlock();}
 function hav(la1,lo1,la2,lo2){var R=6371,p1=la1*Math.PI/180,p2=la2*Math.PI/180,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180;var x=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2);return 2*R*Math.asin(Math.sqrt(x));}
 const GUIDE={GREEN:"No verified danger nearby. Remain alert.",YELLOW:"Unconfirmed report nearby. Exercise caution.",ORANGE:"Active danger reported nearby. Avoid the area if you can.",RED:"Critical verified threat. Do not travel; follow official guidance."};
+// P2-03: localized risk-level guidance for the core "check my area" flow — the single
+// most safety-relevant citizen-facing text. Falls back to the English GUIDE above for
+// any missing language/level. (Translations should get a native-speaker review.)
+const GUIDE_I18N={
+  pcm:{GREEN:"No confirmed danger near you. Still dey alert.",YELLOW:"Report wey never confirm dey near. Dey careful.",ORANGE:"Dem report danger near you now. Comot for the area if you fit.",RED:"Serious confirmed threat. No travel; follow wetin authorities talk."},
+  ha:{GREEN:"Babu tabbataccen hatsari kusa. Ka kasance a faɗake.",YELLOW:"Akwai rahoton da ba a tabbatar ba kusa. Ka yi taka-tsantsan.",ORANGE:"An ba da rahoton hatsari kusa da kai. Ka guji wurin idan za ka iya.",RED:"Babbar barazana da aka tabbatar. Kada ka yi tafiya; bi umarnin hukuma."},
+  yo:{GREEN:"Ko si ewu ti a fidi mule nitosi. Ṣọra.",YELLOW:"Ijabọ ti a kò tíì fidi mule wa nitosi. Ṣọra.",ORANGE:"Ewu ti ń lọ lọwọ ni a ti royin nitosi. Yago fun agbegbe naa bí o bá ṣeé ṣe.",RED:"Ewu nla ti a fidi mule. Má rin irin-ajo; tẹle itọsọna ijọba."},
+  ig:{GREEN:"Enweghị ihe egwu akwadoro nso. Nọrọ na njikere.",YELLOW:"Enwere akụkọ a na-akwadoghị nso. Kpachara anya.",ORANGE:"A kọrọ ihe ize ndụ na-eme ugbu a nso. Zere ebe ahụ ma ọ bụrụ na i nwere ike.",RED:"Nnukwu ihe iyi egwu akwadoro. Emela njem; soro ntuziaka gọọmentị."}
+};
+function guideFor(lv){var k=String(lv||'GREEN').toUpperCase();var l=langCode();return (l!=='en'&&GUIDE_I18N[l]&&GUIDE_I18N[l][k])||GUIDE[k]||'';}
 // On-device area report from already-loaded PUBLIC incidents. Used by "locate me"
 // so your GPS coordinate never leaves your phone (privacy bright line).
 function riskAtClient(lat,lng,rad){rad=rad||60;
@@ -821,19 +842,19 @@ function riskAtClient(lat,lng,rad){rad=rad||60;
               .filter(function(i){return i.distance_km<=rad;});
   var worst='GREEN';rel.forEach(function(i){var l=LV[i.status]||'YELLOW';if(ORD[l]>ORD[worst])worst=l;});
   rel.sort(function(a,b){var d=ORD[LV[b.status]||'YELLOW']-ORD[LV[a.status]||'YELLOW'];return d||(a.distance_km-b.distance_km);});
-  return {level:worst,guidance:GUIDE[worst],radius_km:rad,count:rel.length,incidents:rel.slice(0,8)};}
+  return {level:worst,guidance:guideFor(worst),radius_km:rad,count:rel.length,incidents:rel.slice(0,8)};}
 let LASTAREA=null;
 function speak(t){if(!('speechSynthesis'in window))return;try{window.speechSynthesis.cancel();var u=new SpeechSynthesisUtterance(t);u.rate=1;u.pitch=1;u.lang='en-NG';window.speechSynthesis.speak(u);}catch(e){}}
-function sayArea(name,r){var s=(r.level||'GREEN')+'. '+(r.guidance||'')+' '+(r.count||0)+' incident'+((r.count||0)===1?'':'s')+' within '+(r.radius_km||60)+' kilometres'+(name?(' of '+name):'')+'.';var top=(r.incidents||[])[0];if(top){s+=' Nearest: '+top.type.replace(/_/g,' ')+(top.distance_km!=null?(', about '+Math.round(top.distance_km)+' kilometres away'):'')+', near '+top.location_name+'.';}speak(s);}
+function sayArea(name,r){var s=(r.level||'GREEN')+'. '+(guideFor(r.level)||r.guidance||'')+' '+(r.count||0)+' incident'+((r.count||0)===1?'':'s')+' within '+(r.radius_km||60)+' kilometres'+(name?(' of '+name):'')+'.';var top=(r.incidents||[])[0];if(top){s+=' Nearest: '+top.type.replace(/_/g,' ')+(top.distance_km!=null?(', about '+Math.round(top.distance_km)+' kilometres away'):'')+', near '+top.location_name+'.';}speak(s);}
 function sayLast(){if(LASTAREA)sayArea(LASTAREA.name,LASTAREA.r);}
 function showArea(name,r,lat,lng,isMe,recenter){
   LASTAREA={name:name,r:r};
   const lvl=r.level||'GREEN',rad=r.radius_km||60,n=r.count||0,rep=$('#areaReport');
   chip(lvl);const pill=$('#lvpill');if(pill){pill.textContent=lvl;pill.style.background=COL[lvl]+'22';pill.style.color=COL[lvl];}
-  var _g=$('#guide');if(_g)_g.textContent=r.guidance||'';
+  var _g=$('#guide');if(_g)_g.textContent=guideFor(r.level)||r.guidance||'';
   const list=(r.incidents||[]).map(function(i){var lv=LV[i.status]||'YELLOW';
     return '<div class="item '+lv+'" onclick="focusPt('+(+i.lat)+','+(+i.lng)+')"><div class="r1"><span class="pl">'+esc(i.location_name)+', '+esc(i.state)+'</span><span class="badge '+lv+'">'+lv+'</span></div><div class="mt">'+esc(i.type).replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+(i.distance_km!=null?(' · '+esc(i.distance_km)+' km away'):'')+'</div></div>';}).join('');
-  if(rep)rep.innerHTML='<div class="lvl '+lvl+'"><div class="r1"><b>'+lvl+' · '+esc(name)+'</b><button class="spk" onclick="sayLast()" title="Read aloud">🔊</button></div><div class="guide">'+esc(r.guidance||'')+'</div><div class="mt" style="margin-top:6px">'+(+n)+' incident(s) within '+(+rad)+' km'+(isMe?' · 📍 stays on your device':'')+'</div></div>'
+  if(rep)rep.innerHTML='<div class="lvl '+lvl+'"><div class="r1"><b>'+lvl+' · '+esc(name)+'</b><button class="spk" onclick="sayLast()" title="Read aloud">🔊</button></div><div class="guide">'+esc(guideFor(r.level)||r.guidance||'')+'</div><div class="mt" style="margin-top:6px">'+(+n)+' incident(s) within '+(+rad)+' km'+(isMe?' · 📍 stays on your device':'')+'</div></div>'
     +(list?('<h2 class="t" style="margin-top:14px">In your area ('+(+rad)+' km)</h2>'+list):'<p class="note">No incidents reported within '+(+rad)+' km right now. Stay alert.</p>');
   if(lat!=null&&map&&areaLayer){areaLayer.clearLayers();
     L.circle([lat,lng],{radius:rad*1000,color:COL[lvl],weight:2,fillColor:COL[lvl],fillOpacity:.08}).addTo(areaLayer);
@@ -1502,7 +1523,7 @@ document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_
 (async function(){try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetPlace','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
   restoreJourney();   // re-show Journey Guard presence if a trip is in progress
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
-  updateOutboxBadge();flushOutbox(); // send anything saved on a previous offline visit
+  updateOutboxBadge();outboxHydrate().then(flushOutbox); // recover from IndexedDB, then send anything saved on a previous offline visit
   setTimeout(()=>map.invalidateSize(),120);
   if('serviceWorker'in navigator){try{navigator.serviceWorker.register('/sw.js').catch(function(){});}catch(e){}}})();
 

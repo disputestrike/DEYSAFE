@@ -1234,11 +1234,13 @@ def _dual_approval_enabled():
     return os.environ.get("DEYSAFE_DUAL_APPROVAL", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-# P0-06 RBAC role ladder. Higher rank => more authority. Unknown/None => 0 (no access
-# to role-gated routes). The shared OPERATOR_TOKEN maps to 'admin' (top), so single-
-# operator deploys and the gate suite clear every check; roster operators carry their
-# configured role (user:ROLE:hash in DEYSAFE_OPERATORS).
-_ROLE_RANK = {"viewer": 1, "analyst": 2, "operator": 3, "admin": 4}
+# P0-06 RBAC role ladder. Matches the documented roster ladder in DEPLOY.md
+# (viewer < reviewer < verifier < admin); 'analyst'/'operator' are kept as aliases so
+# either naming works. Higher rank => more authority. Unknown/None => 0 (no access to
+# role-gated routes). The shared OPERATOR_TOKEN maps to 'admin' (top), so single-operator
+# deploys and the gate suite clear every check; roster operators carry their configured
+# role (user:ROLE:hash in DEYSAFE_OPERATORS).
+_ROLE_RANK = {"viewer": 1, "reviewer": 2, "analyst": 2, "verifier": 3, "operator": 3, "admin": 4}
 
 
 def _role_rank(role):
@@ -3190,8 +3192,8 @@ class Handler(BaseHTTPRequestHandler):
             # AUTH-01: operator-only RSS pull.
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
-            if not self._require_role("operator"):  # P0-06: not a read-only 'viewer' action
-                return self._json({"ok": False, "error": "operator role required"}, 403)
+            if not self._require_role("reviewer"):  # P0-06: not a read-only 'viewer' action
+                return self._json({"ok": False, "error": "reviewer role required"}, 403)
             # Operator-triggered pull of PUBLIC Nigerian news RSS. Public data only;
             # per-feed failures are skipped. RSS is unstructured -> gazetteer geoparse;
             # everything lands as candidate_unverified (human still gates escalation).
@@ -3486,8 +3488,8 @@ class Handler(BaseHTTPRequestHandler):
             # important lock — it promotes an event to a public RED alert.
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
-            if not self._require_role("operator"):  # P0-06: a 'viewer' cannot publish
-                return self._json({"ok": False, "error": "operator role required to verify/publish"}, 403)
+            if not self._require_role("verifier"):  # P0-06: a 'viewer'/'reviewer' cannot publish
+                return self._json({"ok": False, "error": "verifier role required to verify/publish"}, 403)
             decision = (data.get("decision") or "").strip()
             if decision not in ("verified", "dismissed"):
                 return self._json({"ok": False, "error": "decision must be verified|dismissed"}, 400)
@@ -3571,8 +3573,8 @@ class Handler(BaseHTTPRequestHandler):
             # dual mode OFF this route is intentionally inert (operators use /api/verify).
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
-            if not self._require_role("operator"):  # P0-06: confirmer must be a privileged operator
-                return self._json({"ok": False, "error": "operator role required to confirm/publish"}, 403)
+            if not self._require_role("verifier"):  # P0-06: confirmer must be a privileged operator
+                return self._json({"ok": False, "error": "verifier role required to confirm/publish"}, 403)
             if not _dual_approval_enabled():
                 return self._json({"ok": False, "error": "two-person approval is not enabled (set DEYSAFE_DUAL_APPROVAL=1); use /api/verify"}, 400)
             typ = security.valid_type(data.get("type")) if (data.get("type") or "").strip() else (data.get("type") or "").strip()
@@ -3797,11 +3799,35 @@ def main():
         _warn.append("no OPERATOR_TOKEN / DEYSAFE_OPERATORS — operator console has no working sign-in (locked)")
     for _w in _warn:
         print("  [launch-warning]", _w)
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    # P2-04: graceful shutdown. Railway (and most PaaS) send SIGTERM on a redeploy/scale
+    # event, then SIGKILL after a short grace period. Without a handler the process is
+    # hard-killed mid-request — which can drop a half-written alert or leave the SQLite
+    # WAL dirty. We trap SIGTERM/SIGINT, stop accepting new connections, let in-flight
+    # requests drain (ThreadingMixIn.block_on_close), then stop the background workers.
+    import threading as _threading
+    def _graceful(signum, _frame):
+        print("\n[shutdown] signal %s received — draining in-flight requests..." % signum, flush=True)
+        # shutdown() blocks until serve_forever() returns, so it must run OFF the main
+        # thread (which is parked inside serve_forever()).
+        _threading.Thread(target=httpd.shutdown, name="graceful-shutdown", daemon=True).start()
     try:
-        ThreadingHTTPServer((host, port), Handler).serve_forever()
+        import signal as _signal
+        for _name in ("SIGTERM", "SIGINT"):
+            if hasattr(_signal, _name):
+                _signal.signal(getattr(_signal, _name), _graceful)
+    except Exception:
+        pass  # signals unavailable (e.g. non-main-thread / restricted host): best-effort
+    try:
+        httpd.serve_forever()
     finally:
+        try:
+            httpd.server_close()
+        except Exception:
+            pass
         scheduler.stop_default()
         stop_safety_tick_default()
+        print("[shutdown] background workers stopped, listener closed — bye.", flush=True)
 
 
 if __name__ == "__main__":
