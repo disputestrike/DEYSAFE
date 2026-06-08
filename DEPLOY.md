@@ -33,6 +33,8 @@ Create an operator password hash:
 python -c "import hashlib;print('admin:admin:'+hashlib.sha256('YOURPASS'.encode()).hexdigest())"
 ```
 
+Preferred (P0-15): mint a slow, salted PBKDF2 hash (`pbkdf2$<iters>$<salt>$<hash>`) — `python -c "import sys;sys.path.insert(0,'engine');import auth;print('admin:admin:'+auth.make_pbkdf2('YOURPASS'))"` (legacy sha256 entries above keep working).
+
 ## 3. Optional Live Providers
 
 | Variable(s) | Enables |

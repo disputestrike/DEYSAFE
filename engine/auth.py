@@ -52,10 +52,61 @@ _ENV_SECRET = "DEYSAFE_SECRET"
 _FALLBACK_SECRET = secrets.token_hex(32)
 
 
-# --- small helpers -----------------------------------------------------------
+# --- password hashing --------------------------------------------------------
+# Two on-disk (env) formats are accepted per operator, detected at verify time:
+#   (a) LEGACY  : 64-char lowercase hex = plain SHA-256 of the password. Kept so
+#                 existing DEYSAFE_OPERATORS values keep working. Weak (no salt,
+#                 GPU-fast) — flagged by audit P0-15.
+#   (b) PBKDF2  : self-describing  pbkdf2$<iterations>$<salt_hex>$<hash_hex>
+#                 (slow, salted KDF; stdlib hashlib.pbkdf2_hmac). Preferred.
+# Both verify with hmac.compare_digest for constant-time comparison.
+_PBKDF2_PREFIX = "pbkdf2$"
+_PBKDF2_DEFAULT_ITERS = 200000  # ~OWASP-class work factor for PBKDF2-HMAC-SHA256
+
+
 def sha256_hex(text):
-    """Lowercase hex SHA-256 of a string — used to mint password hashes."""
+    """Lowercase hex SHA-256 of a string — legacy/backward password hash format."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def make_pbkdf2(password, iterations=_PBKDF2_DEFAULT_ITERS):
+    """Mint a new self-describing PBKDF2 hash string for the roster / DEPLOY recipe.
+
+    Returns  "pbkdf2$<iterations>$<salt_hex>$<hash_hex>"  — a slow, salted KDF using
+    only the standard library (hashlib.pbkdf2_hmac, SHA-256). A fresh 16-byte random
+    salt is generated per call, so the same password yields a different string each
+    time. Verify with check_login(); the format is parsed back by _verify_pw().
+    """
+    iterations = int(iterations)
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", (password or "").encode("utf-8"), salt, iterations)
+    return "%s%d$%s$%s" % (_PBKDF2_PREFIX, iterations, salt.hex(), dk.hex())
+
+
+def _verify_pw(password, stored):
+    """Constant-time verify `password` against a stored hash field (legacy or pbkdf2).
+
+    Detects the format from `stored`:
+      - pbkdf2$<iters>$<salt_hex>$<hash_hex>  -> recompute PBKDF2 and compare.
+      - otherwise                              -> treat as legacy plain sha256 hex.
+    Always runs a real comparison (and, for pbkdf2, a real KDF) so it does no early
+    return that would leak timing. A malformed pbkdf2 string fails closed. The
+    user-enumeration guard (comparing against a dummy for unknown users) lives in
+    check_login(); this helper just answers "does this password match this hash?".
+    """
+    stored = stored or ""
+    if stored.startswith(_PBKDF2_PREFIX):
+        try:
+            _tag, iters_s, salt_hex, hash_hex = stored.split("$", 3)
+            iterations = int(iters_s)
+            salt = bytes.fromhex(salt_hex)
+            expected = bytes.fromhex(hash_hex)
+        except (ValueError, TypeError):
+            return False  # malformed pbkdf2 record -> never authenticates
+        dk = hashlib.pbkdf2_hmac("sha256", (password or "").encode("utf-8"), salt, iterations)
+        return hmac.compare_digest(dk, expected)
+    # legacy path: plain sha256 hex (also covers the unknown-user dummy "0"*64).
+    return hmac.compare_digest(sha256_hex(password or ""), stored)
 
 
 def _secret():
@@ -93,10 +144,15 @@ def load_operators():
         parts = rec.split(":")
         if len(parts) != 3:
             continue
-        user, role, pwhex = parts[0].strip(), parts[1].strip().lower(), parts[2].strip().lower()
-        if not user or role not in _RANK or not pwhex:
+        user, role, pwfield = parts[0].strip(), parts[1].strip().lower(), parts[2].strip()
+        if not user or role not in _RANK or not pwfield:
             continue
-        out[user] = {"role": role, "pw": pwhex}
+        # Store the hash field verbatim. PBKDF2 strings (pbkdf2$<iters>$<salt>$<hash>)
+        # must survive intact; legacy sha256 hex is already lowercase from sha256_hex,
+        # but we lowercase it so a hand-typed legacy hex still matches case-insensitively.
+        if not pwfield.startswith(_PBKDF2_PREFIX):
+            pwfield = pwfield.lower()
+        out[user] = {"role": role, "pw": pwfield}
     return out
 
 
@@ -129,9 +185,12 @@ def check_login(user, pw):
     """
     ops = load_operators()
     rec = ops.get(user)
-    candidate = sha256_hex(pw or "")
+    # Unknown users still run a real comparison against a dummy legacy hash so
+    # response timing doesn't reveal whether the username exists. Known users are
+    # verified per their stored format (legacy sha256 hex OR pbkdf2$...), both via
+    # hmac.compare_digest inside _verify_pw().
     expected = rec["pw"] if rec else ("0" * 64)
-    ok = hmac.compare_digest(candidate, expected)
+    ok = _verify_pw(pw or "", expected)
     if rec and ok:
         return issue_token(user, rec["role"])
     return None
@@ -209,5 +268,43 @@ if __name__ == "__main__":
     os.environ[_ENV_OPERATORS] = "bad,worse:two,ok:viewer:%s" % sha256_hex("p")
     o2 = load_operators()
     assert set(o2) == {"ok"} and o2["ok"]["role"] == "viewer"
+
+    # --- P0-15: dual-format password hashing -------------------------------
+    # make_pbkdf2 round-trips and is self-describing (slow, salted, stdlib only).
+    h = make_pbkdf2("correct horse battery staple", iterations=50000)  # low iters = fast test
+    assert h.startswith("pbkdf2$50000$")
+    tag, iters_s, salt_hex, hash_hex = h.split("$", 3)
+    assert tag == "pbkdf2" and int(iters_s) == 50000
+    assert len(bytes.fromhex(salt_hex)) == 16 and len(bytes.fromhex(hash_hex)) == 32
+    assert _verify_pw("correct horse battery staple", h) is True
+    assert _verify_pw("wrong", h) is False
+    # fresh random salt per call -> same password mints a different string
+    assert make_pbkdf2("x", iterations=50000) != make_pbkdf2("x", iterations=50000)
+    # malformed pbkdf2 strings fail closed, never throw
+    assert _verify_pw("anything", "pbkdf2$notanint$zz$zz") is False
+    assert _verify_pw("anything", "pbkdf2$1$$") is False
+
+    # (1) a LEGACY  user:admin:<sha256hex>  roster entry still logs in + rejects wrong pw.
+    legacy_pw = "S3cret-Legacy!"
+    os.environ[_ENV_OPERATORS] = "amina:admin:%s" % sha256_hex(legacy_pw)
+    tok_legacy = check_login("amina", legacy_pw)
+    assert tok_legacy and identity(tok_legacy) == {"user": "amina", "role": "admin"}
+    assert check_login("amina", "nope") is None
+    assert check_login("ghost", legacy_pw) is None  # unknown user still rejected
+
+    # (2) a NEW  user:admin:<pbkdf2$...>  roster entry logs in correctly + rejects wrong pw.
+    new_pw = "S3cret-Pbkdf2!"
+    os.environ[_ENV_OPERATORS] = "amina:admin:%s" % make_pbkdf2(new_pw, iterations=50000)
+    tok_new = check_login("amina", new_pw)
+    assert tok_new and identity(tok_new) == {"user": "amina", "role": "admin"}
+    assert check_login("amina", "nope") is None
+    # the stored pbkdf2 field survives load_operators() verbatim (not lower-mangled).
+    assert load_operators()["amina"]["pw"].startswith("pbkdf2$50000$")
+
+    # (3) mixed roster: legacy + pbkdf2 operators coexist, each verified by its own format.
+    os.environ[_ENV_OPERATORS] = "amina:admin:%s,bola:reviewer:%s" % (
+        sha256_hex(legacy_pw), make_pbkdf2(new_pw, iterations=50000))
+    assert check_login("amina", legacy_pw) and check_login("bola", new_pw)
+    assert check_login("amina", new_pw) is None and check_login("bola", legacy_pw) is None
 
     print("auth.py self-test OK")

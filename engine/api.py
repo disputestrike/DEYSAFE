@@ -1203,32 +1203,86 @@ def risk_for(incidents, place):
             "incidents": sorted(rel, key=lambda i: -i["confidence"])[:6]}
 
 
+def _anon_ip(ip):
+    """Truncate a client IP so a reporter can't be de-anonymized from server logs
+    (P0-09 / retaliation threat in Nigeria's kidnapping belt). IPv4 -> /24, IPv6 -> /48."""
+    ip = (ip or "").strip()
+    if not ip:
+        return "?"
+    if ":" in ip:  # IPv6
+        parts = [p for p in ip.split(":") if p != ""]
+        return ":".join(parts[:3]) + "::/48" if parts else "?"
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return "%s.%s.%s.0/24" % (parts[0], parts[1], parts[2])
+    return "?"
+
+
+def _dual_approval_enabled():
+    """P0-08: when on, promoting an event to a public RED alert needs TWO distinct
+    operators (verify proposes, a different operator confirms). Off by default so
+    single-operator deploys and the existing gate suite are unchanged. Toggle on
+    Railway with DEYSAFE_DUAL_APPROVAL=1 once a second operator account exists."""
+    return os.environ.get("DEYSAFE_DUAL_APPROVAL", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        # PROD-02: minimal structured request log to stderr (was a no-op, which
-        # blinded ops). One line per request: ts, client, method, path, status.
+        # PROD-02 + P0-09: minimal request log to stderr (was a no-op). The client IP
+        # is TRUNCATED (/24) so the log can't de-anonymize a reporter.
         try:
             status = args[1] if len(args) > 1 else "-"
+            cip = _anon_ip(self.client_address[0] if self.client_address else "")
             line = '{ts} client=%s method_path="%s" status=%s' % (
-                self.address_string(), (self.requestline or "").replace('"', "'"), status)
+                cip, (self.requestline or "").replace('"', "'"), status)
             sys.stderr.write(line.format(ts=datetime.datetime.now().isoformat(timespec="seconds")) + "\n")
         except Exception:
             pass
 
     # --- CORS + security headers (XSS-03 + basic hardening) ------------------
     def _security_headers(self):
-        # XSS-03: permissive-but-safe CORS so the API works behind a CDN/custom
-        # domain, plus standard hardening headers. Location stays on-device; these
-        # do not weaken the privacy model.
+        # XSS-03 / P0-13 / P0-14: CORS + full hardening header set. Location stays
+        # on-device; these do not weaken the privacy model.
         origin = self.headers.get("Origin")
-        self.send_header("Access-Control-Allow-Origin", origin or "*")
-        self.send_header("Vary", "Origin")
+        # CORS: when DEYSAFE_ALLOWED_ORIGINS is set (production), only echo an Origin
+        # that is on the allow-list; otherwise (dev/unset) stay permissive so the API
+        # works behind a CDN/custom domain during testing.
+        allowed = os.environ.get("DEYSAFE_ALLOWED_ORIGINS", "").strip()
+        if allowed:
+            allow_list = [o.strip() for o in allowed.split(",") if o.strip()]
+            if origin and origin in allow_list:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+        else:
+            self.send_header("Access-Control-Allow-Origin", origin or "*")
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Operator-Token")
         self.send_header("Access-Control-Max-Age", "600")
+        # Hardening headers.
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
+        # HSTS: honoured only over HTTPS (Railway); ignored on plain-HTTP localhost.
+        self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        # CSP: allow the app's own inline JS/CSS (monolithic PWA) + Leaflet from unpkg +
+        # OSM/HTTPS map tiles + camera blobs; block plugins/embedding. (Nonce-based CSP
+        # that drops 'unsafe-inline' is a follow-up once the inline JS is externalised.)
+        self.send_header("Content-Security-Policy",
+                         "default-src 'self'; "
+                         "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+                         "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+                         "img-src 'self' data: blob: https:; "
+                         "connect-src 'self' https:; "
+                         "font-src 'self' data:; "
+                         "worker-src 'self'; child-src 'self'; "
+                         "frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+        # Permissions-Policy: geolocation/camera/microphone ARE used (self only);
+        # everything else off.
+        self.send_header("Permissions-Policy",
+                         "geolocation=(self), camera=(self), microphone=(self), "
+                         "payment=(), usb=(), magnetometer=(), accelerometer=(self), "
+                         "gyroscope=(self), interest-cohort=()")
 
     def _json(self, obj, code=200, headers=None):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -1869,6 +1923,21 @@ class Handler(BaseHTTPRequestHandler):
             if r.get("address"):
                 targets.append({"address": r.get("address"),
                                 "channel": (r.get("channel") or SOS_DEFAULT_CHANNEL)})
+        # P1-01: fan out to CITIZENS who opted in for this state (or nationwide).
+        # This is the audience half of the response loop: responders ACT, subscribers
+        # are WARNED. Geofenced to the incident's state; empty-state subscribers are
+        # nationwide. De-duplicated against responder addresses already queued.
+        seen_addr = {t["address"] for t in targets}
+        try:
+            subs = db.subscribers_for(state=inc.get("state"))
+        except Exception:
+            subs = []
+        for s in subs:
+            addr = s.get("address")
+            if addr and addr not in seen_addr:
+                seen_addr.add(addr)
+                targets.append({"address": addr,
+                                "channel": (s.get("channel") or SOS_DEFAULT_CHANNEL)})
         extra = os.environ.get("DEYSAFE_ALERT_TEST_RECIPIENTS", "")
         for a in [x.strip() for x in extra.split(",") if x.strip()]:
             targets.append({"address": a, "channel": SOS_DEFAULT_CHANNEL})
@@ -1877,6 +1946,59 @@ class Handler(BaseHTTPRequestHandler):
             # to end in tests/demo with no responders registered. Never a real send.
             targets.append({"address": "+2348000000000", "channel": SOS_DEFAULT_CHANNEL})
         return targets
+
+    def _fire_verified_alert(self, db, inc, iuid, actor):
+        """Publish a verified incident: insert the public alert, fan it out to the
+        geofenced responder + subscriber set (persisting every receipt), and open a
+        human-ack responder task. Shared by the single-operator verify path and the
+        two-person confirm path so this safety-critical fan-out lives in EXACTLY one
+        place. Idempotent on the incident uuid (INT-02: no duplicate alert if one is
+        already active). Returns (alert, broadcast_summary, task_uuid)."""
+        alert = None
+        broadcast_summary = None
+        task_uuid = None
+        lvl = alert_level(inc["confidence"], inc["severity"])
+        rad = TYPE_RADIUS.get(inc["type"], 30)
+        # INT-02: only fire a new public alert if one isn't already active for THIS
+        # incident (keyed by the immutable uuid).
+        if not db.has_active_alert(iuid):
+            alert = {"incident_key": iuid, "level": lvl, "level_label": LEVEL_LABEL[lvl],
+                     "title": "{} — {}, {} — verified".format(inc["type"].replace("_", " ").upper(), inc["location_name"], inc["state"]),
+                     "guidance": TYPE_GUIDANCE.get(inc["type"], "Avoid the area and stay alert. Emergency: 112."),
+                     "lat": inc["lat"], "lng": inc["lng"], "radius_km": rad, "reach": rad * 120}
+            db.insert_alert(alert)
+            db.audit("system", "alert_fired", "L{} {} reach~{}".format(lvl, iuid, rad * 120))
+            # BC-01/02/03: fan the verified alert out to the geofenced responder set +
+            # opted-in subscribers (P1-01), and PERSIST every receipt keyed to this
+            # incident. In SIM mode the receipts are flagged sim_delivered (never a
+            # faked real send); with no keys + SIM off they degrade to 'unconfigured'
+            # but are still recorded honestly.
+            targets = self._alert_recipients(db, inc)
+            if targets:
+                msg = "{}: {} near {}, {}. {}".format(
+                    LEVEL_LABEL[lvl], inc["type"].replace("_", " ").upper(),
+                    inc["location_name"], inc["state"],
+                    TYPE_GUIDANCE.get(inc["type"], "Avoid the area. Emergency: 112."))
+                broadcast_summary = broadcast.fan_out(targets, msg, channel=SOS_DEFAULT_CHANNEL)
+                for rec in broadcast_summary.get("deliveries", []):
+                    db.insert_delivery({"alert_key": iuid, "channel": rec.get("channel"),
+                                        "address": rec.get("to"), "status": rec.get("status"),
+                                        "provider_ref": rec.get("id"), "sim": rec.get("sim")})
+                db.audit("system", "broadcast", "alert={} sent={} sim={}".format(
+                    iuid, broadcast_summary.get("sent"), broadcast_summary.get("sim")))
+            # RESP-01/06: hand the verified incident to a responder as a TASK in the
+            # initial human-ack state 'received'. No auto-dispatch.
+            task_uuid = response.new_id()
+            escalate_after = (datetime.datetime.now() + datetime.timedelta(
+                minutes=metrics.ACK_SLA_MIN)).isoformat(timespec="seconds")
+            db.insert_responder_task({
+                "task_uuid": task_uuid, "incident_uuid": iuid, "alert_key": iuid,
+                "state": response.TASK_INITIAL, "escalate_after": escalate_after,
+                "note": "Auto-created on verify of {} near {}, {}".format(
+                    inc["type"], inc["location_name"], inc["state"])})
+            db.audit("system", "responder_task", "task={} incident={} state={}".format(
+                task_uuid, iuid, response.TASK_INITIAL))
+        return alert, broadcast_summary, task_uuid
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
@@ -2657,6 +2779,63 @@ class Handler(BaseHTTPRequestHandler):
                     "evidence_meta": evidence_meta}
             return self._json(resp)
 
+        if u.path == "/api/subscribe":
+            # P1-01: PUBLIC opt-in to geofenced public-safety alerts. The missing
+            # audience half of the response loop — an operator-verified threat must
+            # actually REACH the people in that state/LGA. Anonymous + rate-limited;
+            # the citizen supplies their own contact, consent is recorded (NDPA
+            # consent_at), and /api/unsubscribe + /api/erasure let them leave.
+            # SINGLE opt-in for now; double opt-in (SMS confirm code) is a follow-up
+            # once the provider key is live — tracked, not silently skipped.
+            if not self._rate_ok("/api/subscribe", 8):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            channel = (data.get("channel") or "sms").strip().lower()
+            if channel not in ("sms", "whatsapp", "voice", "push"):
+                return self._json({"ok": False, "error": "unsupported channel"}, 400)
+            address = (data.get("address") or "").strip()
+            digits = re.sub(r"[^0-9]", "", address)
+            if channel in ("sms", "whatsapp", "voice"):
+                if len(digits) < 10 or len(address) > 24:
+                    return self._json({"ok": False, "error": "invalid phone number"}, 400)
+            elif len(address) < 8 or len(address) > 512:
+                return self._json({"ok": False, "error": "invalid push endpoint"}, 400)
+            # Optional geofence: validate state against the 36+FCT list (empty => nationwide).
+            state_in = (data.get("state") or "").strip()
+            state = _NG_STATE_LOOKUP.get(state_in.lower(), "") if state_in else ""
+            if state_in and not state:
+                return self._json({"ok": False, "error": "unknown state"}, 400)
+            lga = (data.get("lga") or "").strip()[:60]
+            try:
+                sid, created = db.insert_subscriber({"channel": channel, "address": address,
+                                                     "state": state, "lga": lga})
+            except Exception:
+                sid, created = None, False
+            if not sid:
+                return self._json({"ok": False, "error": "could not subscribe"}, 400)
+            # Audit WITHOUT the raw address (PRIV): only channel/scope/new-flag.
+            db.audit("api", "subscribe", "channel={} state={} lga={} new={}".format(
+                channel, state or "nationwide", lga or "-", created))
+            scope = state or "all of Nigeria"
+            return self._json({"ok": True, "subscribed": True, "channel": channel, "scope": scope,
+                               "note": "You'll receive operator-verified public-safety alerts for {}. "
+                                       "Opt out any time via /api/unsubscribe.".format(scope)})
+
+        if u.path == "/api/unsubscribe":
+            # P1-01 / NDPA opt-out: deactivate (row kept for audit). /api/erasure (P2-02)
+            # hard-deletes. Idempotent: unknown address returns ok with matched=false.
+            if not self._rate_ok("/api/unsubscribe", 8):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            channel = (data.get("channel") or "sms").strip().lower()
+            address = (data.get("address") or "").strip()
+            if not address:
+                return self._json({"ok": False, "error": "address required"}, 400)
+            try:
+                matched = db.deactivate_subscriber(channel, address)
+            except Exception:
+                matched = False
+            db.audit("api", "unsubscribe", "channel={} matched={}".format(channel, bool(matched)))
+            return self._json({"ok": True, "unsubscribed": bool(matched)})
+
         if u.path == "/api/sos":
             # FIELD (public + rate-limited): the durable SOS event (SOS-01/02).
             # Three shapes, all anonymous:
@@ -3215,6 +3394,22 @@ class Handler(BaseHTTPRequestHandler):
                 db.audit(actor, "decision", "{} -> {} (no live incident)".format(disp_key, decision))
                 return self._json({"ok": True, "decision": decision, "queue": len(review_queue(db)), "alert": None})
             iuid = inc.get("incident_uuid")
+            # P0-08: two-person integrity. In dual mode a "verified" POST is only a
+            # PROPOSAL — operator #1's approval is recorded and HELD (incident shows
+            # 'pending_confirmation', no RED, no broadcast). A DIFFERENT operator must
+            # POST /api/confirm to publish. Dismissals are never dual-gated (any
+            # operator may pull an event down immediately). Off by default.
+            if decision == "verified" and _dual_approval_enabled():
+                lvl0 = alert_level(inc["confidence"], inc["severity"])
+                db.add_pending_approval(iuid, actor, level=lvl0,
+                                        note=(data.get("note") or "").strip(), disp_key=disp_key)
+                db.set_decision(iuid, "pending_confirmation", (data.get("note") or "").strip(), actor,
+                                event_version=inc.get("event_version"), key=disp_key)
+                db.audit(actor, "first_approval", "{} ({}) proposed; awaiting a second operator".format(disp_key, iuid))
+                return self._json({"ok": True, "decision": "pending_confirmation",
+                                   "awaiting_second_operator": True, "incident_uuid": iuid,
+                                   "first_approver": actor, "queue": len(review_queue(db)),
+                                   "note": "Approval recorded. A DIFFERENT operator must POST /api/confirm to publish this RED alert."})
             db.set_decision(iuid, decision, (data.get("note") or "").strip(), actor,
                             event_version=inc.get("event_version"), key=disp_key)
             db.audit(actor, "decision", "{} ({}) -> {}".format(disp_key, iuid, decision))
@@ -3236,51 +3431,59 @@ class Handler(BaseHTTPRequestHandler):
             broadcast_summary = None
             task_uuid = None
             if decision == "verified":
-                lvl = alert_level(inc["confidence"], inc["severity"])
-                rad = TYPE_RADIUS.get(inc["type"], 30)
-                # INT-02: idempotent — only fire a new public alert if one isn't
-                # already active for THIS incident (keyed by the immutable uuid).
-                if not db.has_active_alert(iuid):
-                    alert = {"incident_key": iuid, "level": lvl, "level_label": LEVEL_LABEL[lvl],
-                             "title": "{} — {}, {} — verified".format(inc["type"].replace("_", " ").upper(), inc["location_name"], inc["state"]),
-                             "guidance": TYPE_GUIDANCE.get(inc["type"], "Avoid the area and stay alert. Emergency: 112."),
-                             "lat": inc["lat"], "lng": inc["lng"], "radius_km": rad, "reach": rad * 120}
-                    db.insert_alert(alert)
-                    db.audit("system", "alert_fired", "L{} {} reach~{}".format(lvl, iuid, rad * 120))
-                    # BC-01/02/03: fan the verified alert out to the geofenced
-                    # responder set + registered targets, and PERSIST every receipt
-                    # keyed to this incident. In SIM mode the receipts are flagged
-                    # sim_delivered (never a faked real send); with no keys + SIM off
-                    # they degrade to 'unconfigured' but are still recorded honestly.
-                    targets = self._alert_recipients(db, inc)
-                    if targets:
-                        msg = "{}: {} near {}, {}. {}".format(
-                            LEVEL_LABEL[lvl], inc["type"].replace("_", " ").upper(),
-                            inc["location_name"], inc["state"],
-                            TYPE_GUIDANCE.get(inc["type"], "Avoid the area. Emergency: 112."))
-                        broadcast_summary = broadcast.fan_out(targets, msg, channel=SOS_DEFAULT_CHANNEL)
-                        for rec in broadcast_summary.get("deliveries", []):
-                            db.insert_delivery({"alert_key": iuid, "channel": rec.get("channel"),
-                                                "address": rec.get("to"), "status": rec.get("status"),
-                                                "provider_ref": rec.get("id"), "sim": rec.get("sim")})
-                        db.audit("system", "broadcast", "alert={} sent={} sim={}".format(
-                            iuid, broadcast_summary.get("sent"), broadcast_summary.get("sim")))
-                    # RESP-01/06: hand the verified incident to a responder as a TASK
-                    # in the initial human-ack state 'received'. No auto-dispatch.
-                    task_uuid = response.new_id()
-                    escalate_after = (datetime.datetime.now() + datetime.timedelta(
-                        minutes=metrics.ACK_SLA_MIN)).isoformat(timespec="seconds")
-                    db.insert_responder_task({
-                        "task_uuid": task_uuid, "incident_uuid": iuid, "alert_key": iuid,
-                        "state": response.TASK_INITIAL, "escalate_after": escalate_after,
-                        "note": "Auto-created on verify of {} near {}, {}".format(
-                            inc["type"], inc["location_name"], inc["state"])})
-                    db.audit("system", "responder_task", "task={} incident={} state={}".format(
-                        task_uuid, iuid, response.TASK_INITIAL))
+                # Single-operator mode (default). In dual mode this branch is reached
+                # only by /api/confirm's second operator; operator #1's verify returned
+                # 'pending_confirmation' above and never gets here. Publish via the
+                # shared fan-out helper so the safety-critical path lives in one place.
+                alert, broadcast_summary, task_uuid = self._fire_verified_alert(db, inc, iuid, actor)
             else:
                 # INT-03 / ABU-07: a dismissal cancels any live alert for this incident.
                 db.cancel_alert(iuid, "dismissed by operator", actor)
             resp = {"ok": True, "decision": decision, "queue": len(review_queue(db)), "alert": alert}
+            if broadcast_summary is not None:
+                resp["broadcast"] = {"sent": broadcast_summary.get("sent"),
+                                     "failed": broadcast_summary.get("failed"),
+                                     "sim": broadcast_summary.get("sim")}
+            if task_uuid:
+                resp["responder_task"] = task_uuid
+            return self._json(resp)
+
+        if u.path == "/api/confirm":
+            # P0-08: the SECOND-operator confirmation that actually publishes a RED alert
+            # proposed via /api/verify under two-person mode. Requires operator auth, an
+            # existing pending approval, and a DIFFERENT operator than the proposer. With
+            # dual mode OFF this route is intentionally inert (operators use /api/verify).
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            if not _dual_approval_enabled():
+                return self._json({"ok": False, "error": "two-person approval is not enabled (set DEYSAFE_DUAL_APPROVAL=1); use /api/verify"}, 400)
+            typ = security.valid_type(data.get("type")) if (data.get("type") or "").strip() else (data.get("type") or "").strip()
+            loc_in = (data.get("location_name") or "").strip()
+            state_in = (data.get("state") or "").strip()
+            disp_key = "{}|{}|{}".format(typ, loc_in, state_in)
+            inc = next((i for i in with_decisions(db)
+                        if ikey(i) == disp_key or _verify_incident_match(i, typ, loc_in, state_in)), None)
+            actor = (self._operator() or {}).get("user", "operator")
+            if not inc:
+                return self._json({"ok": False, "error": "no live incident to confirm"}, 404)
+            iuid = inc.get("incident_uuid")
+            pending = db.get_pending_approval(iuid)
+            if not pending:
+                return self._json({"ok": False, "error": "no pending approval; operator #1 must POST /api/verify first"}, 409)
+            if (pending.get("first_actor") or "") == actor:
+                return self._json({"ok": False,
+                                   "error": "two-person rule: confirmation requires a DIFFERENT operator than the proposer",
+                                   "first_approver": pending.get("first_actor")}, 403)
+            # Two distinct operators have now approved -> record verified + publish.
+            db.set_decision(iuid, "verified", (data.get("note") or "").strip(), actor,
+                            event_version=inc.get("event_version"), key=disp_key)
+            db.audit(actor, "second_approval", "{} ({}) confirmed (proposed by {})".format(
+                disp_key, iuid, pending.get("first_actor")))
+            alert, broadcast_summary, task_uuid = self._fire_verified_alert(db, inc, iuid, actor)
+            db.clear_pending_approval(iuid)
+            resp = {"ok": True, "decision": "verified", "confirmed_by": actor,
+                    "proposed_by": pending.get("first_actor"), "alert": alert,
+                    "queue": len(review_queue(db))}
             if broadcast_summary is not None:
                 resp["broadcast"] = {"sent": broadcast_summary.get("sent"),
                                      "failed": broadcast_summary.get("failed"),

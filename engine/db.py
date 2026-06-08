@@ -199,10 +199,67 @@ CREATE TABLE IF NOT EXISTS source_health (
 );
 """
 
+# subscribers (P1-01): citizens who OPT IN to geofenced public alerts. This is the
+# missing other half of the response loop — operator verifies a threat -> the alert
+# must actually reach the people in that state/LGA. Privacy/NDPA posture:
+#   - address is consent-gated PII (a phone/endpoint the citizen themselves supplied
+#     by opting in); the row carries consent_at as opt-in proof and the table lives
+#     only in the runtime DB (data/ is never committed; the public repo never sees it);
+#   - address_hash = sha256(channel|lower(address)) is UNIQUE, so a repeat opt-in
+#     reactivates rather than duplicating, and unsubscribe/erasure can target a
+#     subscriber WITHOUT a plaintext scan;
+#   - active=0 on opt-out keeps an auditable record; erase_subscriber() hard-deletes
+#     for a full NDPA erasure request (P2-02).
+# Empty `state` == nationwide subscriber (always in range). Both DDLs are
+# CREATE TABLE IF NOT EXISTS so this applies to the live Railway DB on next boot
+# with no manual migration.
+SUBSCRIBERS_SQLITE = """
+CREATE TABLE IF NOT EXISTS subscribers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sub_uuid TEXT,
+  channel TEXT, address TEXT, address_hash TEXT UNIQUE,
+  state TEXT, lga TEXT,
+  active INTEGER DEFAULT 1,
+  consent_at TEXT, created_at TEXT, unsubscribed_at TEXT
+);
+"""
+SUBSCRIBERS_PG = """
+CREATE TABLE IF NOT EXISTS subscribers (
+  id SERIAL PRIMARY KEY,
+  sub_uuid TEXT,
+  channel TEXT, address TEXT, address_hash TEXT UNIQUE,
+  state TEXT, lga TEXT,
+  active INTEGER DEFAULT 1,
+  consent_at TEXT, created_at TEXT, unsubscribed_at TEXT
+);
+"""
+
+# pending_approvals (P0-08): TWO-PERSON integrity for promoting an event to a public
+# RED alert. With DEYSAFE_DUAL_APPROVAL on, operator #1's /api/verify only records a
+# pending approval here; a SECOND, DIFFERENT operator must /api/confirm before the
+# alert fires. Keyed by the immutable incident_uuid so a stale proposal can't re-bind.
+# Off by default — single-operator deploys are unaffected and existing gates stay green.
+PENDING_APPROVALS_SQLITE = """
+CREATE TABLE IF NOT EXISTS pending_approvals (
+  incident_uuid TEXT PRIMARY KEY,
+  first_actor TEXT, first_at TEXT,
+  level INTEGER DEFAULT 0, note TEXT, disp_key TEXT
+);
+"""
+PENDING_APPROVALS_PG = """
+CREATE TABLE IF NOT EXISTS pending_approvals (
+  incident_uuid TEXT PRIMARY KEY,
+  first_actor TEXT, first_at TEXT,
+  level INTEGER DEFAULT 0, note TEXT, disp_key TEXT
+);
+"""
+
 # Local (db.py-owned) extra tables, mirroring response.RESPONSE_TABLES shape.
 _EXTRA_TABLES = {
     "geo_cache": (GEO_CACHE_SQLITE, GEO_CACHE_PG),
     "source_health": (SOURCE_HEALTH_SQLITE, SOURCE_HEALTH_PG),
+    "subscribers": (SUBSCRIBERS_SQLITE, SUBSCRIBERS_PG),
+    "pending_approvals": (PENDING_APPROVALS_SQLITE, PENDING_APPROVALS_PG),
 }
 
 # Phase 4: SafeMeet tables from safety module
@@ -941,6 +998,105 @@ class DB:
 
     def all_responders(self, limit=500):
         return self._all("SELECT * FROM responders ORDER BY id DESC LIMIT %d" % int(limit))
+
+    # --- citizen alert subscribers (P1-01) ---------------------------------
+    # The opt-in audience an operator-verified alert actually fans out to. Kept
+    # deliberately separate from the responder directory (responders ACT on an
+    # alert; subscribers RECEIVE the public warning).
+    @staticmethod
+    def _sub_hash(channel, address):
+        ch = (channel or "sms").strip().lower()
+        addr = (address or "").strip().lower()
+        return hashlib.sha256((ch + "|" + addr).encode("utf-8")).hexdigest()
+
+    def insert_subscriber(self, d):
+        """Opt a citizen in to geofenced public alerts (NDPA: consent_at stored).
+        Idempotent on (channel,address) via address_hash UNIQUE — a repeat opt-in
+        reactivates and refreshes the geofence instead of duplicating. Returns
+        (id, created) where created is False on a reactivate/no-op."""
+        ch = (d.get("channel") or "sms").strip().lower()
+        addr = (d.get("address") or "").strip()
+        if not addr:
+            return None, False
+        ahash = self._sub_hash(ch, addr)
+        ts = now_iso()
+        st = (d.get("state") or "").strip()
+        lga = (d.get("lga") or "").strip()
+        existing = self._one("SELECT id FROM subscribers WHERE address_hash=?", (ahash,))
+        if existing:
+            self._run("UPDATE subscribers SET active=1, state=?, lga=?, consent_at=?,"
+                      " unsubscribed_at=NULL WHERE address_hash=?", (st, lga, ts, ahash))
+            return existing["id"], False
+        suid = _fallback_uuid()
+        sid = self._insert(
+            "INSERT INTO subscribers (sub_uuid, channel, address, address_hash, state, lga,"
+            " active, consent_at, created_at) VALUES (?,?,?,?,?,?,1,?,?)",
+            (suid, ch, addr, ahash, st, lga, ts, ts))
+        return sid, True
+
+    def subscribers_for(self, state=None, lga=None):
+        """Active subscribers for a geofenced alert. An empty-state subscriber is
+        nationwide (always included). Case-insensitive; sqlite + PG compatible."""
+        sql = "SELECT * FROM subscribers WHERE active=1"
+        params = []
+        if state:
+            sql += " AND (state='' OR lower(state)=lower(?))"
+            params.append(state)
+        if lga:
+            sql += " AND (lga='' OR lower(lga)=lower(?))"
+            params.append(lga)
+        sql += " ORDER BY id DESC"
+        return self._all(sql, tuple(params))
+
+    def deactivate_subscriber(self, channel, address):
+        """NDPA opt-out: flip active=0 (row kept for audit). True if a row matched."""
+        addr = (address or "").strip()
+        if not addr:
+            return False
+        ahash = self._sub_hash(channel, addr)
+        row = self._one("SELECT id FROM subscribers WHERE address_hash=? AND active=1", (ahash,))
+        self._run("UPDATE subscribers SET active=0, unsubscribed_at=? WHERE address_hash=?",
+                  (now_iso(), ahash))
+        return bool(row)
+
+    def erase_subscriber(self, channel, address):
+        """NDPA erasure (P2-02): hard-delete the subscriber row. True if matched."""
+        addr = (address or "").strip()
+        if not addr:
+            return False
+        ahash = self._sub_hash(channel, addr)
+        row = self._one("SELECT id FROM subscribers WHERE address_hash=?", (ahash,))
+        self._run("DELETE FROM subscribers WHERE address_hash=?", (ahash,))
+        return bool(row)
+
+    def subscriber_count(self, active_only=True):
+        sql = "SELECT COUNT(*) AS c FROM subscribers" + (" WHERE active=1" if active_only else "")
+        r = self._one(sql)
+        return (r["c"] if r else 0)
+
+    # --- two-person RED approval (P0-08) ------------------------------------
+    def add_pending_approval(self, iuid, actor, level=0, note="", disp_key=""):
+        """Record operator #1's proposal to publish a RED alert. Idempotent per
+        incident: a repeat proposal refreshes the proposer/time so the same operator
+        can never appear as two."""
+        ts = now_iso()
+        existing = self._one("SELECT incident_uuid FROM pending_approvals WHERE incident_uuid=?", (iuid,))
+        if existing:
+            self._run("UPDATE pending_approvals SET first_actor=?, first_at=?, level=?, note=?, disp_key=?"
+                      " WHERE incident_uuid=?", (actor, ts, int(level or 0), note, disp_key, iuid))
+        else:
+            self._insert("INSERT INTO pending_approvals (incident_uuid, first_actor, first_at, level, note, disp_key)"
+                         " VALUES (?,?,?,?,?,?)", (iuid, actor, ts, int(level or 0), note, disp_key))
+        return ts
+
+    def get_pending_approval(self, iuid):
+        return self._one("SELECT * FROM pending_approvals WHERE incident_uuid=?", (iuid,))
+
+    def clear_pending_approval(self, iuid):
+        self._run("DELETE FROM pending_approvals WHERE incident_uuid=?", (iuid,))
+
+    def all_pending_approvals(self, limit=200):
+        return self._all("SELECT * FROM pending_approvals ORDER BY first_at DESC LIMIT %d" % int(limit))
 
     # --- responder tasks (RESP-01/06) — human ack ladder only ---------------
     def insert_responder_task(self, d):
