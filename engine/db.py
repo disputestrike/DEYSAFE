@@ -254,12 +254,31 @@ CREATE TABLE IF NOT EXISTS pending_approvals (
 );
 """
 
+# media_quota (P0-16): per-identity DAILY counter of signed evidence-upload URLs
+# minted, so /api/media/presign cannot be used as an open write-proxy to the object
+# store. Keyed by (quota_key, day) where quota_key is the citizen session uuid when
+# present, else an anonymized caller hash. type + size are already enforced in
+# api.r2_presign_put; this is the abuse/cost cap on top.
+MEDIA_QUOTA_SQLITE = """
+CREATE TABLE IF NOT EXISTS media_quota (
+  quota_key TEXT, day TEXT, count INTEGER DEFAULT 0,
+  PRIMARY KEY (quota_key, day)
+);
+"""
+MEDIA_QUOTA_PG = """
+CREATE TABLE IF NOT EXISTS media_quota (
+  quota_key TEXT, day TEXT, count INTEGER DEFAULT 0,
+  PRIMARY KEY (quota_key, day)
+);
+"""
+
 # Local (db.py-owned) extra tables, mirroring response.RESPONSE_TABLES shape.
 _EXTRA_TABLES = {
     "geo_cache": (GEO_CACHE_SQLITE, GEO_CACHE_PG),
     "source_health": (SOURCE_HEALTH_SQLITE, SOURCE_HEALTH_PG),
     "subscribers": (SUBSCRIBERS_SQLITE, SUBSCRIBERS_PG),
     "pending_approvals": (PENDING_APPROVALS_SQLITE, PENDING_APPROVALS_PG),
+    "media_quota": (MEDIA_QUOTA_SQLITE, MEDIA_QUOTA_PG),
 }
 
 # Phase 4: SafeMeet tables from safety module
@@ -1069,6 +1088,48 @@ class DB:
         self._run("DELETE FROM subscribers WHERE address_hash=?", (ahash,))
         return bool(row)
 
+    def erase_subject(self, channel=None, address=None, owner_token=None, user_uuid=None, phone=None):
+        """NDPA P2-02: hard-erase a data subject's PII across EVERY table that holds it,
+        matched by any identifier supplied (address/phone, owner_token, or session
+        user_uuid). Returns {table: rows_deleted}. Best-effort + table-by-table guarded
+        so a deploy missing an optional table still erases the rest. The caller audits
+        with a HASH of the identifier, never the raw value."""
+        deleted = {}
+        def _del(table, where, params):
+            try:
+                r = self._one("SELECT COUNT(*) AS c FROM %s WHERE %s" % (table, where), params)
+                n = (r["c"] if r else 0)
+            except Exception:
+                return 0
+            if n:
+                try:
+                    self._run("DELETE FROM %s WHERE %s" % (table, where), params)
+                except Exception:
+                    return 0
+            deleted[table] = deleted.get(table, 0) + n
+            return n
+        if address:
+            _del("subscribers", "address_hash=?", (self._sub_hash(channel or "sms", address),))
+        if owner_token:
+            _del("trusted_contacts", "owner_token=?", (owner_token,))
+            _del("sos_events", "reporter_hint=?", (owner_token,))
+        # Citizen identity + sessions: by uuid if known, otherwise resolve via phone_hash.
+        ph = None
+        if not user_uuid and (phone or address) and identity is not None:
+            try:
+                ph = identity.phone_hash((phone or address).strip())
+            except Exception:
+                ph = None
+        if user_uuid:
+            _del("personal_sessions", "user_uuid=?", (user_uuid,))
+            _del("citizen_users", "user_uuid=?", (user_uuid,))
+        elif ph:
+            row = self._one("SELECT user_uuid FROM citizen_users WHERE phone_hash=?", (ph,))
+            if row and row.get("user_uuid"):
+                _del("personal_sessions", "user_uuid=?", (row["user_uuid"],))
+            _del("citizen_users", "phone_hash=?", (ph,))
+        return deleted
+
     def subscriber_count(self, active_only=True):
         sql = "SELECT COUNT(*) AS c FROM subscribers" + (" WHERE active=1" if active_only else "")
         r = self._one(sql)
@@ -1097,6 +1158,19 @@ class DB:
 
     def all_pending_approvals(self, limit=200):
         return self._all("SELECT * FROM pending_approvals ORDER BY first_at DESC LIMIT %d" % int(limit))
+
+    # --- media upload quota (P0-16) -----------------------------------------
+    def media_quota_used(self, quota_key, day):
+        r = self._one("SELECT count FROM media_quota WHERE quota_key=? AND day=?", (quota_key, day))
+        return (r["count"] if r else 0)
+
+    def bump_media_quota(self, quota_key, day):
+        existing = self._one("SELECT count FROM media_quota WHERE quota_key=? AND day=?", (quota_key, day))
+        if existing:
+            self._run("UPDATE media_quota SET count=count+1 WHERE quota_key=? AND day=?", (quota_key, day))
+            return existing["count"] + 1
+        self._insert("INSERT INTO media_quota (quota_key, day, count) VALUES (?,?,1)", (quota_key, day))
+        return 1
 
     # --- responder tasks (RESP-01/06) — human ack ladder only ---------------
     def insert_responder_task(self, d):

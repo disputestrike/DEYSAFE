@@ -493,6 +493,14 @@ def _r2_signing_key(secret, date_stamp):
     return hmac.new(k_service, b"aws4_request", hashlib.sha256).digest()
 
 
+def _r2_configured():
+    """P0-16: True iff a real object store is wired up (so a presigned URL would
+    actually grant a write). When False (dev/gate) the presign endpoint mints nothing
+    and the upload quota / session gate are skipped."""
+    cfg = _r2_config()
+    return all(cfg.get(k) for k in ("endpoint", "bucket", "access_key", "secret_key"))
+
+
 def r2_presign_put(filename, content_type, size):
     cfg = _r2_config()
     needed = ("endpoint", "bucket", "access_key", "secret_key")
@@ -1226,6 +1234,17 @@ def _dual_approval_enabled():
     return os.environ.get("DEYSAFE_DUAL_APPROVAL", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+# P0-06 RBAC role ladder. Higher rank => more authority. Unknown/None => 0 (no access
+# to role-gated routes). The shared OPERATOR_TOKEN maps to 'admin' (top), so single-
+# operator deploys and the gate suite clear every check; roster operators carry their
+# configured role (user:ROLE:hash in DEYSAFE_OPERATORS).
+_ROLE_RANK = {"viewer": 1, "analyst": 2, "operator": 3, "admin": 4}
+
+
+def _role_rank(role):
+    return _ROLE_RANK.get((role or "").strip().lower(), 0)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         # PROD-02 + P0-09: minimal request log to stderr (was a no-op). The client IP
@@ -1339,6 +1358,34 @@ class Handler(BaseHTTPRequestHandler):
         # operator console + endpoints are LOCKED — a careless deploy ships safe,
         # not wide open. Deploys/gates set OPERATOR_TOKEN (or DEYSAFE_OPERATORS).
         return self._operator() is not None
+
+    def _require_role(self, min_role):
+        """P0-06 RBAC: True iff the caller is an operator at or above `min_role` on the
+        ladder viewer<analyst<operator<admin. OPERATOR_TOKEN is admin (clears all);
+        roster sessions carry their configured role. Pairs with _authed() at a route:
+        _authed() => a valid operator at all; _require_role() => a sufficiently
+        privileged one (so a 'viewer' can read but not verify/publish)."""
+        op = self._operator()
+        return bool(op) and _role_rank(op.get("role")) >= _role_rank(min_role)
+
+    def _webhook_ok(self):
+        """P0-11: authenticate an inbound provider webhook (SMS / USSD). Africa's
+        Talking has no built-in HMAC, so we require a shared secret configured
+        out-of-band: set DEYSAFE_WEBHOOK_SECRET and have the provider include it as
+        the `X-Webhook-Secret` header (or a ?wht= / ?token= query param on the webhook
+        URL). FAIL-OPEN only when no secret is configured (dev + the gate suite);
+        FAIL-CLOSED once set, so production inbound reports can't be spoofed."""
+        secret = os.environ.get("DEYSAFE_WEBHOOK_SECRET", "").strip()
+        if not secret:
+            return True  # not configured -> dev/gate posture (documented in DEPLOY.md)
+        got = (self.headers.get("X-Webhook-Secret") or self.headers.get("X-Webhook-Token") or "").strip()
+        if not got:
+            try:
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                got = (q.get("wht", [""])[0] or q.get("token", [""])[0] or "").strip()
+            except Exception:
+                got = ""
+        return bool(got) and hmac.compare_digest(got, secret)
 
     def require(self, role="viewer"):
         """Gate: True only if the caller presents a valid operator token whose role
@@ -2173,6 +2220,8 @@ class Handler(BaseHTTPRequestHandler):
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
             apply = (data.get("confirm") or "").strip() == "APPLY_RETENTION"
+            if apply and not self._require_role("admin"):  # P0-06: only admin may purge data
+                return self._json({"ok": False, "error": "admin role required to apply a retention purge"}, 403)
             if not apply:
                 plan = db.retention_plan(apply=False)
                 plan["note"] = "dry_run_only; send confirm=APPLY_RETENTION to delete matched records"
@@ -2626,7 +2675,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
             name = (data.get("name") or data.get("filename") or "evidence").strip()
             ctype = (data.get("type") or data.get("content_type") or "").strip()
+            # P0-16: type + size are enforced inside r2_presign_put. When the bucket is
+            # REAL (R2 configured), minting a signed upload URL is privileged: attribute
+            # it to a quota key (citizen session uuid if present, else an anonymized
+            # caller hash) and enforce a per-key DAILY cap so the endpoint can't be used
+            # as an open write-proxy. Optional strict mode (DEYSAFE_MEDIA_REQUIRE_SESSION)
+            # demands a real session. When R2 is unconfigured (dev/gate) there is nothing
+            # to mint, so the gate is skipped and behaviour is unchanged.
+            quota_key = None
+            today = datetime.date.today().isoformat()
+            if _r2_configured():
+                fu = self._field_user(db, data)
+                if not fu and os.environ.get("DEYSAFE_MEDIA_REQUIRE_SESSION", "").strip().lower() in ("1", "true", "yes", "on"):
+                    return self._json({"ok": False, "error": "a citizen session is required to upload evidence"}, 401)
+                quota_key = (fu or {}).get("user_uuid") or ("ip:" + hashlib.sha256(self._client_id().encode("utf-8")).hexdigest()[:16])
+                cap = int(os.environ.get("DEYSAFE_MEDIA_QUOTA_PER_DAY", "30") or 30)
+                if db.media_quota_used(quota_key, today) >= cap:
+                    return self._json({"ok": False, "error": "daily evidence-upload quota reached", "quota": cap}, 429)
             presigned = r2_presign_put(name, ctype, data.get("size") or 0)
+            if quota_key and presigned.get("ok") and presigned.get("configured"):
+                db.bump_media_quota(quota_key, today)
+                db.audit("api", "media_presign", "key=%s ctype=%s" % (quota_key[:10], ctype[:40]))
             return self._json(presigned, 200 if presigned.get("ok") else 400)
 
         if u.path == "/api/report":
@@ -2835,6 +2904,43 @@ class Handler(BaseHTTPRequestHandler):
                 matched = False
             db.audit("api", "unsubscribe", "channel={} matched={}".format(channel, bool(matched)))
             return self._json({"ok": True, "unsubscribed": bool(matched)})
+
+        if u.path == "/api/erasure":
+            # NDPA P2-02: subject-access erasure ("right to be forgotten"). Destructive,
+            # so it requires an explicit confirm=ERASE. Two paths:
+            #   * an ADMIN operator handling a written request -> erase by any identifier;
+            #   * a citizen SELF-SERVING -> erase only data tied to their OWN session/owner.
+            # (Anonymous alert opt-out is /api/unsubscribe; this hard-deletes PII.)
+            # Audited by a HASH of the identifier, never the raw value.
+            if not self._rate_ok("/api/erasure", 12):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            if (data.get("confirm") or "").strip() != "ERASE":
+                return self._json({"ok": False, "error": "send confirm=ERASE to permanently delete subject data"}, 400)
+            fu = self._field_user(db, data)
+            channel = (data.get("channel") or "sms").strip().lower()
+            address = (data.get("address") or data.get("phone") or "").strip()
+            if self._require_role("admin"):
+                owner_token = (data.get("owner_token") or "").strip()
+                user_uuid = (data.get("user_uuid") or "").strip()
+                if not (address or owner_token or user_uuid):
+                    return self._json({"ok": False, "error": "an identifier (address/phone, owner_token, or user_uuid) is required"}, 400)
+                deleted = db.erase_subject(channel=channel, address=address or None,
+                                           owner_token=owner_token or None,
+                                           user_uuid=user_uuid or None, phone=address or None)
+                actor = (self._operator() or {}).get("user", "operator")
+            elif fu:
+                owner_token = (data.get("owner_token") or "").strip() or fu.get("user_uuid")
+                deleted = db.erase_subject(channel=channel, address=address or None,
+                                           owner_token=owner_token or None,
+                                           user_uuid=fu.get("user_uuid"), phone=address or None)
+                actor = "self:" + (fu.get("user_uuid") or "")[:10]
+            else:
+                return self._json({"ok": False, "error": "a citizen session or admin role is required to erase data"}, 401)
+            total = sum(deleted.values())
+            subj = (address or data.get("owner_token") or data.get("user_uuid") or "").encode("utf-8")
+            db.audit(actor, "erasure", "subject=%s deleted=%s total=%s" % (
+                hashlib.sha256(subj).hexdigest()[:12], deleted, total))
+            return self._json({"ok": True, "erased": deleted, "total": total})
 
         if u.path == "/api/sos":
             # FIELD (public + rate-limited): the durable SOS event (SOS-01/02).
@@ -3084,6 +3190,8 @@ class Handler(BaseHTTPRequestHandler):
             # AUTH-01: operator-only RSS pull.
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
+            if not self._require_role("operator"):  # P0-06: not a read-only 'viewer' action
+                return self._json({"ok": False, "error": "operator role required"}, 403)
             # Operator-triggered pull of PUBLIC Nigerian news RSS. Public data only;
             # per-feed failures are skipped. RSS is unstructured -> gazetteer geoparse;
             # everything lands as candidate_unverified (human still gates escalation).
@@ -3213,6 +3321,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/sms":
             # Inbound SMS report (Africa's Talking posts here). Basic-phone reach.
+            # P0-11: verify the shared webhook secret first so a spoofer can't inject
+            # fabricated reports (which could trigger panic or poison corroboration).
+            if not self._webhook_ok():
+                return self._json({"ok": False, "error": "unauthorized webhook"}, 401)
             if not self._rate_ok("/api/sms", 40):  # ABU-01
                 return self._json({"ok": False, "error": "rate limited"}, 429)
             text = (data.get("text") or "").strip()
@@ -3224,6 +3336,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/ussd":
             # USSD menu (Africa's Talking). `text` accumulates choices like "2*gunmen on road".
+            if not self._webhook_ok():  # P0-11: reject spoofed gateway posts
+                return self._text("END Service unavailable.")
             txt = (data.get("text") or "").strip()
             parts = txt.split("*") if txt else []
             if not parts:
@@ -3372,6 +3486,8 @@ class Handler(BaseHTTPRequestHandler):
             # important lock — it promotes an event to a public RED alert.
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
+            if not self._require_role("operator"):  # P0-06: a 'viewer' cannot publish
+                return self._json({"ok": False, "error": "operator role required to verify/publish"}, 403)
             decision = (data.get("decision") or "").strip()
             if decision not in ("verified", "dismissed"):
                 return self._json({"ok": False, "error": "decision must be verified|dismissed"}, 400)
@@ -3455,6 +3571,8 @@ class Handler(BaseHTTPRequestHandler):
             # dual mode OFF this route is intentionally inert (operators use /api/verify).
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
+            if not self._require_role("operator"):  # P0-06: confirmer must be a privileged operator
+                return self._json({"ok": False, "error": "operator role required to confirm/publish"}, 403)
             if not _dual_approval_enabled():
                 return self._json({"ok": False, "error": "two-person approval is not enabled (set DEYSAFE_DUAL_APPROVAL=1); use /api/verify"}, 400)
             typ = security.valid_type(data.get("type")) if (data.get("type") or "").strip() else (data.get("type") or "").strip()
