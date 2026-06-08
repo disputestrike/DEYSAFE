@@ -177,6 +177,17 @@ Water
 Power bank
 Call home after arrival
 Check hotel address</textarea>
+    <div id="decoyPin" style="display:none;margin-top:16px;border-top:1px solid #ddd2bd;padding-top:14px">
+      <div style="font:14px Georgia,serif;color:#6b6453;margin-bottom:8px">Enter passcode to edit</div>
+      <input id="decoyPinInput" type="password" inputmode="numeric" maxlength="8" autocomplete="off"
+             onkeydown="if(event.key==='Enter')decoyPinSubmit()"
+             style="width:150px;font:18px Georgia,serif;letter-spacing:3px;padding:10px;border:1px solid #ddd2bd;border-radius:8px;background:#fffdf7;color:#26231d" />
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button onclick="decoyPinSubmit()" style="padding:9px 18px;border:1px solid #ddd2bd;border-radius:8px;background:#efe8d6;font:15px Georgia,serif;cursor:pointer">Open</button>
+        <button onclick="decoyPinCancel()" style="padding:9px 18px;border:1px solid #ddd2bd;border-radius:8px;background:#fffdf7;font:15px Georgia,serif;cursor:pointer">Cancel</button>
+      </div>
+      <div id="decoyPinMsg" style="font:13px Georgia,serif;color:#9a4b3b;margin-top:8px;min-height:16px"></div>
+    </div>
   </div>
   <div id="alertBanner" class="abanner" style="display:none"></div>
   <div id="journeyBanner" class="jbanner" style="display:none;cursor:pointer" role="status" onclick="go('waka')"></div>
@@ -410,7 +421,7 @@ Check hotel address</textarea>
       </div>
       <div class="case">
         <button class="btn sec" onclick="panicLock()">Privacy lock</button>
-        <p class="note" style="text-align:left;margin:8px 2px 0">Shows a harmless notes screen while SOS, route, and contacts keep running underneath. Tap Trip Notes four times to unlock.</p>
+        <p class="note" style="text-align:left;margin:8px 2px 0">Shows a harmless notes screen while SOS, route, and contacts keep running underneath. Tap "Trip Notes" four times, then enter your App PIN to unlock. Your Duress PIN shows a fake "Saved" screen while help keeps coming. (No PIN set = four taps unlocks.)</p>
       </div>
       <h2 class="t" style="margin-top:22px">Phone Safety Readiness</h2>
       <div class="case">
@@ -822,7 +833,43 @@ function panicLock(){
   tick();clearInterval(DECOY_CLOCK);DECOY_CLOCK=setInterval(tick,30000);
 }
 function panicUnlock(){var d=$('#decoy');if(d)d.classList.remove('show');clearInterval(DECOY_CLOCK);DECOY_CLOCK=null;DECOY_TAPS=0;try{localStorage.removeItem('ds_locked');}catch(e){}LOCKED=false;try{startLiveLocation();}catch(e){}}
-function decoyTap(){clearTimeout(DECOY_TIMER);DECOY_TAPS++;DECOY_TIMER=setTimeout(function(){DECOY_TAPS=0;},2500);if(DECOY_TAPS>=4)panicUnlock();}
+// On-device passcode digest so the panic-lock can verify a PIN OFFLINE (a victim is
+// often in a no-signal area). SHA-256 when available; a weak fallback for non-secure
+// contexts. NOTE: a 4-digit PIN is inherently low-entropy — this gates casual/captor
+// access (vs. today's free 4-tap unlock), not a determined forensic extraction.
+async function _pinDigest(pin){
+  var msg='deysafe-pin|'+String(pin||'');
+  try{
+    var buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(msg));
+    return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
+  }catch(e){
+    var h=0;for(var i=0;i<msg.length;i++){h=((h<<5)-h+msg.charCodeAt(i))|0;}return 'f'+(h>>>0).toString(16);
+  }
+}
+// Four taps on the decoy title. If the user set PINs, reveal the passcode pad instead of
+// unlocking instantly (so a captor poking the "notes" cannot expose the live SOS). If NO
+// PIN was ever set, keep the original 4-tap unlock so the owner can never be locked out.
+function decoyTap(){
+  clearTimeout(DECOY_TIMER);DECOY_TAPS++;DECOY_TIMER=setTimeout(function(){DECOY_TAPS=0;},2500);
+  if(DECOY_TAPS<4)return;
+  DECOY_TAPS=0;
+  var hasPin=false;try{hasPin=!!localStorage.getItem('ds_pin_app');}catch(e){}
+  if(!hasPin){panicUnlock();return;}
+  var p=$('#decoyPin');if(p){p.style.display='block';var i=$('#decoyPinInput');if(i){i.value='';try{i.focus();}catch(e){}}}
+}
+async function decoyPinSubmit(){
+  var inp=$('#decoyPinInput');if(!inp)return;var pin=(inp.value||'').trim();inp.value='';
+  var d=await _pinDigest(pin),appH='',durH='';
+  try{appH=localStorage.getItem('ds_pin_app')||'';durH=localStorage.getItem('ds_pin_duress')||'';}catch(e){}
+  if(d&&d===appH){var p=$('#decoyPin');if(p)p.style.display='none';panicUnlock();return;}        // real unlock
+  if(d&&d===durH){                                                                                // DURESS: fake "saved", never reveal
+    try{if(SOS_UUID||SOS_REF)postOrQueue('/api/sos',{sos_uuid:SOS_UUID||'',ref:SOS_REF||'',cancel:true,pin:pin});}catch(e){}
+    var m=$('#decoyPinMsg');if(m){m.textContent='Saved ✓';setTimeout(function(){m.textContent='';},1800);}
+    var pp=$('#decoyPin');if(pp)pp.style.display='none';return;
+  }
+  var mm=$('#decoyPinMsg');if(mm){mm.textContent='Wrong passcode';setTimeout(function(){mm.textContent='';},1500);}  // wrong -> stay locked
+}
+function decoyPinCancel(){var p=$('#decoyPin');if(p)p.style.display='none';var i=$('#decoyPinInput');if(i)i.value='';}
 function hav(la1,lo1,la2,lo2){var R=6371,p1=la1*Math.PI/180,p2=la2*Math.PI/180,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180;var x=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2);return 2*R*Math.asin(Math.sqrt(x));}
 const GUIDE={GREEN:"No verified danger nearby. Remain alert.",YELLOW:"Unconfirmed report nearby. Exercise caution.",ORANGE:"Active danger reported nearby. Avoid the area if you can.",RED:"Critical verified threat. Do not travel; follow official guidance."};
 // P2-03: localized risk-level guidance for the core "check my area" flow — the single
@@ -1220,11 +1267,20 @@ async function signupVerify(){
 }
 async function savePins(){
   if(sessionRequired())return;
-  var safety=($('#safetyPin').value||'').trim(),duress=($('#duressPin').value||'').trim();
+  var app=($('#appPin').value||'').trim(),safety=($('#safetyPin').value||'').trim(),duress=($('#duressPin').value||'').trim();
   if(safety.length<4||duress.length<4){toast('Safety and duress PINs must be at least 4 digits');return;}
-  var r=await apiJson('/api/profile/pins',{app_pin:($('#appPin').value||'').trim(),safety_pin:safety,duress_pin:duress});
+  var r=await apiJson('/api/profile/pins',{app_pin:app,safety_pin:safety,duress_pin:duress});
   var el=$('#pinStatus');if(el)el.textContent=r.ok?'PINs saved. Duress and Safety PINs are active.':'Could not save PINs: '+(r.error||'failed');
-  if(r.ok){['#appPin','#safetyPin','#duressPin'].forEach(function(s){var el=$(s);if(el)el.value='';});}
+  if(r.ok){
+    // OFF-LOCK: store on-device verifiers so the panic-lock unlocks OFFLINE. The App PIN
+    // (or, if none, the Safety PIN) does the real unlock; the Duress PIN triggers the fake
+    // "all-clear" while the SOS keeps escalating. Digest only — see _pinDigest note.
+    try{
+      localStorage.setItem('ds_pin_app', await _pinDigest(app||safety));
+      localStorage.setItem('ds_pin_duress', await _pinDigest(duress));
+    }catch(e){}
+    ['#appPin','#safetyPin','#duressPin'].forEach(function(s){var el=$(s);if(el)el.value='';});
+  }
 }
 function renderGuardians(list){
   var el=$('#guardianList');if(!el)return;
