@@ -1254,8 +1254,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             status = args[1] if len(args) > 1 else "-"
             cip = _anon_ip(self.client_address[0] if self.client_address else "")
-            line = '{ts} client=%s method_path="%s" status=%s' % (
-                cip, (self.requestline or "").replace('"', "'"), status)
+            rl = (self.requestline or "").replace('"', "'")
+            # P0-11/P0-09: never log a webhook/token secret that may ride in the query
+            # string (Africa's Talking can be configured to append ?wht=...).
+            rl = re.sub(r"((?:wht|token|secret|key)=)[^&\s]+", r"\1[redacted]", rl, flags=re.I)
+            line = '{ts} client=%s method_path="%s" status=%s' % (cip, rl, status)
             sys.stderr.write(line.format(ts=datetime.datetime.now().isoformat(timespec="seconds")) + "\n")
         except Exception:
             pass
@@ -2922,6 +2925,7 @@ class Handler(BaseHTTPRequestHandler):
             channel = (data.get("channel") or "sms").strip().lower()
             address = (data.get("address") or data.get("phone") or "").strip()
             if self._require_role("admin"):
+                # Admin actioning a verified written request: may target any identifier.
                 owner_token = (data.get("owner_token") or "").strip()
                 user_uuid = (data.get("user_uuid") or "").strip()
                 if not (address or owner_token or user_uuid):
@@ -2930,18 +2934,21 @@ class Handler(BaseHTTPRequestHandler):
                                            owner_token=owner_token or None,
                                            user_uuid=user_uuid or None, phone=address or None)
                 actor = (self._operator() or {}).get("user", "operator")
+                subj_id = address or owner_token or user_uuid
             elif fu:
-                owner_token = (data.get("owner_token") or "").strip() or fu.get("user_uuid")
-                deleted = db.erase_subject(channel=channel, address=address or None,
-                                           owner_token=owner_token or None,
-                                           user_uuid=fu.get("user_uuid"), phone=address or None)
+                # Self-service: erase ONLY the caller's OWN session-scoped data, keyed to
+                # the authenticated user_uuid. We deliberately IGNORE any client-supplied
+                # address/owner_token here — honouring them would let one citizen erase
+                # another person's records. (To merely stop alerts, use /api/unsubscribe;
+                # erasure of a subscription by phone is an admin-actioned request.)
+                deleted = db.erase_subject(owner_token=fu.get("user_uuid"), user_uuid=fu.get("user_uuid"))
                 actor = "self:" + (fu.get("user_uuid") or "")[:10]
+                subj_id = fu.get("user_uuid") or ""
             else:
                 return self._json({"ok": False, "error": "a citizen session or admin role is required to erase data"}, 401)
             total = sum(deleted.values())
-            subj = (address or data.get("owner_token") or data.get("user_uuid") or "").encode("utf-8")
             db.audit(actor, "erasure", "subject=%s deleted=%s total=%s" % (
-                hashlib.sha256(subj).hexdigest()[:12], deleted, total))
+                hashlib.sha256((subj_id or "").encode("utf-8")).hexdigest()[:12], deleted, total))
             return self._json({"ok": True, "erased": deleted, "total": total})
 
         if u.path == "/api/sos":
