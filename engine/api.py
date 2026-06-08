@@ -3255,6 +3255,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     mode = "report"
             used_ai = False
+            ai_err = ""   # surfaced in the response so a silent LLM failure is debuggable
             if mode == "missing":
                 res = ai.extract_missing(text) if ai.available() else None
                 if isinstance(res, dict) and not res.get("error"):
@@ -3267,36 +3268,56 @@ class Handler(BaseHTTPRequestHandler):
                               "vehicle": res.get("vehicle") or "", "clothing": res.get("clothing") or "",
                               "direction": res.get("direction") or ""}
                 else:
+                    if isinstance(res, dict):
+                        ai_err = str(res.get("error") or "")
                     gp = geoparse.geoparse({"title": "", "text": text}) or {}
                     fields = {"name": "", "age": "", "count": 1, "place": gp.get("location_name", ""),
                               "exact_place": "", "hours_ago": 1, "description": text,
                               "vehicle": "", "clothing": "", "direction": ""}
             elif mode in ("meet", "safemeet"):
-                low = text.lower()
-                gp = geoparse.geoparse({"title": "", "text": text}) or {}
-                meeting_type = "personal"
-                if any(w in low for w in ("online date", "date", "dating")):
-                    meeting_type = "date"
-                elif any(w in low for w in ("marketplace", "buy", "buyer", "sell", "seller", "transaction", "swap")):
-                    meeting_type = "transaction"
-                elif any(w in low for w in ("business", "client", "contract", "work")):
-                    meeting_type = "business"
-                tm = re.search(r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*(am|pm)?\b", text, re.I)
-                eta = ""
-                if tm:
-                    hour = int(tm.group(1))
-                    minute = tm.group(2) or "00"
-                    suffix = (tm.group(3) or "").lower()
-                    if suffix == "pm" and hour < 12:
-                        hour += 12
-                    if suffix == "am" and hour == 12:
-                        hour = 0
-                    eta = "%02d:%s" % (hour, minute)
-                fields = {"meeting_type": meeting_type,
-                          "meeting_place": gp.get("location_name", ""),
-                          "meeting_address": gp.get("location_name", ""),
-                          "expected_arrival": eta,
-                          "user_notes": text}
+                # P-18: voice-first SafeMeet. Use the LLM to pull person/vehicle/duration/
+                # address out of natural speech; fall back to rule-based when no key/LLM.
+                res = ai.extract_meeting(text) if ai.available() else None
+                if isinstance(res, dict) and not res.get("error"):
+                    used_ai = True
+                    fields = {"meeting_type": (res.get("meeting_type") or "personal"),
+                              "person_name": res.get("person_name") or "",
+                              "person_phone": res.get("person_phone") or "",
+                              "meeting_place": res.get("place") or "",
+                              "meeting_address": res.get("address") or res.get("place") or "",
+                              "expected_arrival": (res.get("expected_arrival") or "").strip(),
+                              "expected_duration_min": res.get("expected_duration_min") or "",
+                              "vehicle": res.get("vehicle") or "",
+                              "risk_factors": res.get("risk_factors") or "",
+                              "user_notes": text}
+                else:
+                    if isinstance(res, dict):
+                        ai_err = str(res.get("error") or "")
+                    low = text.lower()
+                    gp = geoparse.geoparse({"title": "", "text": text}) or {}
+                    meeting_type = "personal"
+                    if any(w in low for w in ("online date", "date", "dating")):
+                        meeting_type = "date"
+                    elif any(w in low for w in ("marketplace", "buy", "buyer", "sell", "seller", "transaction", "swap")):
+                        meeting_type = "transaction"
+                    elif any(w in low for w in ("business", "client", "contract", "work")):
+                        meeting_type = "business"
+                    tm = re.search(r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*(am|pm)?\b", text, re.I)
+                    eta = ""
+                    if tm:
+                        hour = int(tm.group(1))
+                        minute = tm.group(2) or "00"
+                        suffix = (tm.group(3) or "").lower()
+                        if suffix == "pm" and hour < 12:
+                            hour += 12
+                        if suffix == "am" and hour == 12:
+                            hour = 0
+                        eta = "%02d:%s" % (hour, minute)
+                    fields = {"meeting_type": meeting_type, "person_name": "", "person_phone": "",
+                              "meeting_place": gp.get("location_name", ""),
+                              "meeting_address": gp.get("location_name", ""),
+                              "expected_arrival": eta, "expected_duration_min": "",
+                              "vehicle": "", "risk_factors": "", "user_notes": text}
             else:
                 res = ai.classify(text) if ai.available() else None
                 if isinstance(res, dict) and not res.get("error") and res.get("is_incident"):
@@ -3306,11 +3327,14 @@ class Handler(BaseHTTPRequestHandler):
                     fields = {"type": (security.valid_type(sug) if sug else ""), "place": res.get("location_text") or "",
                               "description": res.get("summary") or text}
                 else:
+                    if isinstance(res, dict) and res.get("error"):
+                        ai_err = str(res.get("error") or "")
                     gp = geoparse.geoparse({"title": "", "text": text}) or {}
                     fields = {"type": gp.get("type", ""), "place": gp.get("location_name", ""),
                               "description": text}
-            db.audit("api", "ai_intake", "mode={} ai={}".format(mode, used_ai))
-            return self._json({"ok": True, "mode": mode, "ai": used_ai, "ai_on": ai.available(), "fields": fields})
+            db.audit("api", "ai_intake", "mode={} ai={} err={}".format(mode, used_ai, ai_err[:60]))
+            return self._json({"ok": True, "mode": mode, "ai": used_ai, "ai_on": ai.available(),
+                               "ai_provider": ai.provider(), "ai_error": ai_err, "fields": fields})
 
         if u.path == "/api/channel":
             # Community safety channel (Zello-style, light): short area-tagged posts.

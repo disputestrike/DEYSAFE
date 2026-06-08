@@ -142,3 +142,23 @@ def classify(text, system=SYSTEM):
 def extract_missing(text):
     """Extract a missing-person case from free text/speech, or None if no key."""
     return classify(text, MISSING_SYSTEM)
+
+
+MEETING_SYSTEM = (
+    "You are a safety assistant for a Nigerian personal-safety app (SafeMeet). From the "
+    "user's spoken or typed description of a meeting they are about to attend (English, "
+    "Hausa, Yoruba, Igbo, or Nigerian Pidgin), extract the details. Respond with ONLY "
+    "valid JSON, no markdown, no preamble:\n"
+    '{"meeting_type": "personal|date|transaction|business|other", "person_name": str or null, '
+    '"person_phone": str or null, "place": str or null, "address": str or null, '
+    '"expected_arrival": "HH:MM" or null, "expected_duration_min": int or null, '
+    '"vehicle": str or null, "risk_factors": str or null, "user_notes": str}\n'
+    "expected_arrival in 24h HH:MM. Infer meeting_type from context (buying/selling a "
+    "thing = transaction, online/blind date = date, work/client/contract = business). "
+    "place = the area/town; address = the specific street or building if stated."
+)
+
+
+def extract_meeting(text):
+    """Extract a SafeMeet meeting from free text/speech, or None if no key."""
+    return classify(text, MEETING_SYSTEM)
