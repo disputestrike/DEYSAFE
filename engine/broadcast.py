@@ -8,8 +8,10 @@ own the wire + a testable SIM mode.
 CHANNELS
   - "sms"      reuses engine/sms.py (Africa's Talking). Real send only when
                AT_USERNAME + AT_API_KEY are set.
-  - "whatsapp" stub for the WhatsApp Business API (not wired yet).
-  - "push"     stub for web-push / OneSignal (not wired yet).
+  - "whatsapp" WhatsApp Business Cloud API. Real send only when WHATSAPP_TOKEN +
+               WHATSAPP_PHONE_ID are set.
+  - "push"     OneSignal push. Real send only when ONESIGNAL_API_KEY +
+               ONESIGNAL_APP_ID are set.
 
 KEY-GATED (bright line: never fake a real send)
   A channel only performs a real send when its credentials are present. With no
@@ -85,11 +87,11 @@ def available(channel):
         except Exception:
             return False
     if ch == "whatsapp":
-        # WhatsApp Business API: needs token + phone-number id (not wired yet).
+        # WhatsApp Business Cloud API: needs WHATSAPP_TOKEN + WHATSAPP_PHONE_ID.
         return bool(os.environ.get("WHATSAPP_TOKEN")
                     and os.environ.get("WHATSAPP_PHONE_ID"))
     if ch == "push":
-        # Web push / OneSignal (not wired yet).
+        # OneSignal push: needs ONESIGNAL_API_KEY + ONESIGNAL_APP_ID.
         return bool(os.environ.get("ONESIGNAL_API_KEY")
                     and os.environ.get("ONESIGNAL_APP_ID"))
     return False
