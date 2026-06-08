@@ -2229,7 +2229,7 @@ class Handler(BaseHTTPRequestHandler):
                 plan["note"] = "dry_run_only; send confirm=APPLY_RETENTION to delete matched records"
                 return self._json(plan)
             plan = db.retention_plan(apply=True)
-            db.audit("operator", "retention_apply", "deleted=%s" % plan.get("total_deleted"))
+            db.audit((self._operator() or {}).get("user", "operator"), "retention_apply", "deleted=%s" % plan.get("total_deleted"))
             return self._json(plan)
 
         if u.path == "/api/readiness":
@@ -3222,13 +3222,13 @@ class Handler(BaseHTTPRequestHandler):
                                     "gseverity": 1 if res.get("urgency") in ("high", "critical") else 0})
                 recompute(db)
             except Exception as e:
-                db.audit("operator", "ingest_live_error", repr(e)[:200])
+                db.audit((self._operator() or {}).get("user", "operator"), "ingest_live_error", repr(e)[:200])
                 ok = False
             inc = len(public_incidents(db))
             db.record_source_run("rss_live", ok=ok, fetched=fetched, added=added,
                                  error=("" if ok else "operator ingest-live failed"))
             if ok:
-                db.audit("operator", "ingest_live", "fetched={} added={} ai={} incidents={}".format(fetched, added, ai_used, inc))
+                db.audit((self._operator() or {}).get("user", "operator"), "ingest_live", "fetched={} added={} ai={} incidents={}".format(fetched, added, ai_used, inc))
             return self._json({"ok": ok, "fetched": fetched, "added": added, "ai_used": ai_used,
                                "ai_on": ai.available(), "incidents": inc, "queue": len(review_queue(db))})
 
