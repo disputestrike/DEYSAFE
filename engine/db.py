@@ -443,6 +443,12 @@ class DB:
                     self._create_table(sdl, pdl)
                 except Exception:
                     pass
+        self._add_columns("guardian_contacts", (
+            ("address_ciphertext", "TEXT", "TEXT"),
+            ("verification_ref", "TEXT", "TEXT"),
+            ("verification_hash", "TEXT", "TEXT"),
+            ("verified_at", "TEXT", "TEXT"),
+        ))
         if not self.pg:
             self.conn.commit()
 
@@ -722,12 +728,41 @@ class DB:
                 return state in getattr(response, "ALERT_LIVE", frozenset())
         return response.alert_is_active(state, r.get("created_at"), ttl_h)
 
+    def _ensure_alert_lifecycle(self, r):
+        if response is None or not r:
+            return r
+        if r.get("alert_uuid") and r.get("state") and r.get("expires_at"):
+            return r
+        ts = r.get("updated_at") or now_iso()
+        created = response._parse_iso(r.get("created_at")) or datetime.datetime.now()
+        try:
+            ttl_h = response.ttl_for_level(r.get("level_label"))
+            expires_at = r.get("expires_at") or (created + datetime.timedelta(hours=ttl_h)).isoformat(timespec="seconds")
+        except Exception:
+            expires_at = r.get("expires_at") or (created + datetime.timedelta(hours=24)).isoformat(timespec="seconds")
+        alert_uuid = r.get("alert_uuid") or (response.new_id() if response else _fallback_uuid())
+        state = r.get("state") or getattr(response, "ALERT_INITIAL", "PUBLISHED")
+        version = int(r.get("version") or 1)
+        try:
+            self._run(
+                "UPDATE alerts SET alert_uuid=?, state=?, version=?, expires_at=?, updated_at=? WHERE id=?",
+                (alert_uuid, state, version, expires_at, ts, r.get("id")))
+            r["alert_uuid"] = alert_uuid
+            r["state"] = state
+            r["version"] = version
+            r["expires_at"] = expires_at
+            r["updated_at"] = ts
+        except Exception:
+            pass
+        return r
+
     def active_alerts(self):
         # Keep the SQL filter on the legacy status column (fast, index-friendly,
         # preserves current behaviour) then drop any lifecycle-dead / past-TTL rows
         # at read-time. validate_response.py gate D checks both the expires_at field
         # is present and that no past-TTL alert is still listed.
-        rows = self._all("SELECT * FROM alerts WHERE status='active' ORDER BY level DESC, id DESC")
+        rows = [self._ensure_alert_lifecycle(r) for r in
+                self._all("SELECT * FROM alerts WHERE status='active' ORDER BY level DESC, id DESC")]
         return [r for r in rows if self._alert_row_active(r)]
 
     def has_active_alert(self, key):
@@ -1085,6 +1120,93 @@ class DB:
     def source_health(self, limit=200):
         return self._all("SELECT * FROM source_health ORDER BY source LIMIT %d" % int(limit))
 
+    # --- privacy retention / erasure support -------------------------------
+    def retention_plan(self, apply=False):
+        """Dry-run or apply conservative NDPA-style retention purges.
+
+        Deletes only clearly stale operational exhaust by default. Case evidence,
+        missing-person records, and verified incident history are deliberately not
+        auto-deleted here; they need case-owner/operator policy decisions.
+        """
+        now = datetime.datetime.now()
+
+        def days_env(name, default):
+            try:
+                return max(1, int(os.environ.get(name, str(default))))
+            except Exception:
+                return default
+
+        policies = [
+            {
+                "name": "expired_otp_challenges",
+                "table": "otp_challenges",
+                "date_col": "expires_at",
+                "days": days_env("DEYSAFE_RETENTION_OTP_DAYS", 2),
+                "extra": "",
+            },
+            {
+                "name": "expired_personal_sessions",
+                "table": "personal_sessions",
+                "date_col": "expires_at",
+                "days": days_env("DEYSAFE_RETENTION_SESSION_DAYS", 45),
+                "extra": "",
+            },
+            {
+                "name": "old_delivery_receipts",
+                "table": "deliveries",
+                "date_col": "created_at",
+                "days": days_env("DEYSAFE_RETENTION_DELIVERY_DAYS", 180),
+                "extra": "",
+            },
+            {
+                "name": "old_community_channel_posts",
+                "table": "channel",
+                "date_col": "created_at",
+                "days": days_env("DEYSAFE_RETENTION_CHANNEL_DAYS", 90),
+                "extra": "",
+            },
+            {
+                "name": "old_journey_events",
+                "table": "journey_events",
+                "date_col": "created_at",
+                "days": days_env("DEYSAFE_RETENTION_JOURNEY_EVENT_DAYS", 90),
+                "extra": "",
+            },
+            {
+                "name": "old_safemeet_checkins",
+                "table": "safemeet_checkins",
+                "date_col": "created_at",
+                "days": days_env("DEYSAFE_RETENTION_SAFEMEET_CHECKIN_DAYS", 180),
+                "extra": "",
+            },
+            {
+                "name": "closed_sos_events",
+                "table": "sos_events",
+                "date_col": "updated_at",
+                "days": days_env("DEYSAFE_RETENTION_CLOSED_SOS_DAYS", 180),
+                "extra": " AND state IN ('SAFE','CLOSED')",
+            },
+        ]
+        results = []
+        total = 0
+        for p in policies:
+            cutoff = (now - datetime.timedelta(days=p["days"])).isoformat(timespec="seconds")
+            where = "%s < ?%s" % (p["date_col"], p["extra"])
+            try:
+                row = self._one("SELECT COUNT(*) AS c FROM %s WHERE %s" % (p["table"], where), (cutoff,))
+                count = int((row or {}).get("c") or 0)
+                if apply and count:
+                    self._run("DELETE FROM %s WHERE %s" % (p["table"], where), (cutoff,))
+                results.append({"name": p["name"], "table": p["table"], "cutoff": cutoff,
+                                "days": p["days"], "matched": count,
+                                "deleted": count if apply else 0})
+                total += count
+            except Exception as e:
+                results.append({"name": p["name"], "table": p["table"], "error": repr(e)[:160],
+                                "matched": 0, "deleted": 0})
+        return {"ok": True, "applied": bool(apply), "total_matched": total,
+                "total_deleted": total if apply else 0, "policies": results}
+
     # ======================================================================
     # PRODUCT-SAFETY ACCESSORS
     # Journey Guard / readiness / SHIELD cases / restricted evidence /
@@ -1235,20 +1357,52 @@ class DB:
         gid = identity.new_id("guard")
         now = now_iso()
         addr = (address or "").strip()[:120]
+        cipher = identity.encrypt_secret(addr, aad=gid)
+        verify_ref = identity.new_id("gv")
+        verify_code = identity.otp_code()
         self._run(
             "INSERT INTO guardian_contacts (guardian_uuid, user_uuid, policy_id, name, channel, address,"
-            " address_hash, verified, active, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " address_ciphertext, address_hash, verification_ref, verification_hash, verified, active, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (gid, user_uuid, policy_id, (name or "Guardian").strip()[:80],
-             (channel or "sms").strip()[:24], addr, identity.hmac_hex("guardian", addr),
-             0, 1, now, now))
-        return self._one("SELECT * FROM guardian_contacts WHERE guardian_uuid=?", (gid,))
+             (channel or "sms").strip()[:24], "", cipher, identity.hmac_hex("guardian", addr),
+             verify_ref, identity.otp_hash(verify_ref, verify_code), 0, 1, now, now))
+        row = self._one("SELECT * FROM guardian_contacts WHERE guardian_uuid=?", (gid,))
+        if row:
+            row["verification_code"] = verify_code
+        return row
 
     def list_guardians(self, user_uuid):
         return self._all("SELECT * FROM guardian_contacts WHERE user_uuid=? AND active=1 ORDER BY id", (user_uuid,))
 
+    def verify_guardian(self, user_uuid, guardian_uuid, code):
+        if identity is None:
+            return None
+        gid = (guardian_uuid or "").strip()
+        row = self._one(
+            "SELECT * FROM guardian_contacts WHERE user_uuid=? AND guardian_uuid=? AND active=1",
+            (user_uuid, gid))
+        if not row:
+            return None
+        ref = row.get("verification_ref") or ""
+        expected = row.get("verification_hash") or ""
+        if not ref or not expected:
+            return None
+        if not hmac.compare_digest(identity.otp_hash(ref, code), expected):
+            return None
+        self._run("UPDATE guardian_contacts SET verified=1, verified_at=?, updated_at=? WHERE guardian_uuid=?",
+                  (now_iso(), now_iso(), gid))
+        return self._one("SELECT * FROM guardian_contacts WHERE guardian_uuid=?", (gid,))
+
     def guardian_targets_for_policy(self, policy_id):
         rows = self._all("SELECT * FROM guardian_contacts WHERE policy_id=? AND active=1 ORDER BY id", (policy_id,))
-        return [{"address": r.get("address"), "channel": r.get("channel") or "sms"} for r in rows if r.get("address")]
+        out = []
+        for r in rows:
+            addr = identity.guardian_address(r) if identity else (r.get("address") or "")
+            if addr:
+                out.append({"address": addr, "channel": r.get("channel") or "sms",
+                            "verified": bool(r.get("verified"))})
+        return out
 
     def upsert_push_subscription(self, user_uuid, device_id, subscription):
         if identity is None:

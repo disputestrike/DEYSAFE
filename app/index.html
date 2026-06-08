@@ -17,7 +17,7 @@
   }
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   body{background:#e9edf3;color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;justify-content:center;min-height:100vh}
-  .app{width:100%;max-width:460px;background:var(--bg);min-height:100vh;display:flex;flex-direction:column;position:relative}
+  .app{width:100%;max-width:460px;background:var(--bg);min-height:100vh;height:100vh;min-height:100dvh;height:100dvh;display:flex;flex-direction:column;position:relative}
   .top{display:flex;align-items:center;gap:10px;padding:13px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:600}
   .logo{width:32px;height:32px;border-radius:9px;background:#0d3b77;display:grid;place-items:center;overflow:hidden;flex:0 0 auto}
   .logo img{width:32px;height:32px;display:block;object-fit:cover}
@@ -29,7 +29,7 @@
   .abanner.L1{background:var(--green)}.abanner.L2{background:var(--yellow);color:#3a2c00}.abanner.L3{background:var(--orange)}.abanner.L4{background:var(--red)}
   .abanner b{font-weight:800;white-space:nowrap}.abanner .x{margin-left:auto;cursor:pointer;opacity:.85;font-weight:700}
   .demobanner{position:sticky;top:0;z-index:900;background:repeating-linear-gradient(45deg,#7a1d12,#7a1d12 14px,#922316 14px,#922316 28px);color:#fff;font-weight:800;font-size:12px;letter-spacing:.02em;text-align:center;padding:7px 12px;line-height:1.35;border-bottom:2px solid #ffd23f}
-  main{flex:1;overflow:auto;padding-bottom:74px}
+  main{flex:1;min-height:0;overflow:auto;padding-bottom:16px}
   .view{display:none}.view.active{display:block}
   .pad{padding:14px 16px}
   h2.t{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--faint);margin:4px 2px 10px;font-weight:700}
@@ -138,7 +138,7 @@
   .rights ul{margin:8px 0 4px 18px;padding:0}.rights li{margin:3px 0}
   .mm{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.3);border:2px solid #fff}
   .mm span{transform:rotate(45deg);font-size:13px}
-  nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:600}
+  nav{position:static;flex:0 0 auto;width:100%;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:600;padding-bottom:env(safe-area-inset-bottom)}
   nav button{flex:1;background:none;border:none;color:var(--faint);padding:9px 0 11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;font:inherit;font-size:10.5px;font-weight:600}
   nav button svg{width:21px;height:21px}nav button.active{color:var(--brand)}
   nav button.watchnav.on{color:#1f9d57}nav button.watchnav.on svg{fill:#1f9d5722}
@@ -148,7 +148,7 @@
   @media(min-width:860px){
     body{background:#d9e0ea}
     .app{max-width:1160px}
-    nav{position:static;order:1;width:auto;max-width:none;transform:none;justify-content:flex-start;border-top:none;border-bottom:1px solid var(--line);padding:0 8px}
+    nav{order:1;width:auto;max-width:none;justify-content:flex-start;border-top:none;border-bottom:1px solid var(--line);padding:0 8px}
     nav button{flex:none;flex-direction:row;gap:8px;padding:14px 18px;font-size:13.5px}
     nav button svg{width:18px;height:18px}
     main{order:2;padding-bottom:0;display:flex;flex-direction:column;flex:1;min-height:0}
@@ -448,12 +448,13 @@ const LIST_LIMIT=500;
 const qLimit=(extra)=>'?limit='+LIST_LIMIT+(extra?('&'+extra):'');
 let map,incLayer,missLayer,routeLayer,areaLayer,triLayer,heatLayer,meLayer,HEAT_ON=false,TYPES=[],PLACES=[],PLACE_COORDS={},SEG='alerts',SOS_TYPE='kidnapping',INCS=[],MISS=[],CASE=null;
 let LIVE_WATCH=null,LIVE_FIRST=true,LIVE_POS=null;
-let SESSION_TOKEN='', DEVICE_ID='', USER_PROFILE=null, GUARDIAN_COUNT=0, GUARDIAN_POLICY_ID='', PUSH_SUB_ID='';
+let SESSION_TOKEN='', SESSION_READY=false, DEVICE_ID='', USER_PROFILE=null, GUARDIAN_COUNT=0, GUARDIAN_POLICY_ID='', PUSH_SUB_ID='';
 try{SESSION_TOKEN=localStorage.getItem('ds_session')||'';DEVICE_ID=localStorage.getItem('ds_device_id')||'';PUSH_SUB_ID=localStorage.getItem('ds_push_sub')||'';}catch(e){}
 function ensureDeviceId(){if(DEVICE_ID)return DEVICE_ID;DEVICE_ID='dev_'+_uuid();try{localStorage.setItem('ds_device_id',DEVICE_ID);}catch(e){}return DEVICE_ID;}
 function setSession(token,deviceId){
   SESSION_TOKEN=token||'';DEVICE_ID=deviceId||DEVICE_ID||ensureDeviceId();
-  try{if(SESSION_TOKEN)localStorage.setItem('ds_session',SESSION_TOKEN);else localStorage.removeItem('ds_session');localStorage.setItem('ds_device_id',DEVICE_ID);}catch(e){}
+  SESSION_READY=!!SESSION_TOKEN;
+  try{localStorage.removeItem('ds_session');localStorage.setItem('ds_device_id',DEVICE_ID);}catch(e){}
 }
 function authHeaders(){var h={'Content-Type':'application/json'};if(SESSION_TOKEN)h.Authorization='Bearer '+SESSION_TOKEN;return h;}
 function authBody(body){var b=Object.assign({},body||{});if(SESSION_TOKEN)b.session_token=SESSION_TOKEN;if(DEVICE_ID)b.device_id=DEVICE_ID;if(GUARDIAN_POLICY_ID)b.guardian_policy_id=GUARDIAN_POLICY_ID;return b;}
@@ -464,9 +465,19 @@ async function apiJson(url,body){
   return r.json();
 }
 function sessionRequired(){
-  if(!SESSION_TOKEN){toast('Verify your phone in Profile first');go('settings');return true;}
+  if(!hasSession()){toast(tx('verify_phone'));go('settings');return true;}
   return false;
 }
+function hasSession(){return !!(SESSION_READY||SESSION_TOKEN||USER_PROFILE);}
+const I18N={
+  en:{verify_phone:'Verify your phone in Profile first',profile_locked:'Verify your phone to unlock Safety Vault, PINs, push alerts, and MySafe.',phone_verified:'Phone verified',readiness_saved:'Readiness saved',safety_phrase:'Know before you waka.',sos_alarm:'Alarm + prepare your live location to share - no typing',sos_silent:'No alarm - quietly save SOS + prepare your location to share',sos_voice:'Say what is happening - it is prepared to share when you go quiet',sos_voice_silent:'Say what is happening - saved quietly, no alarm, prepared to share',no_guardians:'No Safety Vault guardians configured yet. Open Profile to verify your phone and add at least one guardian.'},
+  pcm:{verify_phone:'Verify your phone for Profile first',profile_locked:'Verify your phone to open Safety Vault, PINs, push alerts, and MySafe.',phone_verified:'Phone don verify',readiness_saved:'Readiness don save',safety_phrase:'Know before you waka.',sos_alarm:'Alarm plus live location ready - no need type',sos_silent:'No alarm - save SOS quietly and ready your location to share',sos_voice:'Talk wetin dey happen - e go ready to share when you quiet',sos_voice_silent:'Talk wetin dey happen - saved quietly, no alarm',no_guardians:'No Safety Vault guardian yet. Open Profile, verify phone, add at least one guardian.'},
+  ha:{verify_phone:'Tabbatar da lambarka a Profile tukuna',profile_locked:'Tabbatar da waya don bude Safety Vault, PINs, sanarwa, da MySafe.',phone_verified:'An tabbatar da waya',readiness_saved:'An ajiye shirin tsaro',safety_phrase:'Ka sani kafin tafiya.',sos_alarm:'Kara da shirya wurin da kake - babu rubutu',sos_silent:'Babu kara - SOS zai ajiye a hankali kuma wurinka ya shirya rabawa',sos_voice:'Fadi abin da ke faruwa - zai shirya rabawa idan ka yi shiru',sos_voice_silent:'Fadi abin da ke faruwa - an ajiye a hankali, babu kara',no_guardians:'Babu guardian a Safety Vault. Bude Profile, tabbatar da waya, kara guardian akalla daya.'},
+  yo:{verify_phone:'Je ka fi idi foonu re mule ni Profile tele',profile_locked:'Fi idi foonu re mule lati si Safety Vault, PIN, itaniji, ati MySafe.',phone_verified:'Foonu ti je fidi mule',readiness_saved:'A ti fi imurasilẹ pamọ',safety_phrase:'Mo ewu tele ki o to rin.',sos_alarm:'Agogo itaniji ati ipo re setan - ko si typing',sos_silent:'Ko si agogo - SOS wa ni ipalemo laiparuwo, ipo re setan fun pinpin',sos_voice:'So ohun ti n sele - yoo setan fun pinpin ti o ba dakẹ',sos_voice_silent:'So ohun ti n sele - a fi pamọ laiparuwo, ko si agogo',no_guardians:'Ko si guardian ninu Safety Vault. Si Profile, fi foonu mule, fi guardian kun.'},
+  ig:{verify_phone:'Kwenye ekwentị gị na Profile mbụ',profile_locked:'Kwenye ekwentị iji mepee Safety Vault, PIN, alerts, na MySafe.',phone_verified:'Ekwentị akwadoro',readiness_saved:'Echekwara njikere nchekwa',safety_phrase:'Mara tupu i gawa.',sos_alarm:'Mkpu na ebe ị nọ dị njikere - enweghị typing',sos_silent:'Enweghị mkpu - chekwa SOS nwayọọ ma kwadebe ebe ị nọ ịkekọrịta',sos_voice:'Kwuo ihe na-eme - ọ ga-adị njikere ikekọrịta mgbe ị dara jụụ',sos_voice_silent:'Kwuo ihe na-eme - echekwara nwayọọ, enweghị mkpu',no_guardians:'Enweghị guardian na Safety Vault. Mepee Profile, kwenye ekwentị, tinye guardian otu ma ọ bụ karịa.'}
+};
+function langCode(){return ((USER_PROFILE&&USER_PROFILE.language)||($('#langSelect')&&$('#langSelect').value)||'en').toLowerCase();}
+function tx(k){var l=langCode();return (I18N[l]&&I18N[l][k])||I18N.en[k]||k;}
 
 function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
 function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>'+e+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});}
@@ -730,7 +741,8 @@ function shareFlyer(id){const m=MISS.find(x=>x.id===id);if(!m)return;
   if(navigator.share){navigator.share({title:'Missing: '+m.name,text:txt}).catch(()=>{});}
   else{try{navigator.clipboard.writeText(txt);}catch(e){}alert('Flyer copied:\n\n'+txt);}}
 
-async function loadPlaces(){var m=await fetch('/api/places').then(r=>r.json()).catch(function(){return {};})||{};TYPES=m.types||[];PLACES=m.places||[];PLACE_COORDS=m.coords||{};
+let PLACE_COVERAGE=null;
+async function loadPlaces(){var m=await fetch('/api/places').then(r=>r.json()).catch(function(){return {};})||{};TYPES=m.types||[];PLACES=m.places||[];PLACE_COORDS=m.coords||{};PLACE_COVERAGE=m.coverage||null;
   renderPlaceOptions(m.places||[]);
   var tg=$('#typeGrid');tg.innerHTML='';TYPES.forEach(function(t){var b=document.createElement('button');b.textContent=String(t).replace(/_/g,' ');b.onclick=function(){pick(b,'RTYPE',t);};tg.appendChild(b);});
   if(tg.firstChild)tg.firstChild.classList.add('on');window.RTYPE=TYPES[0];}
@@ -744,8 +756,8 @@ function attachPlaceSuggest(id){
     if(q.length<2){renderPlaceOptions(PLACES);return;}
     PLACE_TIMER=setTimeout(async function(){
       try{
-        var r=await fetch('/api/gazetteer?q='+encodeURIComponent(q)+'&limit=12').then(x=>x.json());
-        var names=(r.candidates||[]).map(function(c){return c.name;});
+        var r=await fetch('/api/place-suggest?q='+encodeURIComponent(q)+'&limit=16').then(x=>x.json());
+        var names=(r.suggestions||[]).map(function(c){return c.name;});
         renderPlaceOptions(Array.from(new Set(names.concat(PLACES))).slice(0,900));
       }catch(e){}
     },180);
@@ -1139,13 +1151,13 @@ async function saveReadiness(){
     silent_sos:!!($('#rdSilent')&&$('#rdSilent').checked),sms_fallback:!!($('#rdSms')&&$('#rdSms').checked),
     wearable:!!($('#rdWear')&&$('#rdWear').checked),offline_pack:!!($('#rdOffline')&&$('#rdOffline').checked)});
   var r=await fetch('/api/readiness',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
-  if(r.ok){renderReadiness(r.readiness);toast('Readiness saved');}
+  if(r.ok){renderReadiness(r.readiness);toast(tx('readiness_saved'));}
   else toast(r.error||'Could not save readiness');
 }
 async function loadReadiness(){
   try{JOURNEY_ID=localStorage.getItem('ds_journey_id')||'';}catch(e){}
   try{
-    var r=await fetch(SESSION_TOKEN?'/api/readiness':'/api/readiness?owner_token='+encodeURIComponent(SOS_OWNER),{headers:authHeaders()}).then(x=>x.json());
+    var r=await fetch(hasSession()?'/api/readiness':'/api/readiness?owner_token='+encodeURIComponent(SOS_OWNER),{headers:authHeaders()}).then(x=>x.json());
     if(r&&r.readiness)renderReadiness(r.readiness);else renderReadiness(null);
   }catch(e){renderReadiness(null);}
   if(JOURNEY_ID){
@@ -1157,14 +1169,14 @@ function renderProfile(){
   var acct=$('#acctStatus'),badge=$('#acctBadge'),gb=$('#guardianBadge');
   if(badge)badge.textContent=USER_PROFILE?'Verified':'Guest';
   if(gb)gb.textContent=String(GUARDIAN_COUNT||0);
-  if(acct)acct.innerHTML=USER_PROFILE?('<b>'+esc(USER_PROFILE.first_name||'DeySafe user')+'</b><div>'+esc(USER_PROFILE.phone||'verified phone')+'</div><div>Language: '+esc(USER_PROFILE.language||'en')+'</div>'):'Verify your phone to unlock Safety Vault, PINs, push alerts, and MySafe.';
+  if(acct)acct.innerHTML=USER_PROFILE?('<b>'+esc(USER_PROFILE.first_name||'DeySafe user')+'</b><div>'+esc(USER_PROFILE.phone||'verified phone')+'</div><div>Language: '+esc(USER_PROFILE.language||'en')+'</div><div>'+esc(tx('safety_phrase'))+'</div>'):esc(tx('profile_locked'));
   renderTrusted();
 }
 async function loadMe(){
-  if(!SESSION_TOKEN){renderProfile();return null;}
   try{
     var r=await fetch('/api/me',{headers:authHeaders()}).then(function(x){return x.json();});
-    if(!r.ok){setSession('',DEVICE_ID);USER_PROFILE=null;GUARDIAN_COUNT=0;GUARDIAN_POLICY_ID='';renderProfile();return null;}
+    if(!r.ok){SESSION_READY=false;setSession('',DEVICE_ID);USER_PROFILE=null;GUARDIAN_COUNT=0;GUARDIAN_POLICY_ID='';renderProfile();return null;}
+    SESSION_READY=true;
     USER_PROFILE=r.user||null;GUARDIAN_COUNT=Number(r.guardian_count||0);GUARDIAN_POLICY_ID=(USER_PROFILE&&USER_PROFILE.guardian_policy_id)||'';
     renderProfile();await loadGuardians();return USER_PROFILE;
   }catch(e){renderProfile();return null;}
@@ -1183,7 +1195,7 @@ async function signupVerify(){
   var r=await fetch('/api/signup/verify',{method:'POST',headers:authHeaders(),body:JSON.stringify({otp_ref:ref,code:code,first_name:($('#firstNameInput').value||'').trim(),language:($('#langSelect').value||'en'),device_id:ensureDeviceId()})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
   if(!r.ok){toast(r.error||'OTP failed');return;}
   setSession(r.session_token||'',r.device_id||DEVICE_ID);USER_PROFILE=r.user||null;GUARDIAN_COUNT=Number(r.guardian_count||0);GUARDIAN_POLICY_ID=(USER_PROFILE&&USER_PROFILE.guardian_policy_id)||'';
-  toast('Phone verified');renderProfile();await loadMe();await loadMySafe();await loadReadiness();
+  toast(tx('phone_verified'));renderProfile();await loadMe();await loadMySafe();await loadReadiness();
 }
 async function savePins(){
   if(sessionRequired())return;
@@ -1195,11 +1207,13 @@ async function savePins(){
 }
 function renderGuardians(list){
   var el=$('#guardianList');if(!el)return;
-  if(!SESSION_TOKEN){el.innerHTML='Verify your phone first.';return;}
-  el.innerHTML=(list&&list.length)?list.map(function(g){return '<div class="tcitem"><span class="tcch">'+esc(g.channel||'sms')+'</span><span><b>'+esc(g.name||'Guardian')+'</b> '+esc(g.address_redacted||'')+'</span></div>';}).join(''):'No guardians yet.';
+  if(!hasSession()){el.innerHTML='Verify your phone first.';return;}
+  el.innerHTML=(list&&list.length)?list.map(function(g){var gid=String(g.guardian_uuid||'').replace(/[^A-Za-z0-9_:-]/g,'');
+    var action=g.verified?'<span class="tcch">verified</span>':'<button class="spk" data-guardian="'+gid+'" onclick="verifyVaultGuardian(this.dataset.guardian)" title="Verify guardian">verify</button>';
+    return '<div class="tcitem"><span class="tcch">'+esc(g.channel||'sms')+'</span><span><b>'+esc(g.name||'Guardian')+'</b> '+esc(g.address_redacted||'')+'</span>'+action+'</div>';}).join(''):'No guardians yet.';
 }
 async function loadGuardians(){
-  if(!SESSION_TOKEN){renderGuardians([]);return;}
+  if(!hasSession()){renderGuardians([]);return;}
   var r=await fetch('/api/vault/guardians',{headers:authHeaders()}).then(function(x){return x.json();}).catch(function(){return {ok:false,guardians:[]};});
   if(r.ok){GUARDIAN_COUNT=Number(r.guardian_count||r.count||((r.guardians||[]).length));renderProfile();renderGuardians(r.guardians||[]);}
 }
@@ -1210,12 +1224,20 @@ async function addVaultGuardian(){
   var r=await apiJson('/api/vault/guardians',{name:name||'Guardian',channel:$('#vaultChannel').value||'sms',address:address,safety_pin:pin,pin:pin});
   if(!r.ok){toast(r.error||'Could not add guardian');return;}
   ['#vaultName','#vaultAddress','#vaultSafetyPin'].forEach(function(s){var el=$(s);if(el)el.value='';});
-  GUARDIAN_COUNT=Number(r.guardian_count||r.count||GUARDIAN_COUNT+1);GUARDIAN_POLICY_ID=r.guardian_policy_id||GUARDIAN_POLICY_ID;toast('Guardian saved in Safety Vault');await loadGuardians();await loadReadiness();
+  GUARDIAN_COUNT=Number(r.guardian_count||r.count||GUARDIAN_COUNT+1);GUARDIAN_POLICY_ID=r.guardian_policy_id||GUARDIAN_POLICY_ID;toast(r.dev_verification_code?('Guardian saved. Demo verify code: '+r.dev_verification_code):'Guardian saved in Safety Vault');await loadGuardians();await loadReadiness();
+}
+async function verifyVaultGuardian(id){
+  if(!id)return;
+  var code=prompt('Guardian verification code');
+  if(!code)return;
+  var r=await apiJson('/api/vault/guardians/verify',{guardian_uuid:id,code:code});
+  if(r.ok){toast('Guardian verified');await loadGuardians();await loadReadiness();}
+  else toast(r.error||'Could not verify guardian');
 }
 function renderMySafePlaces(list){var el=$('#mysafePlaces');if(!el)return;el.innerHTML=(list&&list.length)?list.map(function(p){return '<div>'+esc(p.alias||'Place')+': '+esc(p.place||'')+'</div>';}).join(''):'No saved places yet.';}
 function renderMySafeRoutes(list){var el=$('#mysafeRoutes');if(!el)return;el.innerHTML=(list&&list.length)?list.map(function(r){return '<div>'+esc(r.origin_alias||'from')+' to '+esc(r.destination_alias||'to')+' - '+esc(r.days||'any day')+' '+esc(r.departure_window||'')+'</div>';}).join(''):'No recurring routes yet.';}
 async function loadMySafe(){
-  if(!SESSION_TOKEN){renderMySafePlaces([]);renderMySafeRoutes([]);return;}
+  if(!hasSession()){renderMySafePlaces([]);renderMySafeRoutes([]);return;}
   var p=await fetch('/api/mysafe/places',{headers:authHeaders()}).then(function(x){return x.json();}).catch(function(){return {places:[]};});
   var r=await fetch('/api/mysafe/routes',{headers:authHeaders()}).then(function(x){return x.json();}).catch(function(){return {routes:[]};});
   renderMySafePlaces(p.places||[]);renderMySafeRoutes(r.routes||[]);
@@ -1347,13 +1369,13 @@ function tcLoad(){return Array.from({length:GUARDIAN_COUNT},function(){return {v
 function tcSave(){return;}
 function renderTrusted(){var el=$('#tcList');if(!el)return;
   el.innerHTML=GUARDIAN_COUNT>0?'<div class="tcitem"><span class="tcch">vault</span><span><b>'+GUARDIAN_COUNT+' guardian'+(GUARDIAN_COUNT===1?'':'s')+'</b> configured in Safety Vault</span></div>'
-    :'<p class="note" style="text-align:left;margin:4px 2px 0">No Safety Vault guardians configured yet. Open Profile to verify your phone and add at least one guardian.</p>';}
+    :'<p class="note" style="text-align:left;margin:4px 2px 0">'+esc(tx('no_guardians'))+'</p>';}
 async function addTrusted(){go('settings');toast('Add guardians in Safety Vault');}
 function removeTrusted(){go('settings');toast('Manage guardians in Safety Vault');}
 function renderSosButtons(){SOS_SILENT=!!($('#sosSilentToggle')&&$('#sosSilentToggle').checked);
   var a=$('#sosAutoSub'),v=$('#sosVoiceSub');
-  if(a)a.textContent=SOS_SILENT?'No alarm — quietly save SOS + prepare your location to share':'Alarm + prepare your live location to share — no typing';
-  if(v)v.textContent=SOS_SILENT?'Say what\'s happening — saved quietly, no alarm, prepared to share':'Say what\'s happening — it\'s prepared to share when you go quiet';}
+  if(a)a.textContent=SOS_SILENT?tx('sos_silent'):tx('sos_alarm');
+  if(v)v.textContent=SOS_SILENT?tx('sos_voice_silent'):tx('sos_voice');}
 // Create the durable SOS event server-side and request trusted-circle notify. Best-effort:
 // the user's own share path NEVER depends on this call succeeding (fail-open for the victim).
 async function sosCreateEvent(extra){
@@ -1608,7 +1630,7 @@ async function loadMeetList() {
   var el = $('#meetList');
   if (!el) return;
   try {
-    var r = await fetch(SESSION_TOKEN?'/api/safemeet/list':'/api/safemeet/list?owner_token=' + encodeURIComponent(SOS_OWNER),{headers:authHeaders()}).then(x => x.json());
+    var r = await fetch(hasSession()?'/api/safemeet/list':'/api/safemeet/list?owner_token=' + encodeURIComponent(SOS_OWNER),{headers:authHeaders()}).then(x => x.json());
     var sessions = (r && r.sessions) || [];
     if (!sessions.length) { el.innerHTML = '<p class="note">No active meetings.</p>'; return; }
     el.innerHTML = sessions.map(function(s) {

@@ -1,63 +1,93 @@
-# Deploying DeySafe / SHIELD to Railway
+# Deploying DeySafe / SHIELD To Railway
 
-Pure-Python (standard-library-only) web app — one web process, no build step. It runs
-on **SQLite** out of the box and on **PostgreSQL** when `DATABASE_URL` is set.
+Pure-Python web app: one web process, no build step. It runs on SQLite locally
+and on PostgreSQL when `DATABASE_URL` is set.
 
 ## 1. Deploy
-1. Push `DEYSAFE/` to GitHub (or `railway up` from this folder).
-2. Railway → **New Project → Deploy from repo** (root = `DEYSAFE`).
-3. Railway runs the `Procfile`: `web: python engine/api.py`. The server binds
-   `0.0.0.0:$PORT` automatically and Railway gives you a public HTTPS URL.
 
-## 2. Launch checklist — set these in Railway → Variables
+1. Push `DEYSAFE/` to GitHub, or run `railway up` from this folder.
+2. Railway -> New Project -> Deploy from repo, with root set to `DEYSAFE`.
+3. Railway runs the `Procfile`: `web: python engine/api.py`.
+4. The server binds `0.0.0.0:$PORT` and Railway gives you a public HTTPS URL.
 
-These are the difference between a demo and a real, safe deployment. **Set all of the
-"required for launch" ones before sharing the URL.**
+## 2. Required Launch Variables
 
-| Variable | Required for launch | What it does |
+These are the difference between demo mode and a safe public deployment.
+
+| Variable | Required | What it does |
 |---|---|---|
-| `DEMO_MODE` | **`0`** | Turns OFF the synthetic demo incidents. Default is ON — a public app showing fake RED alerts can cause real harm. `/api/health` must show `"demo": false`. |
-| `DEYSAFE_OPERATORS` | **yes** | The operator roster for the SHIELD console sign-in. Format: `user:role:sha256pw` (comma-separated). Roles: `viewer<reviewer<verifier<admin`. **Without this the console has no working sign-in.** Make a line with:<br>`python -c "import hashlib;print('admin:admin:'+hashlib.sha256('YOURPASS'.encode()).hexdigest())"` |
-| `DEYSAFE_SECRET` | **yes** | Long random string that signs operator sessions so logins survive restarts (without it, sessions reset every redeploy). |
-| `DATABASE_URL` | **strongly** | Postgres connection string (Railway → add a Postgres plugin → it injects this). Persists data across redeploys. Without it, SQLite is used (add a **Volume** at `data/` so it survives, or data resets each deploy). Set `DEYSAFE_REQUIRE_POSTGRES=1` to refuse to boot on the SQLite fallback. |
-| `DEYSAFE_BEACON_SECRET` | **yes (if FindMe/BLE used)** | Required to verify signed beacon relays. **Without it, anyone can POST a fake "Bluetooth relay" sighting and misdirect a missing-person search.** |
-| `DEYSAFE_INGEST_MINUTES` | recommended | Minutes between automatic public-RSS pulls (e.g. `30`). Default OFF — without it (and without an operator clicking "Pull live public feeds"), the live map stays empty once `DEMO_MODE=0`. |
-| `DEYSAFE_TRUST_XFF` | **`1` on Railway** | Trust `X-Forwarded-For` for caller identity (rate-limit / abuse). Railway puts a proxy in front, so set `1` there so each client is limited separately. Leave UNSET on a direct-connect host — otherwise an attacker forges the header to get a fresh rate-limit bucket per request. |
+| `DEMO_MODE` | `0` | Turns off synthetic demo incidents. `/api/health` must show `"demo": false`. |
+| `DEYSAFE_OPERATORS` | yes | Operator roster for SHIELD sign-in. Format: `user:role:sha256pw`, comma-separated. Roles: `viewer<reviewer<verifier<admin`. |
+| `DEYSAFE_SECRET` | yes | Long random secret for OTP/session/PIN HMACs and default vault encryption key. |
+| `DEYSAFE_VAULT_KEY` | recommended | Optional separate long random key for Safety Vault contact encryption. Falls back to `DEYSAFE_SECRET` if unset. |
+| `DATABASE_URL` | yes for launch | Railway Postgres connection string. Set `DEYSAFE_REQUIRE_POSTGRES=1` to refuse SQLite fallback. |
+| `DEYSAFE_REQUIRE_POSTGRES` | `1` | Fails closed in production when Postgres is not active. |
+| `DEYSAFE_BEACON_SECRET` | yes if FindMe/BLE used | Verifies signed beacon relays and replay nonces. |
+| `DEYSAFE_INGEST_MINUTES` | recommended | Automatic public RSS ingest interval, for example `30`. Default is off locally. |
+| `DEYSAFE_SAFETY_TICK_MINUTES` | recommended | Automatic stale Journey/SafeMeet check interval, for example `5`. `/api/health` exposes `safety_tick`. |
+| `DEYSAFE_TRUST_XFF` | `1` on Railway | Trust Railway proxy `X-Forwarded-For` for caller identity and abuse limits. |
 
-### Optional — flip features from "ready" to "live" as you get keys
+Create an operator password hash:
+
+```bash
+python -c "import hashlib;print('admin:admin:'+hashlib.sha256('YOURPASS'.encode()).hexdigest())"
+```
+
+## 3. Optional Live Providers
+
 | Variable(s) | Enables |
 |---|---|
-| `AT_USERNAME` + `AT_API_KEY` (+ `AT_SENDER`) | Real **SMS** alerts to the trusted circle (Africa's Talking — best for Nigeria). |
-| `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID` | **WhatsApp** alerts (Meta Cloud API). |
-| `ONESIGNAL_API_KEY` + `ONESIGNAL_APP_ID` | Web/mobile **push**. |
-| `CLOUDFLARE_R2_*` (account/bucket/access keys) | Real **video/photo evidence upload**. Without it the app still stores a custody hash + file facts (no raw upload). |
-| `CEREBRAS_API_KEY` (or `GEMINI_API_KEY` / `GROQ_API_KEY`) | **AI** incident extraction (multi-language). Without a key it uses the rule-based parser. |
-| `DEYSAFE_ROAD_ROUTING_URL` | A dedicated/self-hosted OSRM for WakaSafe road routing at scale (the free public demo is rate-limited). |
+| `AT_USERNAME` + `AT_API_KEY` | Real SMS alerts through Africa's Talking. |
+| `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID` | WhatsApp Cloud API alerts. |
+| `ONESIGNAL_API_KEY` + `ONESIGNAL_APP_ID` | Push provider fan-out. |
+| `DEYSAFE_VAPID_PUBLIC_KEY` + `DEYSAFE_VAPID_PRIVATE_KEY` | Browser Web Push subscriptions and test receipts. |
+| `CLOUDFLARE_R2_*` | Real image/video evidence upload. Without it the app stores custody hash and file facts only. |
+| `CEREBRAS_API_KEY` or `GEMINI_API_KEY` or `GROQ_API_KEY` | AI incident extraction and intake. Without a key it uses rules. |
+| `DEYSAFE_ROAD_ROUTING_URL` | Dedicated/self-hosted OSRM for WakaSafe road routing at scale. |
+| `GOOGLE_PLACES_API_KEY` or `GOOGLE_MAPS_API_KEY` | Google Places Autocomplete for live place suggestions across Nigeria. The offline national gazetteer still works without it. |
 
-Everything is **safe-by-default**: with a feature's keys unset, that feature degrades
-honestly (it never fakes a delivery/upload) — the rest of the app keeps working.
+The app is safe by default: when a provider key is missing, it reports
+`unconfigured` and never fakes delivery, upload, or AI vision.
 
-## 3. First operator sign-in
-Open `https://<your-app>/review.html` → the **SHIELD operator sign-in** appears → log in
-with a `DEYSAFE_OPERATORS` account. The console page is public (it's just the login
-shell); all operator **data** is gated server-side (401 without a valid login).
+## 4. Verify Railway/Postgres
 
-## What's built and live after deploy
-- Installable **PWA**: live-location area risk (GREEN→RED), anonymous reporting, **WakaSafe**
-  real road routing (OSRM) + Journey Guard, **SOS** (silent/audible) with persistent
-  decoy "kill switch", **FindMe** with server-side triangulation (probability zones +
-  confidence), camera/video evidence capture, voice, offline outbox.
-- **SHIELD** console: operator sign-in, review queue, verify/dismiss (human gate before any
-  public alert), live-feed pull, cases + evidence gallery + GeoTrace.
-- **774-LGA** offline gazetteer + open OpenStreetMap geocoding; Postgres dual-mode.
+Run the full local gate against a disposable Postgres or the Railway-provided URL:
 
-## Still needs build/hardware (not config)
-- Native mobile app for **background Bluetooth mesh** scanning + a real **DeySafe Tag**.
-- Raw video **object storage at scale** + a video-AI pipeline (capture + R2 metadata exist).
-- Postgres **connection pooling** (pgbouncer) for high concurrent traffic.
-- NDPA data **retention/erasure** policy + a staffed 24/7 operator + signed 112/NGO handoff.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\verify_all.ps1 -Postgres -DatabaseUrl "<DATABASE_URL>"
+```
 
-## ⚠️ Launch posture
-Go public **warning-only beta** first: `DEMO_MODE=0`, a human verifying before any public
-RED alert, "developing/unverified" labels kept, and no promise of guaranteed rescue or
-automatic dispatch. Prove one corridor (e.g. Kaduna–Abuja) before claiming national reach.
+Pass criteria:
+
+- `/api/health` reports `database.backend == "postgres"`.
+- All validation gates pass.
+- `launch_posture.errors` is empty when `DEYSAFE_ENV=production`.
+- `safety_tick.enabled` is true when `DEYSAFE_SAFETY_TICK_MINUTES` is set.
+
+## 5. What Is Live After Deploy
+
+- Installable PWA: live-location area risk, anonymous reporting, WakaSafe road
+  routing plus Journey Guard, SOS with Safety Vault and decoy lock, FindMe
+  triangulation, camera/video evidence metadata, voice, and offline outbox.
+- SHIELD console: operator sign-in, review queue, verify/dismiss human gate,
+  live feed pull, cases, evidence gallery, GeoTrace, delivery receipts, source
+  health, and ops readiness.
+- Generated nationwide offline gazetteer: all 774 LGAs plus thousands of
+  ward-level coordinate records, OpenStreetMap fallback, and optional Google
+  Places suggestions.
+
+## 6. Still Needs Native Or Operations Work
+
+- Native mobile app for background Bluetooth scanning, hardware activation,
+  push-to-talk, and stronger background location.
+- Real video AI pipeline. Capture, R2 metadata, and custody facts exist, but
+  pixel/frame-level vision still needs a provider adapter.
+- Postgres connection pooling for high concurrent traffic.
+- Staffed operator coverage, responder agreements, 112/NGO handoff, and public
+  field operations.
+
+## 7. Launch Posture
+
+Go public as a warning-only beta first: `DEMO_MODE=0`, human verification before
+any public RED alert, "developing/unverified" labels kept, no rescue guarantee,
+and no automatic official dispatch claim.

@@ -221,6 +221,12 @@
     <div class="rcard" id="opsCard"><div class="rempty">No source runs recorded yet.</div></div>
   </div>
 
+  <div class="section" id="secRetention">
+    <div class="shead"><h2>Privacy retention</h2><span class="cnt" id="retCnt">0</span>
+      <button class="rf" onclick="loadRetention()">Refresh</button></div>
+    <div class="rcard" id="retCard"><div class="rempty">No retention plan loaded yet.</div></div>
+  </div>
+
   <div class="section" id="secRep">
     <div class="shead"><h2>Source reputation</h2><span class="cnt" id="rCnt">0</span>
       <button class="rf" onclick="loadReputation()">Refresh</button></div>
@@ -445,11 +451,12 @@ function clearResponse(){
   CASES=[]; OPEN_CASE=null; $('#caseDetail').innerHTML='';
   $('#delivCard').innerHTML='<div class="rempty">No delivery receipts yet.</div>'; $('#dCnt').textContent='0';
   $('#opsCard').innerHTML='<div class="rempty">No source runs recorded yet.</div>'; $('#oCnt').textContent='0';
+  $('#retCard').innerHTML='<div class="rempty">No retention plan loaded yet.</div>'; $('#retCnt').textContent='0';
   $('#repCard').innerHTML='<div class="rempty">No reporter reputation rows yet.</div>'; $('#rCnt').textContent='0';
   $('#opsReadyCard').innerHTML='<div class="rempty">No ops readiness data yet.</div>'; $('#orCnt').textContent='0';
 }
 
-function loadResponse(){ loadTasks(); loadJourneys(); loadCases(); loadAlerts(); loadDeliveries(); loadOps(); loadReputation(); loadOpsReadiness(); }
+function loadResponse(){ loadTasks(); loadJourneys(); loadCases(); loadAlerts(); loadDeliveries(); loadOps(); loadRetention(); loadReputation(); loadOpsReadiness(); }
 
 // ---- Responder tasks ------------------------------------------------------------
 async function loadTasks(){
@@ -871,6 +878,27 @@ async function loadOps(){
     return '<div class="drow"><span class="ch">'+esc(x.source||'source')+'</span>'
       + '<span class="addr">'+detail+(x.last_run_at?' · last '+esc(x.last_run_at):'')+'</span>'
       + '<span class="dstat '+(ok?'ok':'failed')+'">'+esc(status)+'</span></div>';
+  }).join('');
+}
+
+// ---- Privacy retention --------------------------------------------------------
+async function loadRetention(){
+  let r;
+  try{ r = await fetch('/api/retention',{headers:authHeaders()}); }
+  catch(e){ $('#retCard').innerHTML='<div class="rempty">Could not reach the server.</div>'; return; }
+  if(respAuthFail(r)) return;
+  let d={}; try{ d = await r.json(); }catch(e){ d={}; }
+  const rows = d.policies||[];
+  $('#retCnt').textContent = d.total_matched || 0;
+  if(!rows.length){ $('#retCard').innerHTML='<div class="rempty">No retention policies available.</div>'; return; }
+  const head = '<div class="brightline">Dry-run only. Matched records are not deleted unless an admin explicitly posts confirm=APPLY_RETENTION.</div>';
+  $('#retCard').innerHTML = head + rows.map(function(x){
+    const matched = Number(x.matched||0);
+    const cls = matched ? 'sim' : 'ok';
+    const detail = x.error ? esc(x.error) : ('table '+esc(x.table||'')+' · cutoff '+esc(x.cutoff||'')+' · '+esc(x.days||'')+' days');
+    return '<div class="drow"><span class="ch">'+esc(x.name||'policy')+'</span>'
+      + '<span class="addr">'+detail+'</span>'
+      + '<span class="dstat '+cls+'">'+esc(matched)+'</span></div>';
   }).join('');
 }
 

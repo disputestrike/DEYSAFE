@@ -345,41 +345,57 @@ _PLACES = [_expand(r) for r in _RAW]
 
 
 # ---------------------------------------------------------------------------
-# 2. Optional best-effort merge of config/locations.json (still OFFLINE)
+# 2. Optional best-effort merge of generated/admin config files (still OFFLINE)
 # ---------------------------------------------------------------------------
 # So the embedded core and the project's editable starter set never drift apart,
-# we fold in any rows from config/locations.json that we don't already have. This
-# is the ONLY file read, it's wrapped so a missing/corrupt file cannot break
-# import, and it does NO network. It also gives operators a single place to drop
-# the full HDX/OCHA LGA+ward export later without touching code (GEO-03 "offline
-# gazetteer cache" + "community-contributed locations").
+# we fold in generated rows and config/locations.json that we don't already have.
+# These are the ONLY files read, they are wrapped so a missing/corrupt file cannot
+# break import, and they do NO network. config/nigeria_admin_places.json is built
+# by scripts/import_nigeria_gazetteer.py and gives us a repeatable nationwide
+# offline baseline (LGAs + wards) instead of a hand-waved "full Nigeria" claim.
 def _merge_config():
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(base, "config", "locations.json")
-    try:
-        with open(path, encoding="utf-8") as f:
-            rows = (json.load(f) or {}).get("places", [])
-    except Exception:
-        return  # no file / bad JSON -> embedded table stands alone
     have = {_norm(p["name"]) for p in _PLACES}
-    for r in rows:
+
+    def merge_file(relpath, default_source):
+        path = os.path.join(base, relpath)
         try:
-            nm = r["name"]
-            key = _norm(nm)
+            with open(path, encoding="utf-8") as f:
+                rows = (json.load(f) or {}).get("places", [])
         except Exception:
-            continue
-        if not key or key in have:
-            continue
-        _PLACES.append({
-            "name": nm,
-            "lat": float(r["lat"]),
-            "lng": float(r["lng"]),
-            "state": r.get("state", ""),
-            "kind": r.get("kind", "town"),
-            "hotspot": bool(r.get("hotspot", False)),
-            "aliases": list(r.get("aliases", []) or []),
-        })
-        have.add(key)
+            return 0  # no file / bad JSON -> embedded table stands alone
+        added = 0
+        for r in rows:
+            try:
+                nm = r["name"]
+                key = _norm(nm)
+            except Exception:
+                continue
+            if not key or key in have:
+                continue
+            try:
+                lat = float(r["lat"])
+                lng = float(r["lng"])
+            except Exception:
+                continue
+            if not (3.0 <= lat <= 15.0 and 2.0 <= lng <= 15.5):
+                continue
+            _PLACES.append({
+                "name": nm,
+                "lat": lat,
+                "lng": lng,
+                "state": r.get("state", ""),
+                "kind": r.get("kind", "town"),
+                "hotspot": bool(r.get("hotspot", False)),
+                "aliases": list(r.get("aliases", []) or []),
+                "source": r.get("source") or default_source,
+            })
+            have.add(key)
+            added += 1
+        return added
+
+    merge_file(os.path.join("config", "nigeria_admin_places.json"), "generated_nigeria_admin_places")
+    merge_file(os.path.join("config", "locations.json"), "config_locations")
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +519,7 @@ def _result(rec, confidence):
         "hotspot": rec.get("hotspot", False),
         "confidence": confidence,
         "score": CONF_SCORE[confidence],
-        "source": SOURCE,
+        "source": rec.get("source") or SOURCE,
     }
 
 
@@ -673,12 +689,30 @@ def size():
     return len(_PLACES)
 
 
+def coverage():
+    """Small source/coverage summary for launch-readiness checks and /api/places."""
+    by_kind = {}
+    by_source = {}
+    for p in _PLACES:
+        kind = p.get("kind", "town")
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+        src = p.get("source") or SOURCE
+        by_source[src] = by_source.get(src, 0) + 1
+    return {
+        "total": len(_PLACES),
+        "states": len(states()),
+        "kinds": by_kind,
+        "sources": by_source,
+        "nationwide_admin_dataset": by_kind.get("lga", 0) >= 774 and by_kind.get("ward", 0) >= 8000,
+    }
+
+
 # ===========================================================================
 # 6. SELF-TEST  (python engine/gazetteer.py)
 # ===========================================================================
 if __name__ == "__main__":
     # --- table integrity ---------------------------------------------------
-    assert size() >= 150, "embedded table should be a substantial expansion (got %d)" % size()
+    assert size() >= 150, "table should be a substantial expansion (got %d)" % size()
     # every record is well-formed and in-bounds for Nigeria (~lat 4..14, lng 2..15)
     seen_names = set()
     for p in _PLACES:

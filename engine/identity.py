@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS guardian_contacts (
   name TEXT,
   channel TEXT,
   address TEXT,
+  address_ciphertext TEXT,
   address_hash TEXT,
   verified INTEGER DEFAULT 0,
   active INTEGER DEFAULT 1,
@@ -168,6 +169,7 @@ CREATE TABLE IF NOT EXISTS guardian_contacts (
   name TEXT,
   channel TEXT,
   address TEXT,
+  address_ciphertext TEXT,
   address_hash TEXT,
   verified INTEGER DEFAULT 0,
   active INTEGER DEFAULT 1,
@@ -259,6 +261,75 @@ def hmac_hex(kind, value):
     return hmac.new(key, msg, hashlib.sha256).hexdigest()
 
 
+def _b64_bytes(data):
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _unb64_bytes(text):
+    pad = "=" * (-len(str(text or "")) % 4)
+    return base64.urlsafe_b64decode((str(text or "") + pad).encode("ascii"))
+
+
+def _vault_key():
+    raw = (os.environ.get("DEYSAFE_VAULT_KEY") or effective_secret()).encode("utf-8")
+    return hashlib.sha256(b"deysafe-vault-v1|" + raw).digest()
+
+
+def _vault_stream(key, nonce, length):
+    out = b""
+    counter = 0
+    while len(out) < length:
+        counter += 1
+        out += hmac.new(key, nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest()
+    return out[:length]
+
+
+def encrypt_secret(value, aad=""):
+    """Authenticated reversible vault encryption for server-side contact secrets.
+
+    Stdlib-only so this repo can still boot without a build step. The production
+    requirement is a long DEYSAFE_SECRET or DEYSAFE_VAULT_KEY; startup already
+    fails closed in production when the secret is weak.
+    """
+    text = str(value or "")
+    if not text:
+        return ""
+    key = _vault_key()
+    nonce = secrets.token_bytes(16)
+    raw = text.encode("utf-8")
+    stream = _vault_stream(key, nonce, len(raw))
+    ct = bytes(a ^ b for a, b in zip(raw, stream))
+    aad_b = str(aad or "").encode("utf-8")
+    tag = hmac.new(key, b"v1|" + nonce + b"|" + aad_b + b"|" + ct, hashlib.sha256).digest()[:16]
+    return "v1.%s.%s.%s" % (_b64_bytes(nonce), _b64_bytes(ct), _b64_bytes(tag))
+
+
+def decrypt_secret(token, aad=""):
+    token = str(token or "")
+    if not token:
+        return ""
+    parts = token.split(".")
+    if len(parts) != 4 or parts[0] != "v1":
+        return ""
+    try:
+        nonce = _unb64_bytes(parts[1])
+        ct = _unb64_bytes(parts[2])
+        tag = _unb64_bytes(parts[3])
+    except Exception:
+        return ""
+    key = _vault_key()
+    aad_b = str(aad or "").encode("utf-8")
+    want = hmac.new(key, b"v1|" + nonce + b"|" + aad_b + b"|" + ct, hashlib.sha256).digest()[:16]
+    if not hmac.compare_digest(tag, want):
+        return ""
+    stream = _vault_stream(key, nonce, len(ct))
+    raw = bytes(a ^ b for a, b in zip(ct, stream))
+    try:
+        return raw.decode("utf-8")
+    except Exception:
+        return ""
+
+
 def normalize_phone(phone):
     raw = re.sub(r"[^0-9+]", "", str(phone or "").strip())
     if raw.startswith("00"):
@@ -340,6 +411,18 @@ def redact_address(addr):
     return s[:4] + "..." + s[-3:]
 
 
+def guardian_address(row):
+    if not row:
+        return ""
+    cipher = row.get("address_ciphertext") or ""
+    if cipher:
+        plain = decrypt_secret(cipher, aad=row.get("guardian_uuid") or "")
+        if plain:
+            return plain
+    # Migration fallback for older rows created before vault encryption.
+    return row.get("address") or ""
+
+
 def public_user(row):
     if not row:
         return None
@@ -354,11 +437,12 @@ def public_user(row):
 
 
 def public_guardian(row):
+    addr = guardian_address(row)
     return {
         "guardian_uuid": row.get("guardian_uuid"),
         "name": row.get("name") or "Guardian",
         "channel": row.get("channel") or "sms",
-        "address_redacted": redact_address(row.get("address") or ""),
+        "address_redacted": redact_address(addr),
         "verified": bool(row.get("verified")),
         "active": bool(row.get("active")),
     }

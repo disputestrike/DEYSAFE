@@ -29,7 +29,7 @@ F = [0]
 FAILS = []
 
 
-def call(method, path, body=None, token="", operator=False, timeout=25):
+def call(method, path, body=None, token="", operator=False, timeout=25, extra_headers=None):
     data = json.dumps(body).encode("utf-8") if body is not None else None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -37,6 +37,8 @@ def call(method, path, body=None, token="", operator=False, timeout=25):
     if operator and OPTOKEN:
         headers["Authorization"] = "Bearer " + OPTOKEN
         headers["X-Operator-Token"] = OPTOKEN
+    if extra_headers:
+        headers.update(extra_headers)
     req = urllib.request.Request(BASE + path, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -75,6 +77,9 @@ print("target: " + BASE)
 
 app_html = app_text(os.path.join("app", "index.html"))
 sw_js = app_text(os.path.join("app", "sw.js"))
+api_py = app_text(os.path.join("engine", "api.py"))
+identity_py = app_text(os.path.join("engine", "identity.py"))
+db_py = app_text(os.path.join("engine", "db.py"))
 
 check("browser bundle does not store guardian PII in ds_trusted localStorage",
       "ds_trusted" not in app_html and "tcAddress" not in app_html and "contacts:tcLoad" not in app_html)
@@ -82,6 +87,14 @@ check("Profile exposes phone session, Safety PINs, Safety Vault, push, and MySaf
       all(x in app_html for x in (
           "/api/signup/start", "/api/profile/pins", "/api/vault/guardians",
           "/api/push/config", "/api/mysafe/places", "Safety Vault guardians")))
+check("Browser session uses HttpOnly cookie path instead of persistent localStorage bearer",
+      "Set-Cookie" in api_py and "ds_session" in api_py and "localStorage.setItem('ds_session'" not in app_html
+      and "localStorage.removeItem('ds_session')" in app_html,
+      "session cookie/localStorage markers missing")
+check("Safety Vault stores guardian addresses as encrypted ciphertext",
+      "address_ciphertext" in identity_py and "encrypt_secret" in identity_py
+      and "guardian_address" in identity_py and "address_ciphertext" in db_py,
+      "guardian ciphertext markers missing")
 check("SafeMeet is voice-first and AI-filled",
       "meetNL" in app_html and "fillSafeMeetAI" in app_html and "mode:'meet'" in app_html)
 check("service worker can display push notifications",
@@ -112,6 +125,11 @@ policy = (j.get("user") or {}).get("guardian_policy_id")
 check("GET /api/me with session returns redacted user and policy",
       s == 200 and j.get("ok") is True and policy and "phone" in (j.get("user") or {}), "status=%s" % s)
 
+s, j, _ = call("GET", "/api/me", extra_headers={"Cookie": "ds_session=" + token})
+check("GET /api/me accepts HttpOnly cookie session without bearer token",
+      s == 200 and j.get("ok") is True and (j.get("user") or {}).get("guardian_policy_id") == policy,
+      "status=%s" % s)
+
 s, j, _ = call("POST", "/api/profile/pins", {
     "app_pin": "1111",
     "safety_pin": "2468",
@@ -129,9 +147,19 @@ s, j, raw = call("POST", "/api/vault/guardians", {
     "channel": "sms",
     "address": "+2348000000001",
 }, token=token)
+g1 = j.get("guardian") or {}
+g1_code = j.get("dev_verification_code") or ""
 check("first guardian can be added after phone verification",
-      s == 200 and j.get("ok") is True and (j.get("guardian") or {}).get("address_redacted"),
+      s == 200 and j.get("ok") is True and g1.get("address_redacted") and g1_code,
       "status=%s raw=%s" % (s, raw[:160]))
+
+s, j, _ = call("POST", "/api/vault/guardians/verify", {
+    "guardian_uuid": g1.get("guardian_uuid"),
+    "code": g1_code,
+}, token=token)
+check("guardian verification confirms Safety Vault contact",
+      s == 200 and j.get("ok") is True and (j.get("guardian") or {}).get("verified") is True,
+      "status=%s raw=%s" % (s, j))
 
 s, j, _ = call("POST", "/api/vault/guardians", {
     "name": "Bello",

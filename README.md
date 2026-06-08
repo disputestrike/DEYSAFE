@@ -1,113 +1,134 @@
-# DeySafe — *Know before you waka*
+# DeySafe - Know Before You Waka
 
-A civilian, **rights-preserving early-warning + find-people platform** for Nigeria's
-kidnapping / banditry crisis. **A warning system, not a targeting system.** It detects,
-locates, corroborates, warns, and helps find missing people — it never tracks individuals
-without consent, never auto-acts, and never cues force.
+A civilian, rights-preserving early-warning and find-people platform for
+Nigeria's kidnapping and banditry crisis. It is a warning system, not a targeting
+system: detect, locate, corroborate, warn, and help families search without
+scoring people, tracking without consent, or auto-dispatching force.
 
-- **DeySafe** — the public app (calm, light, map-first).
-- **WakaSafe** — road / route safety.
-- **FindMe** — missing-person triangulation.
-- **SHIELD** — the operator "situation room" + human-verification console (`/review.html`).
+- **DeySafe** - public PWA.
+- **WakaSafe** - road and route safety.
+- **FindMe** - missing-person triangulation.
+- **SHIELD** - operator situation room and human-verification console at
+  `/review.html`.
 
-> Status: working **prototype**. The current source-of-truth map is
-> `docs/WORK_INDEX.md`; gates must pass before public release. Not yet proven with
-> real users/data — see *Honest scope*.
+## Bright Lines
 
----
+- Event-centric, not person-centric.
+- Nothing is auto-verified; human review gates public RED alerts.
+- Location stays on-device unless the user explicitly shares it.
+- Public data only; no telecom, financial, RF, biometric, or force-targeting feed.
+- No automatic dispatch to armed responders.
+- Opt-in only for person-locating.
+- Anonymous reporting by default, with redaction and operator gating.
 
-## Bright lines (encoded in the code, not just docs)
-- **Event-centric, not person-centric** — we warn about *events at places*; we never score people.
-- **Nothing is auto-verified** — the max automatic status is `needs_human_review`; a **human** confirms before any public RED alert.
-- **Your location stays on your device** — "locate me" and proactive warnings are computed **on-device**; your GPS is never sent to or stored on the server.
-- **Public data only** — no telecom / financial / RF / biometric ingestion.
-- **No auto-dispatch to armed responders.** SOS shares only with people *you* choose.
-- **Opt-in only** for any person-locating (a family registers a missing relative's beacon); unknown beacons are ignored.
-- **Anonymous** reporting, no PII; parameterised queries; user content escaped.
+## What It Does
 
----
+**Public app**
 
-## What it does
+- Map-first GREEN / YELLOW / ORANGE / RED safety view.
+- Area safety report for any typed Nigerian town, village, LGA, ward, road, or
+  landmark resolved through the offline gazetteer, OSM fallback, and optional
+  Google Places suggestions.
+- WakaSafe: type any `from -> to`, auto-render the map, road route when
+  available, corridor fallback when not, spoken summary, Journey Guard, and
+  foreground warnings.
+- Profile / Safety Vault: phone OTP session, HttpOnly cookie support, encrypted
+  server-side guardian storage, guardian verification, Safety PIN, Duress PIN,
+  push test/confirm, and MySafe places/routes.
+- Locate-me and proactive proximity warnings computed in the browser.
+- Voice in and out. Critical SOS/readiness/profile phrases respect English,
+  Nigerian Pidgin, Hausa, Yoruba, and Igbo profile choices.
+- SOS: audible or silent, durable server event, Safety Vault escalation,
+  PIN-gated close request, Duress PIN, and persistent decoy lock.
+- Camera/video evidence: attach image/video fingerprint and file facts to an
+  anonymous report; Cloudflare R2 upload is key-gated.
+- AI evidence review: visible media triage from the home screen; honest
+  `vision_ready=false` until a real vision adapter is configured.
+- SafeMeet: say/type the risky meeting once, AI fills the form, and the phone
+  foreground-watches arrival/check-ins/anomalies.
+- Police-misconduct category, rights card, and area-tagged community channels.
 
-**Public app (DeySafe PWA)**
-- Map-first home (Leaflet) with GREEN / YELLOW / ORANGE / RED severity.
-- **Geofenced area report** — type *any* town/village (free-text geocoding via OpenStreetMap, no key) → a written report of incidents within range + a "drill-fence" circle.
-- **WakaSafe** — type any *from -> to* once; road route risk when available, clearly labeled corridor fallback when not, automatic map render, spoken summary, foreground Journey Guard, warnings, check-ins, and arrival handling.
-- **Profile / Safety Vault** — phone OTP session, Safety PIN, Duress PIN, server-side guardian vault, push-alert test/confirm, and MySafe places/routes. Guardian PII is not stored in browser localStorage.
-- **📍 Locate-me** (Google-Maps style, on-device) + **🛡 proactive proximity warnings** (Waze-style: warns of danger near you as you move).
-- **Voice in & out** — speak "am I safe in Kaduna" / "Lagos to Kano"; it reads the report back.
-- **SOS** — *Automatic* (alarm + on-device location + shareable link) or *Hold-&-Speak* (auto-sends after dead air), with silent mode, Safety Vault guardian escalation, PIN-gated closure, Duress PIN, and a decoy privacy lock.
-- **Camera/video evidence** — attach an image/video fingerprint and file facts to an anonymous report; optional Cloudflare R2 upload is available when storage keys and CORS are configured.
-- **AI evidence review** — visible image/video triage from the home screen: validates media, captures custody facts, uses AI for written context when keys are present, and clearly flags that pixel/frame-level vision is not wired until a vision adapter is added.
-- **SafeMeet** — say/type the meeting once, AI fills the form, then the phone auto-watches arrival in the foreground, records check-ins, and flags anomalies.
-- **Report danger** (any town → geocoded, human-gated incident), **police-misconduct** category + **know-your-rights** card, **community channels** (area-tagged posts).
+**FindMe**
 
-**FindMe — missing persons**
-- Cases (incl. group / mass-abduction), crowdsourced **sightings** that re-anchor the search.
-- **★ Venn-diagram triangulation** — each sighting is a reachability ring; the densest overlap = most-likely zone.
-- **Movement prediction (Strava-style)** — heading cones + forward marker from the sighting trail.
-- **Bluetooth crowd-relay (AirTag model, backend)** — register a beacon; any phone that hears it logs a sighting (the offline reach; the BLE scanner itself is the native-app milestone).
+- Missing-person cases and crowdsourced sightings.
+- Venn-style reachability triangulation: last-seen plus sightings become
+  probability rings; densest overlap becomes a likely search zone.
+- Movement prediction cone from the newest sighting trail.
+- Backend beacon relay model with signed envelopes and replay checks; native BLE
+  scanning remains a native-app milestone.
 
-**Intelligence engine + SHIELD console**
-- Ingest (samples + **live Nigerian news RSS**) → geo-parse → corroborate → **human gate** → tiered alerts.
-- Operator triage queue, one-click **live scrape**, Verify / Dismiss, auto **decay** (stale incidents age off the map).
-- **Real AI** (Cerebras round-robin, key-gated) extracts incidents from news + powers natural-language intake and evidence-context triage. Falls back to rule-based with no key; computer-vision analysis is a separate pending adapter.
+**SHIELD console**
 
-**Reach**
-- In-app alerts + **SMS inbound + USSD menu** (Ushahidi-style basic-phone access). Outbound SMS is key-gated (Africa's Talking).
+- Operator sign-in, queue, verify/dismiss, live public feed pull, delivery
+  receipts, source health, privacy retention dry-run, launch readiness,
+  responder tasks, cases, evidence, GeoTrace, sentinels, safety points, and ops
+  readiness.
 
----
-
-## Run it
+## Run It
 
 ```bash
 python engine/api.py
 ```
-- Public app:      http://localhost:4500
-- SHIELD console:  http://localhost:4500/review.html
 
-Run the pre-release gate against the live server:
+- Public app: `http://localhost:4500`
+- SHIELD console: `http://localhost:4500/review.html`
+
+Run the gates:
+
 ```bash
-python validate.py            # 56 checks: endpoints + chaos + functional
+powershell -ExecutionPolicy Bypass -File scripts\verify_all.ps1
 ```
 
-(Original Day-1 CLI detection pass still works: `python engine/pipeline.py [--live]`.)
+## Configuration
 
-## Configuration (all via environment variables — never in code)
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Use PostgreSQL (else SQLite). Falls back to SQLite if unreachable. |
-| `CEREBRAS_API_KEY_1..5` (or `CEREBRAS_API_KEY`) | Turns on real AI extraction + intake. |
-| `CEREBRAS_MODEL` | Override the model name (default `llama-3.3-70b`). |
-| `AT_USERNAME`, `AT_API_KEY` | Africa's Talking — turns on **outbound** SMS. |
-| `CLOUDFLARE_R2_*`, `R2_*` | Optional Cloudflare R2 direct browser upload for image/video evidence. See `.env.example`. |
-| `DEYSAFE_SECRET` | Required in production for OTP/session/PIN HMACs. |
-| `DEYSAFE_OTP_ECHO` | `1` only in validation/demo if you need the OTP returned by the API. |
-| `DEYSAFE_BEACON_SECRET` | Signs beacon relay envelopes before FindMe/Bluetooth pilot use. |
-| `DEYSAFE_VAPID_PUBLIC_KEY`, `DEYSAFE_VAPID_PRIVATE_KEY` | Web Push subscription/testing. Without these, the app only records permission/test intent. |
-| `DEMO_MODE` | `0` for production/no synthetic data; local demo defaults may seed examples. |
-| `PORT` | Server port (default 4500). |
-
----
+| `DATABASE_URL` | Use PostgreSQL. SQLite is local fallback unless `DEYSAFE_REQUIRE_POSTGRES=1`. |
+| `DEYSAFE_REQUIRE_POSTGRES` | Fail closed when production requires Postgres. |
+| `DEYSAFE_SECRET` | Required for OTP/session/PIN HMACs and default vault encryption key. |
+| `DEYSAFE_VAULT_KEY` | Optional separate Safety Vault encryption key. |
+| `DEYSAFE_BEACON_SECRET` | Signs beacon relay envelopes. |
+| `DEYSAFE_INGEST_MINUTES` | Optional live public RSS ingest interval. |
+| `DEYSAFE_SAFETY_TICK_MINUTES` | Optional stale Journey/SafeMeet check interval. |
+| `DEYSAFE_VAPID_PUBLIC_KEY`, `DEYSAFE_VAPID_PRIVATE_KEY` | Web Push subscription/testing. |
+| `AT_USERNAME`, `AT_API_KEY` | Africa's Talking outbound SMS. |
+| `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID` | WhatsApp Cloud API alerts. |
+| `CLOUDFLARE_R2_*`, `R2_*` | Cloudflare R2 direct browser upload for evidence. |
+| `GOOGLE_PLACES_API_KEY`, `GOOGLE_MAPS_API_KEY` | Optional Google Places Autocomplete. |
+| `CEREBRAS_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY` | AI extraction/intake providers. |
+| `DEMO_MODE` | `0` for production/no synthetic data. |
+| `PORT` | Server port, default `4500`. |
 
 ## Architecture
-- **Backend:** Python **standard library only** (`http.server`, `sqlite3`, `urllib`) — one optional dep, `psycopg2-binary`, used only in Postgres mode.
-- **Storage:** dual-mode **SQLite ↔ PostgreSQL** (auto-selects on `DATABASE_URL`).
-- **Frontend:** vanilla JS PWA + Leaflet (no build step). Install from browser: Android/desktop via Install/Add to Home Screen; iPhone via Safari Share -> Add to Home Screen.
-- **Deploy:** Railway-ready (`Procfile`, binds `0.0.0.0:$PORT`, seed-if-empty). Connect the repo → it auto-deploys; add a Postgres plugin for persistence.
+
+- Backend: Python standard library server, with optional `psycopg2-binary` only
+  for Postgres mode.
+- Storage: SQLite to PostgreSQL dual-mode, encrypted Safety Vault contacts for
+  new guardian records.
+- Frontend: vanilla JS PWA plus Leaflet, no build step.
+- Nationwide data: generated offline table containing all 774 LGAs plus
+  thousands of ward-level coordinate records, with OSM and optional Google
+  suggestions.
+- Deploy: Railway-ready `Procfile`, binding `0.0.0.0:$PORT`.
 
 ## Validation
-`docs/WORK_INDEX.md` shows where the current work lives, what was recovered, and what still needs proof. `docs/TRACEABILITY.md` is the North Star matrix (every feature -> where it lives -> status -> how it's validated). `docs/LAUNCH_COMPLIANCE_CROSSWALK.md` is the public-release crosswalk and corrective-action matrix. The gates must pass before any release.
 
----
+`docs/WORK_INDEX.md` shows where recovered work lives. `docs/TRACEABILITY.md` and
+`docs/LAUNCH_COMPLIANCE_CROSSWALK.md` are the source-of-truth matrices. Gates
+must pass before release.
 
-## Honest scope (where we really are)
-**✅ Built & working:** everything above in the web + server stack when the local gates are green.
-**◑ Partial:** AI (built; needs a key — verify on the deployment) · SMS/USSD *send* (needs Africa's Talking) · Web Push provider delivery (needs VAPID + receipt proof) · audit log (data only, no UI) · NDPA retention schedule.
-**☐ Not built / native:** the native app (background **Bluetooth mesh** scanner + real-time **push-to-talk**) · user reputation · satellite + 72-h forecast · the production Next.js/Supabase stack · NRT integration.
+## Honest Scope
 
-We've out-*designed* the incumbents (Ushahidi / Zello / Govia ideas folded in); we have **not** yet out-*proven* them — that needs real deployment, verified data, operators, and the native client.
+Built in the web/server stack when gates are green: the public PWA, WakaSafe,
+FindMe, SHIELD, Safety Vault, retention dry-run, generated national gazetteer,
+and launch-readiness checks.
 
----
+Partial/provider-dependent: AI, SMS/WhatsApp delivery, Web Push provider
+delivery, R2 raw media upload, Google Places, road-routing SLA, Railway/Postgres
+live proof, and real provider receipts.
+
+Not built in this repo yet: native app background BLE scanning, hardware button,
+wearable activation, real video AI pipeline, staffed 24/7 operator coverage,
+responder agreements, and field operations.
 
 This repository folder is **DEYSAFE**; keep new work, docs, tests, and assets here.

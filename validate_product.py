@@ -27,7 +27,7 @@ OP_PATHS = (
     "/api/journeys", "/api/cases", "/api/shield", "/api/case", "/api/evidence",
     "/api/geotrace", "/api/sentinels", "/api/mesh", "/api/trackers",
     "/api/ops-agreements", "/api/ops-drills", "/api/ops-readiness",
-    "/api/safety-points",
+    "/api/safety-points", "/api/retention", "/api/launch-readiness",
 )
 
 P = [0]
@@ -103,18 +103,21 @@ check("GET /api/route exposes auto-renderable road/fallback route metadata",
       and "road_routing" in j and j.get("from_place") and j.get("to_place"),
       "status=%s mode=%s waypoints=%s raw=%s" % (s, j.get("route_mode"), len(j.get("waypoints") or []), raw[:160]))
 app_path = os.path.join(os.path.dirname(__file__), "app", "index.html")
+review_path = os.path.join(os.path.dirname(__file__), "app", "review.html")
 sw_path = os.path.join(os.path.dirname(__file__), "app", "sw.js")
 manifest_path = os.path.join(os.path.dirname(__file__), "app", "manifest.json")
 gitignore_path = os.path.join(os.path.dirname(__file__), ".gitignore")
 env_example_path = os.path.join(os.path.dirname(__file__), ".env.example")
 try:
     app_html = open(app_path, encoding="utf-8").read()
+    review_html = open(review_path, encoding="utf-8").read()
     sw_js = open(sw_path, encoding="utf-8").read()
     manifest_json = open(manifest_path, encoding="utf-8").read()
     gitignore_txt = open(gitignore_path, encoding="utf-8").read()
     env_example = open(env_example_path, encoding="utf-8").read()
 except Exception:
     app_html = ""
+    review_html = ""
     sw_js = ""
     manifest_json = ""
     gitignore_txt = ""
@@ -168,15 +171,40 @@ check("Profile contains phone OTP, Safety PINs, and server Safety Vault",
       and "/api/vault/guardians" in app_html and "Safety Vault guardians" in app_html
       and "ds_trusted" not in app_html,
       "profile/vault markers missing or local guardian storage still present")
+check("Nigerian language selector drives critical safety phrases",
+      "const I18N" in app_html and "pcm:" in app_html and "ha:" in app_html
+      and "yo:" in app_html and "ig:" in app_html and "tx('sos_silent')" in app_html,
+      "language phrase markers missing")
 check("MySafe places/routes and Web Push receipt testing are wired",
       "/api/mysafe/places" in app_html and "/api/mysafe/routes" in app_html
       and "/api/push/config" in app_html and "/api/push/test" in app_html
       and "I received the alert" in app_html,
       "mysafe/push markers missing")
+check("SHIELD exposes privacy retention dry-run controls",
+      "/api/retention" in review_html and "Privacy retention" in review_html
+      and "confirm=APPLY_RETENTION" in review_html,
+      "retention UI markers missing")
 check("SafeMeet has voice-first AI intake and automatic watch posture",
       "meetNL" in app_html and "fillSafeMeetAI" in app_html
       and "watching for arrival automatically" in app_html,
       "SafeMeet AI/auto markers missing")
+s, j, raw = call("GET", "/api/places", want_token=False)
+coverage = j.get("coverage") or {}
+check("Nigeria-wide generated gazetteer is loaded with all LGAs and thousands of wards",
+      s == 200 and coverage.get("nationwide_admin_dataset") is True
+      and (coverage.get("kinds") or {}).get("lga", 0) >= 774
+      and (coverage.get("kinds") or {}).get("ward", 0) >= 8000,
+      "status=%s coverage=%s raw=%s" % (s, coverage, raw[:200]))
+s, j, raw = call("GET", "/api/place-suggest?q=Ariaria%20Market&limit=8", want_token=False)
+check("Place suggestions combine offline national candidates with optional Google path",
+      s == 200 and j.get("ok") is True and any("Ariaria Market" in (x.get("name") or "") for x in (j.get("suggestions") or []))
+      and "google_places_configured" in j,
+      "status=%s raw=%s" % (s, raw[:240]))
+s, j, raw = call("GET", "/api/geocode?q=Ariaria%20Market", want_token=False)
+res = j.get("result") or {}
+check("Geocode resolves nationwide ward-level places offline before OSM/Google",
+      s == 200 and j.get("ok") is True and res.get("kind") == "ward" and res.get("state") == "Abia",
+      "status=%s result=%s raw=%s" % (s, res, raw[:240]))
 time.sleep(1.0)  # Wait for rate limit reset
 s, j, raw = call("POST", "/api/report", {
     "type": "armed_robbery",
@@ -457,6 +485,28 @@ check("GET /api/ops-readiness summarizes weak operational gaps",
       s == 200 and ops.get("sentinels", 0) >= 1 and ops.get("safety_points", 0) >= 2
       and ops.get("agreements", 0) >= 1 and ops.get("drills", 0) >= 1,
       "status=%s ops=%s" % (s, ops))
+s, j, _ = call("GET", "/api/health", want_token=False)
+check("GET /api/health exposes gazetteer and safety tick launch status",
+      s == 200 and (j.get("gazetteer") or {}).get("nationwide_admin_dataset") is True
+      and "safety_tick" in j,
+      "status=%s" % s)
+s, j, _ = call("GET", "/api/retention", want_token=False)
+check("GET /api/retention is operator gated",
+      s == 401, "status=%s" % s)
+s, j, raw = call("GET", "/api/retention", want_token=True)
+check("GET /api/retention returns dry-run NDPA retention plan",
+      s == 200 and j.get("applied") is False and isinstance(j.get("policies"), list),
+      "status=%s raw=%s" % (s, raw[:200]))
+s, j, raw = call("POST", "/api/retention", {}, want_token=True)
+check("POST /api/retention without explicit confirmation remains dry-run",
+      s == 200 and j.get("applied") is False and "dry_run" in (j.get("note") or ""),
+      "status=%s raw=%s" % (s, raw[:200]))
+s, j, raw = call("GET", "/api/launch-readiness", want_token=True)
+lr = j.get("launch_readiness") or {}
+check("GET /api/launch-readiness cross-checks providers, Postgres, retention, and gazetteer",
+      s == 200 and j.get("ok") is True and (lr.get("providers") or {}).get("nationwide_gazetteer") is True
+      and "retention" in lr and "database" in lr and "safety_tick" in lr,
+      "status=%s raw=%s" % (s, raw[:240]))
 
 
 print("\nRESULT: %d passed, %d failed" % (P[0], F[0]))

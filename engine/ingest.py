@@ -8,6 +8,7 @@ import os
 import re
 import html
 import datetime
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -52,6 +53,14 @@ def _parse_date(s):
     return datetime.datetime.now().isoformat(timespec="seconds")
 
 
+def _env_int(name, default, floor=1, ceiling=1000):
+    try:
+        value = int(float(os.environ.get(name, "") or default))
+    except Exception:
+        value = default
+    return max(floor, min(ceiling, value))
+
+
 def fetch_rss(url, name, limit=25, timeout=8):
     out = []
     try:
@@ -73,12 +82,31 @@ def fetch_rss(url, name, limit=25, timeout=8):
     return out
 
 
-def load_live():
+def load_live(max_feeds=None, per_feed_timeout=None, limit_per_feed=None, deadline_seconds=None):
+    """Fetch public RSS feeds with a hard practical budget.
+
+    RSS is a best-effort public signal rail. It must never make an operator
+    request hang just because one publisher is slow, so defaults are intentionally
+    bounded and can be tuned in Railway with DEYSAFE_RSS_* environment variables.
+    """
     with open(os.path.join(CONFIG, "sources.json"), encoding="utf-8") as f:
         srcs = json.load(f)["rss"]
+    if max_feeds is None:
+        max_feeds = _env_int("DEYSAFE_RSS_MAX_FEEDS", len(srcs), floor=1, ceiling=len(srcs))
+    if per_feed_timeout is None:
+        per_feed_timeout = _env_int("DEYSAFE_RSS_TIMEOUT_SECONDS", 3, floor=1, ceiling=20)
+    if limit_per_feed is None:
+        limit_per_feed = _env_int("DEYSAFE_RSS_LIMIT_PER_FEED", 12, floor=1, ceiling=50)
+    if deadline_seconds is None:
+        deadline_seconds = _env_int("DEYSAFE_RSS_DEADLINE_SECONDS", 30, floor=5, ceiling=120)
+
+    start = time.monotonic()
     out = []
-    for s in srcs:
-        got = fetch_rss(s["url"], s["name"])
+    for s in srcs[:max_feeds]:
+        if time.monotonic() - start > deadline_seconds:
+            print("  [ingest] deadline reached; skipping remaining feeds")
+            break
+        got = fetch_rss(s["url"], s["name"], limit=limit_per_feed, timeout=per_feed_timeout)
         print("  [ingest] {}: {} items".format(s["name"], len(got)))
         out.extend(got)
     return out

@@ -21,6 +21,7 @@ import hashlib
 import datetime
 import urllib.parse
 import urllib.request
+from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -104,6 +105,17 @@ import collections as _collections
 import threading as _threading
 _RECENT_REPORTS = _collections.deque(maxlen=400)
 _RECENT_LOCK = _threading.Lock()
+_SAFETY_TICK_THREAD = None
+_SAFETY_TICK_STOP = None
+_SAFETY_TICK_HEALTH = {
+    "enabled": False,
+    "minutes": 0,
+    "runs": 0,
+    "last_run_at": None,
+    "last_error_at": None,
+    "last_error": "",
+    "last_result": None,
+}
 
 
 def _remember_report(rep):
@@ -640,8 +652,33 @@ def production_config_report():
     if not all(_r2_config().get(k) for k in ("endpoint", "bucket", "access_key", "secret_key")):
         if os.environ.get("DEYSAFE_STORAGE_DISABLED", "").strip() != "1":
             warnings.append("R2 evidence storage is missing; set DEYSAFE_STORAGE_DISABLED=1 if intentionally disabled")
+    providers = {
+        "postgres": bool(os.environ.get("DATABASE_URL", "").strip()),
+        "operator_auth": bool(OPERATOR_TOKEN or auth.auth_enabled()),
+        "web_push": bool(os.environ.get("DEYSAFE_VAPID_PRIVATE_KEY") and os.environ.get("DEYSAFE_VAPID_PUBLIC_KEY")),
+        "sms": bool(os.environ.get("AT_API_KEY") and os.environ.get("AT_USERNAME")),
+        "whatsapp": bool(os.environ.get("WHATSAPP_TOKEN") and (
+            os.environ.get("WHATSAPP_PHONE_ID") or os.environ.get("WHATSAPP_PHONE_NUMBER_ID"))),
+        "onesignal": bool(os.environ.get("ONESIGNAL_API_KEY") and os.environ.get("ONESIGNAL_APP_ID")),
+        "cloudflare_r2": all(_r2_config().get(k) for k in ("endpoint", "bucket", "access_key", "secret_key")),
+        "google_places": bool(os.environ.get("GOOGLE_PLACES_API_KEY") or os.environ.get("GOOGLE_MAPS_API_KEY")),
+        "ai": ai.available(),
+        "road_routing": bool(os.environ.get("DEYSAFE_ROAD_ROUTING_URL") or os.environ.get("DEYSAFE_ROAD_ROUTING", "").strip() == "1"),
+        "ingest_scheduler": scheduler.enabled(),
+        "safety_tick": _safety_tick_minutes() > 0,
+        "vault_encryption": len((os.environ.get("DEYSAFE_VAULT_KEY") or identity.secret())) >= 24,
+        "nationwide_gazetteer": gazetteer.coverage().get("nationwide_admin_dataset") is True,
+    }
+    blockers = []
+    if not providers["postgres"]:
+        blockers.append("postgres")
+    if not providers["operator_auth"]:
+        blockers.append("operator_auth")
+    if not providers["vault_encryption"]:
+        blockers.append("vault_encryption")
     return {"production_mode": production_mode(), "fail_closed": production_mode(),
-            "errors": errors, "warnings": warnings, "ok": not errors}
+            "errors": errors, "warnings": warnings, "providers": providers,
+            "blockers": blockers, "ok": not errors}
 
 
 def enforce_production_config():
@@ -662,6 +699,32 @@ def alert_level(conf, sev):
 
 def ikey(i):
     return "{}|{}|{}".format(i["type"], i["location_name"], i["state"])
+
+
+def _place_label_norm(value):
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _same_place_label(a, b):
+    an = _place_label_norm(a)
+    bn = _place_label_norm(b)
+    if not an or not bn:
+        return False
+    if an == bn:
+        return True
+    ahead = _place_label_norm(str(a or "").split(",", 1)[0])
+    bhead = _place_label_norm(str(b or "").split(",", 1)[0])
+    return bool(ahead and bhead and ahead == bhead)
+
+
+def _verify_incident_match(inc, typ, location_name, state):
+    if (inc.get("type") or "") != typ:
+        return False
+    st = (state or "").strip().lower()
+    ist = (inc.get("state") or "").strip().lower()
+    if st and ist and st != ist:
+        return False
+    return _same_place_label(location_name, inc.get("location_name"))
 
 
 # Auto drop-off: an incident stays on the public map only while fresh. After its
@@ -722,6 +785,51 @@ def _state_from_display(display):
         if p in _NG_STATE_LOOKUP:
             return _NG_STATE_LOOKUP[p]
     return ""
+
+
+def google_place_suggestions(q, limit=8):
+    """Key-gated Google Places autocomplete for Nigeria.
+
+    This is a live-search enhancement, not the offline source of truth. Without a
+    GOOGLE_PLACES_API_KEY / GOOGLE_MAPS_API_KEY the caller simply gets [] and the
+    app continues using the generated nationwide gazetteer + OSM fallback.
+    """
+    key = (os.environ.get("GOOGLE_PLACES_API_KEY") or os.environ.get("GOOGLE_MAPS_API_KEY") or "").strip()
+    q = (q or "").strip()
+    if not key or len(q) < 2:
+        return []
+    body = json.dumps({
+        "input": q,
+        "includedRegionCodes": ["ng"],
+        "languageCode": os.environ.get("DEYSAFE_PLACE_LANGUAGE", "en"),
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://places.googleapis.com/v1/places:autocomplete",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": key,
+            "X-Goog-FieldMask": "suggestions.placePrediction.placeId,suggestions.placePrediction.text",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            payload = json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return []
+    out = []
+    seen = set()
+    for item in payload.get("suggestions", [])[: max(1, min(20, int(limit)))]:
+        pred = item.get("placePrediction") or {}
+        text = ((pred.get("text") or {}).get("text") or "").strip()
+        pid = (pred.get("placeId") or "").strip()
+        k = text.lower()
+        if not text or k in seen:
+            continue
+        seen.add(k)
+        out.append({"name": text, "source": "google_places", "place_id": pid})
+    return out
 
 
 def geocode(q, db=None):
@@ -969,7 +1077,12 @@ def ensure_seed(db):
     # operator's later call (only seeds while that incident is still undecided). The
     # decision + seeded alert are keyed to the incident's immutable uuid (INT-01/02).
     rk = "kidnapping|Kaduna|Kaduna"
-    inc = next((i for i in with_decisions(db) if ikey(i) == rk), None)
+    demo_candidates = [i for i in with_decisions(db) if i.get("type") == "kidnapping" and not i.get("decided")]
+    demo_candidates.sort(key=lambda i: (-int(i.get("confidence") or 0), -int(i.get("severity") or 0),
+                                        i.get("location_name") or ""))
+    inc = next((i for i in demo_candidates
+                if ikey(i) == rk or _verify_incident_match(i, "kidnapping", "Kaduna", "Kaduna")),
+               (demo_candidates[0] if demo_candidates else None))
     if inc and not inc.get("decided"):
         iuid = inc.get("incident_uuid")
         db.set_decision(iuid, "verified", "[seed] demo verified threat (synthetic)", "seed",
@@ -1117,11 +1230,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
 
-    def _json(self, obj, code=200):
+    def _json(self, obj, code=200, headers=None):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self._security_headers()
         self.end_headers()
         self.wfile.write(body)
@@ -1189,7 +1304,29 @@ class Handler(BaseHTTPRequestHandler):
         t = self.headers.get("X-DeySafe-Session") or self.headers.get("X-Owner-Session")
         if t:
             return t.strip()
+        raw_cookie = self.headers.get("Cookie", "")
+        if raw_cookie:
+            try:
+                jar = cookies.SimpleCookie(raw_cookie)
+                morsel = jar.get("ds_session")
+                if morsel and morsel.value.startswith("dsu."):
+                    return morsel.value
+            except Exception:
+                pass
         return (data.get("session_token") or data.get("session") or "").strip()
+
+    def _session_cookie_header(self, token):
+        secure = production_mode() or (self.headers.get("X-Forwarded-Proto", "").lower() == "https")
+        attrs = [
+            "ds_session=%s" % token,
+            "Path=/",
+            "Max-Age=%d" % (identity.SESSION_TTL_DAYS * 86400),
+            "HttpOnly",
+            "SameSite=Lax",
+        ]
+        if secure:
+            attrs.append("Secure")
+        return "; ".join(attrs)
 
     def _field_user(self, db, data=None):
         tok = self._session_token(data or {})
@@ -1252,7 +1389,9 @@ class Handler(BaseHTTPRequestHandler):
                                              "postgres_configured": bool(os.environ.get("DATABASE_URL")),
                                              "postgres_required": os.environ.get(
                                                  "DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() in (
-                                                 "1", "true", "yes", "on")}})
+                                                 "1", "true", "yes", "on")},
+                               "gazetteer": gazetteer.coverage(),
+                               "safety_tick": safety_tick_health()})
         if u.path == "/api/me":
             user = self._field_user(db, {})
             if not user:
@@ -1289,7 +1428,38 @@ class Handler(BaseHTTPRequestHandler):
                 coords.setdefault(p["name"], [p["lat"], p["lng"]])
             return self._json({"places": names, "types": TYPES, "coords": coords,
                                "source": "gazetteer_plus_open_geocode",
+                               "coverage": gazetteer.coverage(),
+                               "google_places_configured": bool(
+                                   os.environ.get("GOOGLE_PLACES_API_KEY") or os.environ.get("GOOGLE_MAPS_API_KEY")),
                                "count": len(names), "open_search": True})
+        if u.path == "/api/place-suggest":
+            q = urllib.parse.parse_qs(u.query)
+            term = (q.get("q", [""])[0] or q.get("place", [""])[0]).strip()
+            if len(term) < 2:
+                return self._json({"ok": True, "query": term, "suggestions": [],
+                                   "coverage": gazetteer.coverage()})
+            try:
+                limit = max(1, min(20, int(q.get("limit", ["12"])[0])))
+            except Exception:
+                limit = 12
+            offline = gazetteer.candidates(term, limit=limit)
+            google = google_place_suggestions(term, limit=limit)
+            seen = set()
+            suggestions = []
+            for item in google + offline:
+                name = (item.get("name") or "").strip()
+                key = name.lower()
+                if not name or key in seen:
+                    continue
+                seen.add(key)
+                suggestions.append(item)
+                if len(suggestions) >= limit:
+                    break
+            return self._json({"ok": True, "query": term, "suggestions": suggestions,
+                               "offline_count": len(offline), "google_count": len(google),
+                               "coverage": gazetteer.coverage(),
+                               "google_places_configured": bool(
+                                   os.environ.get("GOOGLE_PLACES_API_KEY") or os.environ.get("GOOGLE_MAPS_API_KEY"))})
         if u.path == "/api/ai-status":
             return self._json({"ai": ai.available(), "provider": ai.provider(), "keys": ai.key_count(), "sms": sms.available()})
         if u.path == "/api/push/config":
@@ -1413,7 +1583,24 @@ class Handler(BaseHTTPRequestHandler):
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
             return self._json({"ok": True, "sources": db.source_health(self._limit(u)),
-                               "scheduler": scheduler.default_health()})
+                               "scheduler": scheduler.default_health(),
+                               "safety_tick": safety_tick_health()})
+        if u.path == "/api/launch-readiness":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            report = production_config_report()
+            report["database"] = {"backend": db.backend(), "postgres": db.backend() == "postgres"}
+            report["gazetteer"] = gazetteer.coverage()
+            report["retention"] = db.retention_plan(apply=False)
+            report["scheduler"] = scheduler.default_health()
+            report["safety_tick"] = safety_tick_health()
+            return self._json({"ok": True, "launch_readiness": report})
+        if u.path == "/api/retention":
+            # OPERATOR (fail-closed): NDPA retention dry-run. Applying the purge is
+            # a POST with confirm=APPLY_RETENTION; GET never deletes data.
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            return self._json(db.retention_plan(apply=False))
         if u.path == "/api/readiness":
             # FIELD/owner: phone safety readiness is looked up only by the owner's
             # local token; no global list exists on the public surface.
@@ -1746,7 +1933,9 @@ class Handler(BaseHTTPRequestHandler):
             db.audit("field", "signup_verify", "user=%s" % user.get("user_uuid"))
             return self._json({"ok": True, "session_token": res["session_token"],
                                "device_id": res["device_id"],
-                               "user": identity.public_user(user)})
+                               "session_cookie": True,
+                               "user": identity.public_user(user)},
+                              headers={"Set-Cookie": self._session_cookie_header(res["session_token"])})
 
         if u.path == "/api/profile/pins":
             user = self._field_user(db, data)
@@ -1778,9 +1967,26 @@ class Handler(BaseHTTPRequestHandler):
                                   data.get("name") or "Guardian",
                                   data.get("channel") or SOS_DEFAULT_CHANNEL, addr)
             db.audit("field", "guardian_add", "user=%s channel=%s" % (user.get("user_uuid"), row.get("channel")))
-            return self._json({"ok": True, "guardian": identity.public_guardian(row),
-                               "count": db.guardian_count(user_uuid=user.get("user_uuid")),
-                               "guardian_policy_id": user.get("guardian_policy_id")})
+            out = {"ok": True, "guardian": identity.public_guardian(row),
+                   "verification_required": True,
+                   "count": db.guardian_count(user_uuid=user.get("user_uuid")),
+                   "guardian_policy_id": user.get("guardian_policy_id")}
+            if DEMO_MODE or os.environ.get("DEYSAFE_GUARDIAN_VERIFY_ECHO", "").strip() == "1":
+                out["dev_verification_code"] = row.get("verification_code")
+            return self._json(out)
+
+        if u.path == "/api/vault/guardians/verify":
+            user = self._field_user(db, data)
+            if not user:
+                return self._json({"ok": False, "error": "session required"}, 401)
+            row = db.verify_guardian(user.get("user_uuid"),
+                                     data.get("guardian_uuid") or data.get("id") or "",
+                                     data.get("code") or data.get("verification_code") or "")
+            if not row:
+                return self._json({"ok": False, "error": "invalid verification"}, 400)
+            db.audit("field", "guardian_verify", "user=%s guardian=%s" % (
+                user.get("user_uuid"), row.get("guardian_uuid")))
+            return self._json({"ok": True, "guardian": identity.public_guardian(row)})
 
         if u.path == "/api/mysafe/places":
             user = self._field_user(db, data)
@@ -1840,6 +2046,18 @@ class Handler(BaseHTTPRequestHandler):
             if not self._authed():
                 return self._json({"ok": False, "error": "operator auth required"}, 401)
             return self._json(safetytick.tick(db))
+
+        if u.path == "/api/retention":
+            if not self._authed():
+                return self._json({"ok": False, "error": "operator auth required"}, 401)
+            apply = (data.get("confirm") or "").strip() == "APPLY_RETENTION"
+            if not apply:
+                plan = db.retention_plan(apply=False)
+                plan["note"] = "dry_run_only; send confirm=APPLY_RETENTION to delete matched records"
+                return self._json(plan)
+            plan = db.retention_plan(apply=True)
+            db.audit("operator", "retention_apply", "deleted=%s" % plan.get("total_deleted"))
+            return self._json(plan)
 
         if u.path == "/api/readiness":
             # FIELD/owner: readiness checklist saved by the user's local owner token.
@@ -2985,7 +3203,10 @@ class Handler(BaseHTTPRequestHandler):
             # INT-01: resolve the LIVE incident first and key the decision on its
             # immutable incident_uuid (not the type|location|state triple). A stale
             # decision can no longer re-bind to a different, newer event.
-            inc = next((i for i in with_decisions(db) if ikey(i) == disp_key), None)
+            loc_in = (data.get("location_name") or "").strip()
+            state_in = (data.get("state") or "").strip()
+            inc = next((i for i in with_decisions(db)
+                        if ikey(i) == disp_key or _verify_incident_match(i, typ, loc_in, state_in)), None)
             actor = (self._operator() or {}).get("user", "operator")
             if not inc:
                 # No live incident matches -> record the decision against the display
@@ -3161,6 +3382,73 @@ def _ingest_live_once(db=None):
     return {"fetched": fetched, "added": added}
 
 
+def _safety_tick_minutes():
+    try:
+        return max(0, int(float(os.environ.get("DEYSAFE_SAFETY_TICK_MINUTES", "0") or "0")))
+    except Exception:
+        return 0
+
+
+def safety_tick_health():
+    return dict(_SAFETY_TICK_HEALTH)
+
+
+def _run_safety_tick_once():
+    db = DB(DB_PATH)
+    try:
+        res = safetytick.tick(db)
+        _SAFETY_TICK_HEALTH["runs"] = int(_SAFETY_TICK_HEALTH.get("runs") or 0) + 1
+        _SAFETY_TICK_HEALTH["last_run_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+        _SAFETY_TICK_HEALTH["last_result"] = res
+        _SAFETY_TICK_HEALTH["last_error"] = ""
+        try:
+            db.audit("scheduler", "safety_tick", json.dumps(res, sort_keys=True)[:300])
+        except Exception:
+            pass
+        return res
+    except Exception as e:
+        _SAFETY_TICK_HEALTH["last_error_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+        _SAFETY_TICK_HEALTH["last_error"] = repr(e)[:200]
+        try:
+            db.audit("scheduler", "safety_tick_error", repr(e)[:200])
+        except Exception:
+            pass
+        return {"ok": False, "error": repr(e)[:200]}
+
+
+def start_safety_tick_default():
+    """Start optional stale Journey/SafeMeet checks.
+
+    Railway can set DEYSAFE_SAFETY_TICK_MINUTES=5 or 10. Default OFF for local
+    gates so tests stay deterministic and do not run background writes.
+    """
+    global _SAFETY_TICK_THREAD, _SAFETY_TICK_STOP
+    minutes = _safety_tick_minutes()
+    _SAFETY_TICK_HEALTH.update({"enabled": minutes > 0, "minutes": minutes})
+    if minutes <= 0 or (_SAFETY_TICK_THREAD and _SAFETY_TICK_THREAD.is_alive()):
+        return False
+    _SAFETY_TICK_STOP = _threading.Event()
+
+    def loop():
+        interval = max(60, minutes * 60)
+        while _SAFETY_TICK_STOP and not _SAFETY_TICK_STOP.wait(interval):
+            _run_safety_tick_once()
+
+    _SAFETY_TICK_THREAD = _threading.Thread(target=loop, name="deysafe-safety-tick", daemon=True)
+    _SAFETY_TICK_THREAD.start()
+    return True
+
+
+def stop_safety_tick_default():
+    global _SAFETY_TICK_THREAD, _SAFETY_TICK_STOP
+    if _SAFETY_TICK_STOP is not None:
+        _SAFETY_TICK_STOP.set()
+    if _SAFETY_TICK_THREAD is not None and _SAFETY_TICK_THREAD.is_alive():
+        _SAFETY_TICK_THREAD.join(timeout=2)
+    _SAFETY_TICK_THREAD = None
+    _SAFETY_TICK_STOP = None
+
+
 def main():
     enforce_production_config()
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -3173,8 +3461,10 @@ def main():
     # set it) never start a background thread or touch the network.
     sched = scheduler.start_default(lambda: _ingest_live_once(None), name="ingest")
     sched_on = "ON (every %s min)" % scheduler.configured_minutes() if scheduler.enabled() else "OFF"
-    print("DeySafe + SHIELD on %s:%d  |  AI: %s  |  ingest scheduler: %s  |  operator console at /review.html" % (
-        host, port, ai_on, sched_on))
+    start_safety_tick_default()
+    tick_on = "ON (every %s min)" % _safety_tick_minutes() if _safety_tick_minutes() else "OFF"
+    print("DeySafe + SHIELD on %s:%d  |  AI: %s  |  ingest scheduler: %s  |  safety tick: %s  |  operator console at /review.html" % (
+        host, port, ai_on, sched_on, tick_on))
     # Launch-posture warnings — loud at boot so a real deploy never ships a silent
     # footgun. None of these block startup; see DEPLOY.md for the launch checklist.
     _warn = []
@@ -3190,6 +3480,7 @@ def main():
         ThreadingHTTPServer((host, port), Handler).serve_forever()
     finally:
         scheduler.stop_default()
+        stop_safety_tick_default()
 
 
 if __name__ == "__main__":

@@ -3,6 +3,27 @@
 Date: 2026-06-07
 Scope: Nigerian public PWA launch readiness, WakaSafe road safety, FindMe, SOS, SHIELD, data, deployment, and corrective actions.
 
+## 2026-06-07 Corrective-Action Update
+
+The following previously partial/not-done software gaps are now implemented in
+the repo and covered by gates:
+
+| Gap | New status | Evidence |
+|---|---|---|
+| Full Nigeria location dataset | Implemented offline baseline | `scripts/import_nigeria_gazetteer.py`, `config/nigeria_admin_places.json`, `engine/gazetteer.py`, `/api/places`, `/api/place-suggest`, `validate_product.py` |
+| Google/live place suggestions | Implemented key-gated path | `GOOGLE_PLACES_API_KEY` / `GOOGLE_MAPS_API_KEY`, `/api/place-suggest`; offline gazetteer remains active without Google |
+| Safety Vault encryption at rest | Implemented for new guardian records | `engine/identity.py` vault cipher helpers, `guardian_contacts.address_ciphertext`, redacted public projections |
+| Guardian verification | Implemented beta flow | `/api/vault/guardians/verify`, Profile verify action, `validate_personal_beta.py` |
+| Secure browser session path | Implemented cookie support | `/api/signup/verify` sets HttpOnly `ds_session`; `_session_token` accepts cookie; PWA stops persisting bearer token to localStorage |
+| Server-side stale checks | Implemented automatic worker option | `DEYSAFE_SAFETY_TICK_MINUTES`, `/api/health` `safety_tick`, `/api/source-health` `safety_tick` |
+| NDPA retention workflow | Implemented operator dry-run/apply control | `/api/retention`, SHIELD Privacy retention card, conservative DB retention plan |
+| Launch/provider readiness | Implemented cross-check endpoint | `/api/launch-readiness` summarizes provider keys, Postgres, gazetteer, retention, scheduler, safety tick |
+| Nigerian language selector | Improved | Critical SOS/readiness/profile phrases now react to English, Nigerian Pidgin, Hausa, Yoruba, and Igbo profile choices |
+
+Still outside the web repo: native background BLE/hardware activation, staffed
+nationwide field operations, real video frame AI, and live provider/Railway proof
+with production secrets.
+
 ## Release Decision
 
 DeySafe is suitable for a controlled public beta only if it is labeled as a warning and reporting product, not an emergency-dispatch authority. It is not yet suitable for an unrestricted national safety launch that promises rescue, real-time police response, background Bluetooth tracking, or guaranteed broadcast delivery.
