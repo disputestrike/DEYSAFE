@@ -378,7 +378,7 @@ Check hotel address</textarea>
         <label class="f">Phone number</label><input id="phoneInput" inputmode="tel" placeholder="+234..." />
         <div class="srow">
           <input id="firstNameInput" placeholder="First name" />
-          <select id="langSelect"><option value="en">English</option><option value="yo">Yoruba</option><option value="ig">Igbo</option><option value="ha">Hausa</option><option value="pcm">Pidgin</option></select>
+          <select id="langSelect" onchange="onLangChange()"><option value="en">English</option><option value="yo">Yorùbá</option><option value="ig">Igbo</option><option value="ha">Hausa</option><option value="pcm">Pidgin</option></select>
         </div>
         <button class="btn sec" onclick="signupStart()">Send OTP</button>
         <div class="srow">
@@ -387,6 +387,11 @@ Check hotel address</textarea>
         </div>
         <button class="btn" onclick="signupVerify()">Verify phone</button>
         <div id="acctStatus" class="kv"></div>
+      </div>
+      <div class="case">
+        <div class="r1"><b>Invite people to DeySafe</b></div>
+        <p class="note" style="text-align:left;margin:8px 2px">The more people on DeySafe, the faster a verified warning spreads. This shares the app only — it is separate from your private Safety Vault.</p>
+        <button class="btn sec" onclick="inviteToApp()">📣 Share DeySafe</button>
       </div>
       <div class="case">
         <div class="r1"><b>Safety PINs</b><span class="badge">private</span></div>
@@ -489,6 +494,23 @@ const I18N={
 };
 function langCode(){return ((USER_PROFILE&&USER_PROFILE.language)||($('#langSelect')&&$('#langSelect').value)||'en').toLowerCase();}
 function tx(k){var l=langCode();return (I18N[l]&&I18N[l][k])||I18N.en[k]||k;}
+// General app invite (separate from private guardian invites). Uses the native share
+// sheet when available, else copies a link.
+function inviteToApp(){
+  var url=(location&&location.origin)?location.origin:'https://deysafe.app';
+  var msg='Join me on DeySafe — free anti-kidnapping early warning, SOS and safe-travel for Nigeria. Install it: '+url;
+  try{if(navigator.share){navigator.share({title:'DeySafe',text:msg,url:url}).catch(function(){});return;}}catch(e){}
+  try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(msg).then(function(){toast('Invite copied — paste it to anyone');}).catch(function(){prompt('Copy this invite:',msg);});return;}}catch(e){}
+  prompt('Copy this invite:',msg);
+}
+// Persist the chosen language and re-render the parts that are translated today.
+function onLangChange(){
+  try{var v=$('#langSelect').value;localStorage.setItem('ds_lang',v);}catch(e){}
+  try{renderSosButtons();}catch(e){}
+  try{renderProfile();}catch(e){}
+  try{loadLevel(false);}catch(e){}
+  try{toast(tx('phone_verified')?'✓':'');}catch(e){}
+}
 
 function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
 function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>'+e+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});}
@@ -901,12 +923,14 @@ function showArea(name,r,lat,lng,isMe,recenter){
   var _g=$('#guide');if(_g)_g.textContent=guideFor(r.level)||r.guidance||'';
   const list=(r.incidents||[]).map(function(i){var lv=LV[i.status]||'YELLOW';
     return '<div class="item '+lv+'" onclick="focusPt('+(+i.lat)+','+(+i.lng)+')"><div class="r1"><span class="pl">'+esc(i.location_name)+', '+esc(i.state)+'</span><span class="badge '+lv+'">'+lv+'</span></div><div class="mt">'+esc(i.type).replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+(i.distance_km!=null?(' · '+esc(i.distance_km)+' km away'):'')+'</div></div>';}).join('');
-  if(rep)rep.innerHTML='<div class="lvl '+lvl+'"><div class="r1"><b>'+lvl+' · '+esc(name)+'</b><button class="spk" onclick="sayLast()" title="Read aloud">🔊</button></div><div class="guide">'+esc(guideFor(r.level)||r.guidance||'')+'</div><div class="mt" style="margin-top:6px">'+(+n)+' incident(s) within '+(+rad)+' km'+(isMe?' · 📍 stays on your device':'')+'</div></div>'
+  if(rep)rep.innerHTML='<div class="lvl '+lvl+'"><div class="r1"><b>'+lvl+' · '+esc(name)+'</b><span style="margin-left:auto;display:flex;gap:6px"><button class="spk" onclick="sayLast()" title="Read aloud">🔊</button><button class="spk" onclick="dismissArea()" title="Close" aria-label="Close">✕</button></span></div><div class="guide">'+esc(guideFor(r.level)||r.guidance||'')+'</div><div class="mt" style="margin-top:6px">'+(+n)+' incident(s) within '+(+rad)+' km'+(isMe?' · 📍 stays on your device':'')+'</div></div>'
     +(list?('<h2 class="t" style="margin-top:14px">In your area ('+(+rad)+' km)</h2>'+list):'<p class="note">No incidents reported within '+(+rad)+' km right now. Stay alert.</p>');
   if(lat!=null&&map&&areaLayer){areaLayer.clearLayers();
     L.circle([lat,lng],{radius:rad*1000,color:COL[lvl],weight:2,fillColor:COL[lvl],fillOpacity:.08}).addTo(areaLayer);
     L.marker([lat,lng],{icon:missIcon(isMe?'📍':'🏠')}).addTo(areaLayer).bindPopup(isMe?'You are here · private to your device':('Your area: '+esc(name)));
     if(recenter!==false){try{map.setView([lat,lng],isMe?11:8);}catch(e){}}}}
+// Let the user close the area status card so it stops dominating the screen.
+function dismissArea(){var r=$('#areaReport');if(r)r.innerHTML='';try{if(areaLayer)areaLayer.clearLayers();}catch(e){}var pill=$('#lvpill');if(pill){pill.textContent='✓';pill.title='Area report closed';}}
 async function loadLevel(recenter){recenter=(recenter!==false);const p=$('#areaSelect').value.trim();if(!p)return;
   const rep=$('#areaReport');if(rep)rep.innerHTML='<p class="note">Building area report…</p>';
   let r,g=await geocodeClient(p);
@@ -1576,7 +1600,7 @@ window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_ON)panicLock();});
 
-(async function(){try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetPlace','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
+(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetPlace','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
   restoreJourney();   // re-show Journey Guard presence if a trip is in progress
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();outboxHydrate().then(flushOutbox); // recover from IndexedDB, then send anything saved on a previous offline visit
