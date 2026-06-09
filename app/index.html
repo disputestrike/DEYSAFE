@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#ffffff" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="DeySafe" />
 <link rel="manifest" href="/manifest.json" />
 <link rel="icon" type="image/png" href="/assets/brand/deysafe-favicon.png" />
 <link rel="apple-touch-icon" href="/assets/brand/deysafe-apple-touch.png" />
@@ -836,8 +839,26 @@ async function installApp(){
     await INSTALL_PROMPT.userChoice.catch(function(){});
     INSTALL_PROMPT=null;showInstallButton();return;
   }
-  var isiOS=/iphone|ipad|ipod/i.test(navigator.userAgent||'');
-  toast(isiOS?'On iPhone: open Safari Share, then Add to Home Screen.':'Use your browser menu to install or Add to Home screen.');
+  var isiOS=/iphone|ipad|ipod/i.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(isiOS){showIosInstall();return;}
+  toast('Use your browser menu to install or Add to Home screen.');
+}
+// iPhone has NO install-prompt API — apps are added from Safari's Share menu. A toast
+// is too easy to miss, so show a clear, persistent step-by-step instead.
+function showIosInstall(){
+  var ex=$('#iosInstall');if(ex){ex.style.display='flex';return;}
+  var d=document.createElement('div');d.id='iosInstall';
+  d.style.cssText='position:fixed;inset:0;background:rgba(8,16,30,.6);z-index:3000;display:flex;align-items:flex-end;justify-content:center;padding:0 0 14px';
+  d.innerHTML='<div style="background:#fff;color:#15233b;max-width:430px;width:94%;border-radius:18px;padding:18px;box-shadow:0 12px 44px rgba(0,0,0,.32)">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><img src="/assets/brand/deysafe-apple-touch.png" alt="" style="width:40px;height:40px;border-radius:9px"/><b style="font-size:16px">Add DeySafe to your iPhone</b></div>'
+    +'<p style="margin:6px 0 12px;font-size:14px;line-height:1.5;color:#41506b">iPhone adds apps from Safari’s Share menu — there is no install button on iOS.</p>'
+    +'<ol style="margin:0 0 14px 18px;padding:0;font-size:14px;line-height:1.8;color:#15233b">'
+    +'<li>Tap <b>Share</b> <span aria-hidden="true">⤴️</span> at the bottom of Safari</li>'
+    +'<li>Tap <b>Add to Home Screen</b></li>'
+    +'<li>Tap <b>Add</b> — DeySafe opens like a real app</li></ol>'
+    +'<button onclick="var e=document.getElementById(\'iosInstall\');if(e)e.style.display=\'none\';" style="width:100%;padding:12px;border:none;border-radius:10px;background:#2f6df6;color:#fff;font:inherit;font-weight:700;cursor:pointer">Got it</button>'
+    +'</div>';
+  document.body.appendChild(d);
 }
 function pick(el,k,v){el.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));el.classList.add('on');
   if(k==='RTYPE')window.RTYPE=v;else SOS_TYPE=v;}
