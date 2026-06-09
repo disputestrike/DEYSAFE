@@ -257,7 +257,7 @@ Check hotel address</textarea>
     </section>
 
     <section class="view pad" id="v-waka">
-      <h2 class="t">WakaSafe — road route risk scan</h2>
+      <h2 class="t" data-i18n="h_waka">WakaSafe — road route risk scan</h2>
       <label class="f">From (type any place)</label><input id="wFrom" list="placelist" autocomplete="off" placeholder="Where you are…" />
       <label class="f">To (type any place)</label><input id="wTo" list="placelist" autocomplete="off" placeholder="Where you're going…" />
       <button class="btn" onclick="checkRoute()">Start WakaSafe</button>
@@ -287,7 +287,7 @@ Check hotel address</textarea>
     </section>
 
     <section class="view pad" id="v-report">
-      <h2 class="t">Report danger</h2>
+      <h2 class="t" data-i18n="h_report">Report danger</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Anonymous. We never ask who you are. <b>Tip:</b> tap the map to set the spot.</p>
       <div class="ai-intake">
         <label class="f" style="margin-top:0">🗣️ Just say or type what's happening — AI fills the form</label>
@@ -312,7 +312,7 @@ Check hotel address</textarea>
     </section>
 
     <section class="view pad" id="v-sos">
-      <h2 class="t">Emergency SOS</h2>
+      <h2 class="t" data-i18n="h_sos">Emergency SOS</h2>
       <div id="sosHome">
         <label class="silentrow"><input type="checkbox" id="sosSilentToggle" onchange="renderSosButtons()" /><span><b>🤫 Silent mode</b> — no alarm or flashing. Best during an active abduction. Still saves your SOS, queues Emergency contacts, and prepares your location to share.</span></label>
         <button class="sosbig auto" onclick="sosAuto()"><span class="bigemoji">🔴</span><b>AUTOMATIC</b><small id="sosAutoSub">Alarm + prepare your live location to share — no typing</small></button>
@@ -328,7 +328,7 @@ Check hotel address</textarea>
     </section>
 
     <section class="view pad" id="v-findme">
-      <h2 class="t">Find — report a missing person</h2>
+      <h2 class="t" data-i18n="h_find">Find — report a missing person</h2>
       <div class="ai-intake">
         <label class="f" style="margin-top:0">🗣️ Just say or type what happened — AI fills the case</label>
         <textarea id="mNL" placeholder="e.g. My son David, 14, missing near Kankara this morning, white Hilux heading north, blue school uniform"></textarea>
@@ -359,7 +359,7 @@ Check hotel address</textarea>
     </section>
 
     <section class="view pad" id="v-meet">
-      <h2 class="t">Safe Meet — coordinate secure meetings</h2>
+      <h2 class="t" data-i18n="h_meet">Safe Meet — coordinate secure meetings</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Two people meeting? DeySafe watches the session, confirms arrival automatically, and escalates if the route or timing goes wrong.</p>
       <div class="ai-intake">
         <label class="f" style="margin-top:0">Say the meeting once</label>
@@ -404,7 +404,7 @@ Check hotel address</textarea>
     </section>
 
     <section class="view pad" id="v-settings">
-      <h2 class="t">Profile</h2>
+      <h2 class="t" data-i18n="h_profile">Profile</h2>
       <div class="case">
         <div class="r1"><b>Account and language</b><span class="badge" id="acctBadge">Guest</span></div>
         <label class="f">Phone number</label><input id="phoneInput" inputmode="tel" placeholder="+234..." />
@@ -472,12 +472,12 @@ Check hotel address</textarea>
   </main>
 
   <nav>
-    <button class="active" data-v="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 20l-5-2V6l5 2 6-2 5 2v12l-5-2-6 2zM9 8v12M15 6v12"/></svg>Map</button>
+    <button class="active" data-v="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 20l-5-2V6l5 2 6-2 5 2v12l-5-2-6 2zM9 8v12M15 6v12"/></svg><span data-i18n="nav_map">Map</span></button>
     <button data-v="waka"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19l8-14 8 14M9 19l3-5 3 5"/></svg>WakaSafe</button>
     <button data-v="meet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l6 2.2v5.2c0 3.9-2.4 6.8-6 8.6-3.6-1.8-6-4.7-6-8.6V5.2z"/><circle cx="9" cy="10" r="1.7"/><circle cx="15" cy="10" r="1.7"/><path d="M8 15c.8-1.2 1.9-1.8 4-1.8s3.2.6 4 1.8"/></svg>SafeMeet</button>
     <button data-v="sos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg>SOS</button>
-    <button data-v="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Report</button>
-    <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Find</button>
+    <button data-v="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span data-i18n="nav_report">Report</span></button>
+    <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span data-i18n="nav_find">Find</span></button>
   </nav>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -523,6 +523,23 @@ const I18N={
 };
 function langCode(){return ((USER_PROFILE&&USER_PROFILE.language)||($('#langSelect')&&$('#langSelect').value)||'en').toLowerCase();}
 function tx(k){var l=langCode();return (I18N[l]&&I18N[l][k])||I18N.en[k]||k;}
+// Extended UI localization via data-i18n attributes. Brand names (DeySafe, WakaSafe,
+// SafeMeet, SOS) are intentionally NOT translated. Safety guidance lives in GUIDE_I18N/tx();
+// this layer covers the always-visible navigation + screen headings.
+const UI_I18N={
+  en:{nav_map:'Map',nav_report:'Report',nav_find:'Find',h_report:'Report danger',h_sos:'Emergency SOS',h_find:'Find — report a missing person',h_waka:'WakaSafe — road route risk scan',h_meet:'Safe Meet — coordinate secure meetings',h_profile:'Profile',h_active_cases:'Active cases — tap to open'},
+  pcm:{nav_map:'Map',nav_report:'Report',nav_find:'Find',h_report:'Report danger',h_sos:'Emergency SOS',h_find:'Find — report person wey miss',h_waka:'WakaSafe — check road wahala',h_meet:'SafeMeet — arrange meeting wey safe',h_profile:'Profile',h_active_cases:'Cases wey dey active — tap to open'},
+  ha:{nav_map:'Taswira',nav_report:'Rahoto',nav_find:'Nemo',h_report:'Bayar da rahoton hadari',h_sos:'SOS na gaggawa',h_find:'Nemo — bayar da rahoton bataccen mutum',h_waka:'WakaSafe — binciken hadarin hanya',h_meet:'SafeMeet — tsara ganawa cikin aminci',h_profile:'Bayani',h_active_cases:'Sharuran da ke aiki — danna ka bude'},
+  yo:{nav_map:'Maapu',nav_report:'Jabo',nav_find:'Wa',h_report:'Jabo ewu',h_sos:'SOS pajawiri',h_find:'Wa — jabo eniyan to sonu',h_waka:'WakaSafe — ayewo ewu ona',h_meet:'SafeMeet — to ipade aabo',h_profile:'Profaili',h_active_cases:'Awon oran to nlo — fi owo kan lati si'},
+  ig:{nav_map:'Maapu',nav_report:'Koo',nav_find:'Choo',h_report:'Koo ihe ize ndu',h_sos:'SOS mberede',h_find:'Choo — koo onye furu efu',h_waka:'WakaSafe — nyocha ihe ize ndu uzo',h_meet:'SafeMeet — hazie nzuko nchekwa',h_profile:'Profaili',h_active_cases:'Ikpe na-aru oru — pia imeghe'}
+};
+function applyI18n(){
+  var l=langCode();var d=UI_I18N[l]||UI_I18N.en;
+  document.querySelectorAll('[data-i18n]').forEach(function(el){
+    var k=el.getAttribute('data-i18n');var v=d[k]||UI_I18N.en[k];
+    if(v)el.textContent=v;
+  });
+}
 // General app invite (separate from private guardian invites). Uses the native share
 // sheet when available, else copies a link.
 function inviteToApp(){
@@ -535,6 +552,7 @@ function inviteToApp(){
 // Persist the chosen language and re-render the parts that are translated today.
 function onLangChange(){
   try{var v=$('#langSelect').value;localStorage.setItem('ds_lang',v);}catch(e){}
+  try{applyI18n();}catch(e){}
   try{renderSosButtons();}catch(e){}
   try{renderProfile();}catch(e){}
   try{loadLevel(false);}catch(e){}
@@ -1752,7 +1770,7 @@ window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_ON)panicLock();});
 
-(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();renderTrusted();renderSosButtons();setupInstall();renderSigninCTA();maybeOnboard();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetAddress','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
+(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();renderTrusted();renderSosButtons();setupInstall();renderSigninCTA();applyI18n();maybeOnboard();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetAddress','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
   restoreJourney();   // re-show Journey Guard presence if a trip is in progress
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();outboxHydrate().then(flushOutbox); // recover from IndexedDB, then send anything saved on a previous offline visit
