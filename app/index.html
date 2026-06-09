@@ -164,7 +164,6 @@
 </head>
 <body>
 <div class="app">
-  <div id="demoBanner" class="demobanner" style="display:none" role="alert">🔧 Dev/test instance — verification codes are shown on screen. Not for public use.</div>
   <div id="onboarding" style="display:none;position:fixed;inset:0;z-index:4000;background:linear-gradient(160deg,#0b1f3a,#143a6b);color:#fff;align-items:center;justify-content:center;padding:22px">
     <div style="max-width:420px;width:100%;text-align:center">
       <img src="/assets/brand/deysafe-icon-192.png" alt="DeySafe" style="width:84px;height:84px;border-radius:20px;box-shadow:0 8px 30px rgba(0,0,0,.4)"/>
@@ -189,7 +188,7 @@
     <div class="logo"><img src="/assets/brand/deysafe-icon-192.png" alt="" /></div>
     <div class="brand"><b>DeySafe</b><span>Know before you waka</span></div>
     <div class="chip" id="chip">—</div>
-    <button id="watchBtn" class="installbtn" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me" style="background:#fdecef;border-color:#f3c2cd;color:#b42318;font-weight:800">🛡 Warn me</button>
+    <button id="watchBtn" class="installbtn" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me" style="background:#fdecef;border-color:#f3c2cd;color:#b42318;font-weight:800;font-size:17px;line-height:1;padding:8px 12px">🛡</button>
     <button id="settingsBtn" class="installbtn" onclick="go('settings')" title="Profile" aria-label="Profile">Profile</button>
     <button id="lockBtn" class="installbtn lockbtn" onclick="panicLock()" title="Privacy lock" aria-label="Privacy lock">Lock</button>
     <button id="installBtn" class="installbtn" style="display:none" onclick="installApp()">Install</button>
@@ -335,7 +334,7 @@ Check hotel address</textarea>
     </section>
 
     <section class="view pad" id="v-findme">
-      <h2 class="t">FindMe — report a missing person</h2>
+      <h2 class="t">Find — report a missing person</h2>
       <div class="ai-intake">
         <label class="f" style="margin-top:0">🗣️ Just say or type what happened — AI fills the case</label>
         <textarea id="mNL" placeholder="e.g. My son David, 14, missing near Kankara this morning, white Hilux heading north, blue school uniform"></textarea>
@@ -486,7 +485,7 @@ Check hotel address</textarea>
     <button data-v="meet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l6 2.2v5.2c0 3.9-2.4 6.8-6 8.6-3.6-1.8-6-4.7-6-8.6V5.2z"/><circle cx="9" cy="10" r="1.7"/><circle cx="15" cy="10" r="1.7"/><path d="M8 15c.8-1.2 1.9-1.8 4-1.8s3.2.6 4 1.8"/></svg>SafeMeet</button>
     <button data-v="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Report</button>
     <button data-v="sos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg>SOS</button>
-    <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Find Me</button>
+    <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Find</button>
   </nav>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -758,9 +757,6 @@ function updateOutboxBadge(){
   else if(n>0){el.style.display='block';el.textContent='📤 Sending '+n+' saved report'+(n===1?'':'s')+'…';}
   else{el.style.display='none';}
 }
-// No synthetic data is ever served now (brief #6). This flags only a DEV/echo instance
-// (OTP/verify codes shown on screen); it auto-hides in production where DEMO_MODE is off.
-async function checkDemo(){try{var h=await fetch('/api/health').then(r=>r.json());var el=$('#demoBanner');if(el)el.style.display=(h&&(h.dev_echo===true||h.demo===true))?'block':'none';}catch(e){}}
 function timeAgo(iso){var t=Date.parse(iso);if(isNaN(t))return '';var m=Math.floor((Date.now()-t)/60000);if(m<1)return 'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
 function renderChannels(){
   var area=$('#areaSelect').value.trim();
@@ -1156,7 +1152,7 @@ function distToSeg(p,a,b){var s=Math.cos(Math.PI/180*((a[0]+b[0])/2));
   var ax=a[1]*s,ay=a[0],bx=b[1]*s,by=b[0],px=p[1]*s,py=p[0];
   var dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy;var t=L2?((px-ax)*dx+(py-ay)*dy)/L2:0;t=Math.max(0,Math.min(1,t));
   var cx=ax+t*dx,cy=ay+t*dy;return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy))*111;}
-let LASTROUTE=null;
+let LASTROUTE=null, NAV_STEPS=[], NAV_IDX=0, NAV_WATCH=null;
 let JOURNEY_ID=null;
 let JOURNEY_WATCH=null,JOURNEY_DEST=null,JOURNEY_LAST_PING=0;
 function sayRoute(){if(LASTROUTE&&LASTROUTE.say)speak(LASTROUTE.say);}
@@ -1202,6 +1198,7 @@ async function checkRoute(){
   const aName=scan.from_place||a, bName=scan.to_place||b;
   const pts=(scan.waypoints||[]).map(function(p){return Array.isArray(p)?[p[0],p[1]]:[p.lat,p.lng];}).filter(function(p){return p[0]!=null&&p[1]!=null;});
   const onRoute=scan.incidents||[];
+  try{stopNav();}catch(e){} NAV_STEPS=(scan.steps||[]); NAV_IDX=0;
   const worst=scan.worst_level||'GREEN';
   const guide={GREEN:'Road looks clear. Stay alert and keep moving.',YELLOW:'Caution - unconfirmed reports near this route.',ORANGE:'Active danger on this route. Travel by day, in convoy, or delay.',RED:'Verified threat on this route. Do not travel - wait or reroute.'}[worst]||scan.guidance||'Stay alert.';
   var rNear=null,rND=1e9;onRoute.forEach(function(i){var d=Number(i.distance_km==null?9999:i.distance_km);if(d<rND){rND=d;rNear=i;}});
@@ -1213,6 +1210,7 @@ async function checkRoute(){
   const list=onRoute.length?onRoute.map(function(i){var l=LV[i.status]||'YELLOW';return '<div class="item '+l+'"><div class="r1"><span class="pl">'+esc(i.location_name||'Route incident')+', '+esc(i.state||'')+'</span><span class="badge '+l+'">'+l+'</span></div><div class="mt">'+esc(String(i.type||'incident')).replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+(i.distance_km!=null?' · '+esc(i.distance_km)+' km from route':'')+'</div></div>';}).join(''):'<p class="note">No incidents reported along this route right now.</p>';
   var summary='<div class="lvl '+worst+'"><div class="r1"><b>'+worst+' · '+esc(aName)+' -> '+esc(bName)+'</b><button class="spk" onclick="sayRoute()" title="Read aloud">🔊</button></div><div class="guide">'+esc(guide)+'</div><div class="mt" style="margin-top:6px">'+onRoute.length+' incident(s) · '+esc(mode)+(scan.route_distance_km?' · '+esc(scan.route_distance_km)+' km':'')+(scan.route_duration_min?' · '+esc(scan.route_duration_min)+' min':'')+'</div></div>';
   summary+='<div class="lvl '+worst+'" style="margin-top:12px"><div class="r1"><b>🧭 Safety briefing</b><button class="spk" onclick="sayBrief()" title="Read aloud">🔊</button></div><ul style="margin:8px 0 0;padding-left:18px;line-height:1.5">'+brief.map(function(s){return '<li style="margin:4px 0">'+esc(s)+'</li>';}).join('')+'</ul></div>';
+  if(NAV_STEPS.length){summary+='<div class="lvl" style="margin-top:12px;border:1px solid #1d4ed8;background:#eef4ff"><div class="r1"><b>🧭 Turn-by-turn — '+NAV_STEPS.length+' steps</b><button class="spk" style="background:#1d4ed8;color:#fff;border:none" onclick="startNav()" title="Start live, voice-guided navigation">▶ Navigate</button></div><ol style="margin:8px 0 0;padding-left:20px;line-height:1.55;max-height:240px;overflow:auto">'+NAV_STEPS.map(function(s){return '<li style="margin:5px 0">'+esc(s.instruction)+(s.distance_m?' <span class="mt">· '+navDist(s.distance_m)+'</span>':'')+'</li>';}).join('')+'</ol></div>';}
   if(box)box.innerHTML=summary+'<h2 class="t" style="margin-top:16px">On your route</h2>'+list;
   var ar=$('#areaReport');if(ar)ar.innerHTML=summary+'<h2 class="t" style="margin-top:14px">Route warnings</h2>'+list;
   var guideEl=$('#guide');if(guideEl)guideEl.textContent=scan.road_routing?'Road route rendered automatically. Live alerts are scored along the road.':'Road provider unavailable; showing corridor fallback automatically.';
@@ -1224,6 +1222,16 @@ async function checkRoute(){
   setTimeout(function(){try{map&&map.invalidateSize();if(pts.length>=2)map.fitBounds(pts,{padding:[60,60]});}catch(e){}},80);
 }
 
+// ---- Turn-by-turn navigation: live, voice-guided. Steps come from /api/route (OSRM).
+//      Bright line preserved: location stays ON-DEVICE; nav never transmits your position.
+function navDist(m){m=Number(m)||0;return m>=1000?(m/1000).toFixed(m<10000?1:0)+' km':(Math.round(m/10)*10)+' m';}
+function _navKm(la1,lo1,la2,lo2){var R=6371,p=Math.PI/180,dLa=(la2-la1)*p,dLo=(lo2-lo1)*p,x=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(la1*p)*Math.cos(la2*p)*Math.sin(dLo/2)*Math.sin(dLo/2);return 2*R*Math.asin(Math.min(1,Math.sqrt(x)));}
+function navArrow(s){var m=(s.modifier||'').toLowerCase(),t=(s.type||'').toLowerCase();if(t==='arrive')return '🏁';if(t==='roundabout'||t==='rotary'||t==='roundabout turn')return '🔄';if(m==='uturn')return '↩️';if(m.indexOf('left')>=0)return '⬅️';if(m.indexOf('right')>=0)return '➡️';return '⬆️';}
+function navHudEl(){var h=$('#navHud');if(!h){h=document.createElement('div');h.id='navHud';h.style.cssText='position:fixed;left:0;right:0;bottom:64px;z-index:3500;margin:0 10px;padding:14px 16px;border-radius:16px;background:#0b1f3a;color:#fff;box-shadow:0 8px 28px rgba(0,0,0,.35);display:none';document.body.appendChild(h);}return h;}
+function navRender(){var h=navHudEl();var s=NAV_STEPS[NAV_IDX]||{};var nx=NAV_STEPS[NAV_IDX+1];h.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="font-size:26px">'+navArrow(s)+'</div><div style="flex:1"><div style="font-weight:800;font-size:17px;line-height:1.25">'+esc(s.instruction||'Proceed')+'</div><div id="navDistLbl" style="opacity:.85;font-size:13px;margin-top:2px">'+(s.distance_m?navDist(s.distance_m):'')+(nx?(' · then '+esc(nx.instruction)):'')+'</div></div><button onclick="stopNav()" style="background:#b42318;color:#fff;border:none;border-radius:10px;padding:8px 12px;font-weight:800">End</button></div><div style="opacity:.7;font-size:12px;margin-top:6px">Step '+(NAV_IDX+1)+' of '+NAV_STEPS.length+' · keep your eyes on the road</div>';h.style.display='block';}
+function startNav(){if(!NAV_STEPS.length){toast('No turn-by-turn available for this route');return;}NAV_IDX=0;navRender();speak(NAV_STEPS[0].instruction||'Starting navigation');if(navigator.geolocation){try{NAV_WATCH=navigator.geolocation.watchPosition(function(p){navTick(p.coords.latitude,p.coords.longitude);},function(){},{enableHighAccuracy:true,maximumAge:5000,timeout:20000});}catch(e){}}toast('🧭 Navigation started — voice guidance on. Your location stays on this phone.');}
+function navTick(lat,lng){if(!NAV_STEPS.length)return;var s=NAV_STEPS[NAV_IDX];if(!s)return;var dKm=_navKm(lat,lng,s.lat,s.lng);var lbl=$('#navDistLbl');if(lbl)lbl.textContent=navDist(dKm*1000)+' to the turn';if(dKm<0.045){if(NAV_IDX>=NAV_STEPS.length-1){speak('You have arrived at your destination');toast('🏁 Arrived');stopNav();return;}NAV_IDX++;navRender();speak(NAV_STEPS[NAV_IDX].instruction||'Continue');}}
+function stopNav(){if(NAV_WATCH!=null){try{navigator.geolocation.clearWatch(NAV_WATCH);}catch(e){}NAV_WATCH=null;}var h=$('#navHud');if(h)h.style.display='none';}
 function renderJourney(j){
   renderJourneyBanner(j);
   var box=$('#journeyBox');if(!box)return;
@@ -1744,7 +1752,7 @@ window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_ON)panicLock();});
 
-(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();renderSigninCTA();maybeOnboard();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetAddress','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
+(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();renderTrusted();renderSosButtons();setupInstall();renderSigninCTA();maybeOnboard();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetAddress','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
   restoreJourney();   // re-show Journey Guard presence if a trip is in progress
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();outboxHydrate().then(flushOutbox); // recover from IndexedDB, then send anything saved on a previous offline visit
