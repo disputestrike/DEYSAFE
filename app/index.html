@@ -164,7 +164,7 @@
 </head>
 <body>
 <div class="app">
-  <div id="demoBanner" class="demobanner" style="display:none" role="alert">⚠ DEMO DATA — DO NOT USE FOR REAL SAFETY DECISIONS</div>
+  <div id="demoBanner" class="demobanner" style="display:none" role="alert">🔧 Dev/test instance — verification codes are shown on screen. Not for public use.</div>
   <div id="onboarding" style="display:none;position:fixed;inset:0;z-index:4000;background:linear-gradient(160deg,#0b1f3a,#143a6b);color:#fff;align-items:center;justify-content:center;padding:22px">
     <div style="max-width:420px;width:100%;text-align:center">
       <img src="/assets/brand/deysafe-icon-192.png" alt="DeySafe" style="width:84px;height:84px;border-radius:20px;box-shadow:0 8px 30px rgba(0,0,0,.4)"/>
@@ -758,8 +758,9 @@ function updateOutboxBadge(){
   else if(n>0){el.style.display='block';el.textContent='📤 Sending '+n+' saved report'+(n===1?'':'s')+'…';}
   else{el.style.display='none';}
 }
-// FAKE-01: surface an un-dismissible banner whenever the backend is serving demo/seed data.
-async function checkDemo(){try{var h=await fetch('/api/health').then(r=>r.json());var el=$('#demoBanner');if(el)el.style.display=(h&&h.demo===true)?'block':'none';}catch(e){}}
+// No synthetic data is ever served now (brief #6). This flags only a DEV/echo instance
+// (OTP/verify codes shown on screen); it auto-hides in production where DEMO_MODE is off.
+async function checkDemo(){try{var h=await fetch('/api/health').then(r=>r.json());var el=$('#demoBanner');if(el)el.style.display=(h&&(h.dev_echo===true||h.demo===true))?'block':'none';}catch(e){}}
 function timeAgo(iso){var t=Date.parse(iso);if(isNaN(t))return '';var m=Math.floor((Date.now()-t)/60000);if(m<1)return 'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
 function renderChannels(){
   var area=$('#areaSelect').value.trim();
@@ -1073,19 +1074,9 @@ async function runAssistant(){
   }
   $('#rNL').value=text;go('report');await nlIntake('report');
 }
-function startVoice(){
-  if(!voiceSupported()){toast('Voice input needs Chrome or Android');return;}
-  try{
-    var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    RECOG=new SR();RECOG.lang='en-NG';RECOG.interimResults=false;RECOG.maxAlternatives=1;
-    var mb=$('#micBtn');
-    RECOG.onstart=function(){if(mb)mb.classList.add('live');toast('🎤 Listening… say a town, or "Lagos to Kano"');};
-    RECOG.onend=function(){if(mb)mb.classList.remove('live');};
-    RECOG.onerror=function(){if(mb)mb.classList.remove('live');toast('Didn\'t catch that — tap 🎤 and try again');};
-    RECOG.onresult=function(e){var t=e.results[0][0].transcript;toast('Heard: '+t);handleVoice(t);};
-    RECOG.start();
-  }catch(err){toast('Voice input unavailable here');}
-}
+// (Redundancy audit, brief #5: removed the orphaned startVoice() — the area-search mic
+//  button #micBtn no longer exists. The live voice path everywhere is nlMic(), which also
+//  handles the iOS keyboard-dictation fallback. handleVoice() is kept for unit testing.)
 // --- Proactive PROXIMITY warnings (Waze/Google style). Watches your location
 // ON-DEVICE and warns of danger within range as you move. Coordinate never sent.
 let WATCH=null, WATCH_KM=40; const ANNOUNCED=new Set();
@@ -1172,6 +1163,31 @@ function sayRoute(){if(LASTROUTE&&LASTROUTE.say)speak(LASTROUTE.say);}
 // Launch WakaSafe: backend route, automatic map render, automatic voice.
 // If the road provider is unavailable, /api/route returns a corridor fallback and
 // the UI says so plainly.
+// Batch H (#12): turn a scored route into an ENHANCED, actionable safety briefing —
+// pre-departure prompts tuned to the worst level, time of day, and the specific danger
+// spots on the road. (Full turn-by-turn navigation is a separate, later build.)
+function routeSafetyBriefing(worst,onRoute,rNear,rND,scan){
+  var out=[];
+  out.push({
+    GREEN:'Road looks clear. Stay alert, keep moving, and don’t stop for strangers flagging you down.',
+    YELLOW:'Unconfirmed reports near this route. Travel in daylight, keep doors locked and windows up, and don’t stop in lonely stretches.',
+    ORANGE:'Active danger on this route. Travel by day only, move in a convoy, or delay until it clears — and don’t stop near the danger spots below.',
+    RED:'Verified threat on this route. Do NOT travel now — wait, or take another road. If you absolutely must move, go in a convoy and tell people your plan and ETA.'
+  }[worst]||'Stay alert and keep moving.');
+  // Time of day — night is the highest-risk window in the kidnapping belt.
+  var hr=(new Date()).getHours();
+  if(hr>=19||hr<6){ out.push('⚠ It’s dark now — abduction risk is highest at night. Strongly consider waiting for daylight before you set off.'); }
+  else if(hr>=16){ out.push('🌆 Daylight is fading. Try to reach your destination before dark, or wait for the morning.'); }
+  // Named danger spots actually on the route.
+  var spots=[];onRoute.forEach(function(i){var l=LV[i.status]||'YELLOW';if((l==='ORANGE'||l==='RED'||i.status==='verified')&&i.location_name&&spots.indexOf(i.location_name)<0)spots.push(i.location_name);});
+  if(spots.length){ out.push('📍 Danger spots ahead: '+spots.slice(0,5).join(', ')+(spots.length>5?'…':'')+'. Do not stop there.'); }
+  if(rNear&&rND<1e9){ out.push('Nearest threat: '+String(rNear.type||'incident').replace(/_/g,' ')+' about '+Math.round(rND)+' km ahead, near '+(rNear.location_name||'the route')+'.'); }
+  // Always-on pre-trip checklist.
+  out.push('✅ Before you go: charge your phone, share your live location with someone you trust, and tell them your ETA. Journey Guard is watching this trip and raises the alarm if you go silent or off-route.');
+  if(scan&&scan.route_distance_km&&Number(scan.route_distance_km)>150){ out.push('🛣 Long trip ('+scan.route_distance_km+' km) — fuel up before you leave and only stop in busy, well-lit towns.'); }
+  return out;
+}
+function sayBrief(){ if(LASTROUTE&&LASTROUTE.brief)speak(LASTROUTE.brief); }
 async function checkRoute(){
   const a=$('#wFrom').value.trim(), b=$('#wTo').value.trim();
   const box=$('#routeBox');
@@ -1192,9 +1208,11 @@ async function checkRoute(){
   var mode=scan.road_routing?'road route':'corridor fallback';
   var sayR=worst+'. '+guide+' '+onRoute.length+' incident'+(onRoute.length===1?'':'s')+' on the '+mode+' from '+aName+' to '+bName+'.';
   if(rNear){sayR+=' Nearest: '+String(rNear.type||'incident').replace(/_/g,' ')+', about '+Math.round(rND)+' kilometres ahead, near '+(rNear.location_name||'the route')+'.';}
-  LASTROUTE={say:sayR};
+  var brief=routeSafetyBriefing(worst,onRoute,rNear,rND,scan);
+  LASTROUTE={say:sayR,brief:brief.join(' ')};
   const list=onRoute.length?onRoute.map(function(i){var l=LV[i.status]||'YELLOW';return '<div class="item '+l+'"><div class="r1"><span class="pl">'+esc(i.location_name||'Route incident')+', '+esc(i.state||'')+'</span><span class="badge '+l+'">'+l+'</span></div><div class="mt">'+esc(String(i.type||'incident')).replace(/_/g,' ')+' · '+(i.status==='verified'?'Verified':'Developing')+(i.distance_km!=null?' · '+esc(i.distance_km)+' km from route':'')+'</div></div>';}).join(''):'<p class="note">No incidents reported along this route right now.</p>';
   var summary='<div class="lvl '+worst+'"><div class="r1"><b>'+worst+' · '+esc(aName)+' -> '+esc(bName)+'</b><button class="spk" onclick="sayRoute()" title="Read aloud">🔊</button></div><div class="guide">'+esc(guide)+'</div><div class="mt" style="margin-top:6px">'+onRoute.length+' incident(s) · '+esc(mode)+(scan.route_distance_km?' · '+esc(scan.route_distance_km)+' km':'')+(scan.route_duration_min?' · '+esc(scan.route_duration_min)+' min':'')+'</div></div>';
+  summary+='<div class="lvl '+worst+'" style="margin-top:12px"><div class="r1"><b>🧭 Safety briefing</b><button class="spk" onclick="sayBrief()" title="Read aloud">🔊</button></div><ul style="margin:8px 0 0;padding-left:18px;line-height:1.5">'+brief.map(function(s){return '<li style="margin:4px 0">'+esc(s)+'</li>';}).join('')+'</ul></div>';
   if(box)box.innerHTML=summary+'<h2 class="t" style="margin-top:16px">On your route</h2>'+list;
   var ar=$('#areaReport');if(ar)ar.innerHTML=summary+'<h2 class="t" style="margin-top:14px">Route warnings</h2>'+list;
   var guideEl=$('#guide');if(guideEl)guideEl.textContent=scan.road_routing?'Road route rendered automatically. Live alerts are scored along the road.':'Road provider unavailable; showing corridor fallback automatically.';
