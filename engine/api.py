@@ -63,9 +63,10 @@ import safetytick  # Server-side stale-device/overdue journey checks
 #     per-user Bearer session tokens and RBAC roles.
 OPERATOR_TOKEN = os.environ.get("OPERATOR_TOKEN", "")
 
-# Synthetic demo data (FAKE-01). Default ON locally so the public sees the full
-# GREEN->RED ladder + a sample case; set DEMO_MODE=0 for a clean (empty) prod deploy.
-DEMO_MODE = os.environ.get("DEMO_MODE", "1").strip().lower() not in ("0", "false", "no", "off", "")
+# No demo/sample mode exists: the app always runs in production posture. A fresh DB
+# starts empty and fills only from real reports/ingest. Narrow, default-OFF test seams
+# (DEYSAFE_OTP_ECHO / DEYSAFE_GUARDIAN_VERIFY_ECHO / DEYSAFE_PUSH_SIM) let the gates
+# exercise the SMS/push paths without real sends; they are blocked in production.
 
 PLACES = json.load(open(os.path.join(BASE, "config", "locations.json"), encoding="utf-8"))["places"]
 PLACE_NAMES = sorted(p["name"] for p in PLACES)
@@ -372,6 +373,38 @@ def _route_cache_put(key, value):
         _ROUTE_CACHE.pop(_ROUTE_CACHE_ORDER.pop(0), None)
 
 
+def _maneuver_text(man, road):
+    """Turn an OSRM maneuver + road name into a short spoken driving instruction."""
+    typ = (man.get("type") or "").lower()
+    mod = (man.get("modifier") or "").lower()
+    road = (road or "").strip()
+    onto = (" onto " + road) if road else ""
+    if typ == "depart":
+        return "Head out" + ((" on " + road) if road else "")
+    if typ == "arrive":
+        return "Arrive at your destination"
+    if typ in ("on ramp", "off ramp", "ramp"):
+        return "Take the ramp" + ((" " + mod) if mod else "") + onto
+    if typ == "merge":
+        return "Merge" + ((" " + mod) if mod else "") + onto
+    if typ == "fork":
+        return "Keep " + (mod or "straight") + " at the fork" + onto
+    if typ in ("roundabout", "rotary", "roundabout turn"):
+        try:
+            exn = int(man.get("exit"))
+        except Exception:
+            exn = 0
+        tail = (", continue" + onto) if road else ""
+        return "At the roundabout" + ((" take exit %d" % exn) if exn else "") + tail
+    if typ == "new name":
+        return "Continue" + onto
+    if typ == "continue":
+        return ("Continue " + mod).strip() + ((" on " + road) if road else "")
+    if typ in ("turn", "end of road"):
+        return "Turn " + (mod or "ahead") + onto
+    return ("Continue " + mod).strip() + ((" on " + road) if road else "")
+
+
 def road_route_waypoints(a, b):
     """Return road-snapped waypoints from an OSRM-compatible route service.
 
@@ -396,7 +429,7 @@ def road_route_waypoints(a, b):
     cached = _ROUTE_CACHE.get(ckey)
     if cached is not None:
         return dict(cached)
-    qs = urllib.parse.urlencode({"overview": "full", "geometries": "geojson", "steps": "false"})
+    qs = urllib.parse.urlencode({"overview": "full", "geometries": "geojson", "steps": "true"})
     url = "%s/route/v1/driving/%s?%s" % (base, coords, qs)
     # Best-effort with ONE short retry: the public OSRM demo often fails the first
     # hit but answers the second. A miss still falls back to the corridor below —
@@ -421,9 +454,30 @@ def road_route_waypoints(a, b):
                 pts = pts[::step]
                 if pts[-1] != (float(b["lat"]), float(b["lng"])):
                     pts.append((float(b["lat"]), float(b["lng"])))
+            # Turn-by-turn: flatten OSRM legs[].steps[] into compact maneuvers the
+            # frontend renders as a directions list and advances through live.
+            steps_out = []
+            for leg in (route.get("legs") or []):
+                for st in (leg.get("steps") or []):
+                    man = st.get("maneuver") or {}
+                    loc = man.get("location") or []
+                    if not (isinstance(loc, (list, tuple)) and len(loc) >= 2):
+                        continue
+                    txt = _maneuver_text(man, st.get("name") or "")
+                    if steps_out and steps_out[-1]["instruction"] == txt and (man.get("type") or "") != "arrive":
+                        continue  # collapse consecutive duplicate guidance
+                    steps_out.append({
+                        "instruction": txt,
+                        "type": man.get("type") or "",
+                        "modifier": man.get("modifier") or "",
+                        "road": (st.get("name") or "").strip(),
+                        "lat": float(loc[1]), "lng": float(loc[0]),
+                        "distance_m": int(round(float(st.get("distance") or 0))),
+                    })
             result = {
                 "waypoints": pts,
                 "provider": "osrm",
+                "steps": steps_out,
                 "distance_km": round(float(route.get("distance", 0) or 0) / 1000.0, 1),
                 "duration_min": round(float(route.get("duration", 0) or 0) / 60.0, 1),
             }
@@ -455,6 +509,7 @@ def route_scan_between(ga, gb, incidents, n=None, radius=None):
         scan["route_provider"] = road.get("provider")
         scan["route_distance_km"] = road.get("distance_km")
         scan["route_duration_min"] = road.get("duration_min")
+        scan["steps"] = road.get("steps") or []
         return scan
     scan = routing.scan((ga["lat"], ga["lng"]), (gb["lat"], gb["lng"]), incidents,
                         n=(n or routing.DEFAULT_WAYPOINTS), radius_km=radius)
@@ -639,8 +694,9 @@ def production_mode():
 def production_config_report():
     errors = []
     warnings = []
-    if DEMO_MODE:
-        errors.append("DEMO_MODE must be 0 in production (it echoes OTP/verify codes on-screen)")
+    for _echo in ("DEYSAFE_OTP_ECHO", "DEYSAFE_GUARDIAN_VERIFY_ECHO", "DEYSAFE_PUSH_SIM"):
+        if os.environ.get(_echo, "").strip() == "1":
+            errors.append(_echo + " must be off in production (it echoes codes / fakes sends)")
     if not os.environ.get("DATABASE_URL", "").strip():
         errors.append("DATABASE_URL/Postgres is required for production")
     if os.environ.get("DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() not in ("1", "true", "yes", "on"):
@@ -1062,8 +1118,7 @@ def ensure_seed(db):
     # A fresh DB starts empty and honest: no sample signals, no "[SAMPLE]" FindMe case,
     # no fabricated human-"verified" RED. The map shows only what real reports and real
     # ingest produce. We still recompute so any real signals already stored build their
-    # own incidents/alerts. (DEMO_MODE no longer touches DATA — it only echoes dev
-    # OTP/verify codes on-screen for local testing, and is hard-blocked in production.)
+    # own incidents/alerts. There is no demo mode at all — the app always runs live.
     recompute(db)
 
 
@@ -1451,12 +1506,11 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         db = DB(DB_PATH)
         if u.path == "/api/health":
-            # No synthetic data is ever seeded now (brief #6). `demo` here means only
-            # "dev echo mode" (OTP/verify codes returned in API responses for local
-            # testing) — never "fake incidents on the map". Kept for diagnostics.
+            # The app has no demo mode: a fresh DB is empty and fills only from real
+            # reports/ingest. `synthetic_data: false` is reported for honest monitoring.
             return self._json({"ok": True, "incidents": len(public_incidents(db)),
                                "queue": len(review_queue(db)), "missing": len(db.all_missing()),
-                               "demo": DEMO_MODE, "dev_echo": DEMO_MODE, "auth": self._auth_enabled(),
+                               "synthetic_data": False, "auth": self._auth_enabled(),
                                "launch_posture": production_config_report(),
                                "database": {"backend": db.backend(),
                                              "postgres_configured": bool(os.environ.get("DATABASE_URL")),
@@ -2056,7 +2110,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": str(e)}, 400)
             out = {"ok": True, "otp_ref": ch["otp_ref"], "expires_at": ch["expires_at"],
                    "phone_redacted": identity.redact_phone(ch["phone"])}
-            if DEMO_MODE or os.environ.get("DEYSAFE_OTP_ECHO", "").strip() == "1":
+            if os.environ.get("DEYSAFE_OTP_ECHO", "").strip() == "1":
                 out["dev_otp"] = ch["code"]
             db.audit("field", "signup_start", "phone=%s" % identity.redact_phone(ch["phone"]))
             return self._json(out)
@@ -2112,7 +2166,7 @@ class Handler(BaseHTTPRequestHandler):
                    "verification_required": True,
                    "count": db.guardian_count(user_uuid=user.get("user_uuid")),
                    "guardian_policy_id": user.get("guardian_policy_id")}
-            if DEMO_MODE or os.environ.get("DEYSAFE_GUARDIAN_VERIFY_ECHO", "").strip() == "1":
+            if os.environ.get("DEYSAFE_GUARDIAN_VERIFY_ECHO", "").strip() == "1":
                 out["dev_verification_code"] = row.get("verification_code")
             return self._json(out)
 
@@ -2168,7 +2222,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "session required"}, 401)
             sub_uuid = (data.get("subscription_id") or data.get("sub_uuid") or "").strip()
             push_ready = bool(os.environ.get("DEYSAFE_VAPID_PRIVATE_KEY") and os.environ.get("DEYSAFE_VAPID_PUBLIC_KEY"))
-            sim = DEMO_MODE or os.environ.get("DEYSAFE_PUSH_SIM", "").strip() == "1"
+            sim = os.environ.get("DEYSAFE_PUSH_SIM", "").strip() == "1"
             if sub_uuid:
                 db.mark_push_test(sub_uuid, confirmed=False, status=("sim_test_sent" if sim else ("provider_ready" if push_ready else "unconfigured")))
             return self._json({"ok": True, "provider": "web_push", "configured": push_ready,
@@ -2980,9 +3034,6 @@ class Handler(BaseHTTPRequestHandler):
                 elif user and pin_kind == "safety":
                     nxt = "CLOSE_REQUESTED"
                     contact_state = "closure requested; guardian or SHIELD verification required"
-                elif (not user) and DEMO_MODE and owner:
-                    nxt = "CLOSE_REQUESTED"
-                    contact_state = "closure requested in demo mode"
                 else:
                     return self._json({"ok": False, "error": "Safety PIN required for closure request"}, 403)
                 db.update_sos_state(ev["sos_uuid"], nxt, contact_state=contact_state)
@@ -3085,8 +3136,7 @@ class Handler(BaseHTTPRequestHandler):
             # stolen owner token.
             if not self._rate_ok("/api/trusted", 30):
                 return self._json({"ok": False, "error": "rate limited"}, 429)
-            if not DEMO_MODE:
-                return self._json({"ok": False, "error": "Safety Vault session required"}, 403)
+            return self._json({"ok": False, "error": "Safety Vault session required"}, 403)
             owner = (data.get("owner_token") or "").strip()
             if not owner:
                 return self._json({"ok": False, "error": "owner_token required"}, 400)
@@ -3428,10 +3478,9 @@ class Handler(BaseHTTPRequestHandler):
             # BLE-01: when a beacon secret is configured, the relay MUST carry a valid
             # SIGNED envelope {beacon_id, lat, lng, ts, nonce, sig}. We verify the HMAC,
             # the timestamp freshness, and the nonce (replay) BEFORE trusting any
-            # coordinate. Outside demo, missing secret fails closed.
+            # coordinate. When no secret is configured, crowd-find runs best-effort so
+            # the feature works out of the box; set DEYSAFE_BEACON_SECRET to enforce it.
             beacon_secret = os.environ.get("DEYSAFE_BEACON_SECRET", "")
-            if not beacon_secret and not DEMO_MODE:
-                return self._json({"ok": False, "error": "beacon signing is not configured"}, 503)
             if beacon_secret:
                 ok_sig, reason = beaconsign.verify(
                     {"beacon_id": bid, "lat": data.get("lat"), "lng": data.get("lng"),
@@ -3822,8 +3871,9 @@ def main():
     # Launch-posture warnings — loud at boot so a real deploy never ships a silent
     # footgun. None of these block startup; see DEPLOY.md for the launch checklist.
     _warn = []
-    if DEMO_MODE:
-        _warn.append("DEMO_MODE is ON (dev OTP/verify codes echoed on-screen) — set DEMO_MODE=0 before public use")
+    for _echo in ("DEYSAFE_OTP_ECHO", "DEYSAFE_GUARDIAN_VERIFY_ECHO", "DEYSAFE_PUSH_SIM"):
+        if os.environ.get(_echo, "").strip() == "1":
+            _warn.append(_echo + " is ON (test seam) — codes echoed / sends faked; never enable in production")
     if not os.environ.get("DEYSAFE_BEACON_SECRET", "").strip():
         _warn.append("DEYSAFE_BEACON_SECRET unset — beacon relays are UNSIGNED/spoofable; set it before FindMe/BLE goes live")
     if not (OPERATOR_TOKEN or auth.auth_enabled()):

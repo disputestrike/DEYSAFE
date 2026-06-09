@@ -127,12 +127,11 @@ check("GET /review.html serves the SHIELD console with a sign-in gate (data is A
       s == 200 and ('id="login"' in h or "operator sign-in" in h.lower()), "got " + str(s))
 
 # ---------------------------------------------------------------------------
-print("\n-- B. DEMO + CONTROLLED VOCAB: synthetic data is labelled; types are constrained (FAKE-01, ABU-09) --")
-# A status/health endpoint must expose whether the instance is running synthetic
-# demo data, so a prod deploy can't silently present fake data as real.
+print("\n-- B. NO DEMO + CONTROLLED VOCAB: instance runs live data only; types are constrained (FAKE-01, ABU-09) --")
+# The app has no demo mode. Health must honestly report that it serves no synthetic
+# data, so monitoring can prove a deploy is live (never fake data presented as real).
 s, j, _ = call("GET", "/api/health")
-has_demo_flag = isinstance(j, dict) and any(k in j for k in ("demo", "demo_mode", "synthetic", "is_demo"))
-check("GET /api/health exposes a demo/synthetic flag (FAKE-01 honesty)", s == 200 and has_demo_flag, "keys=" + str(sorted(j.keys())))
+check("GET /api/health honestly reports NO synthetic data (FAKE-01, go-live)", s == 200 and j.get("synthetic_data") is False, "keys=" + str(sorted(j.keys())))
 
 # An arbitrary made-up incident type must NOT survive as that literal type. It must
 # be rejected (400) or coerced to a controlled-vocab bucket (other_needs_review).
