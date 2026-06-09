@@ -187,7 +187,7 @@
   <header class="top">
     <div class="logo"><img src="/assets/brand/deysafe-icon-192.png" alt="" /></div>
     <div class="brand"><b>DeySafe</b><span>Know before you waka</span></div>
-    <div class="chip" id="chip">—</div>
+    <span id="chip" style="display:none"></span>
     <button id="watchBtn" class="installbtn" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me" style="background:#fdecef;border-color:#f3c2cd;color:#b42318;font-weight:800;font-size:17px;line-height:1;padding:8px 12px">🛡</button>
     <button id="settingsBtn" class="installbtn" onclick="go('settings')" title="Profile" aria-label="Profile">Profile</button>
     <button id="lockBtn" class="installbtn lockbtn" onclick="panicLock()" title="Privacy lock" aria-label="Privacy lock">Lock</button>
@@ -251,16 +251,16 @@ Check hotel address</textarea>
           <textarea id="aiCommand" placeholder="e.g. Abuja to Kaduna, or armed robbery near Oshodi, or my brother is missing in Kankara"></textarea>
           <div class="chatbar"><span></span><button class="chatmic" onclick="nlMic('aiCommand')" title="Speak to DeySafe" aria-label="Speak to DeySafe">🎙</button><button class="sendbtn" onclick="runAssistant()">Send</button></div>
         </div>
-        <div class="segtabs"><button class="seg on" data-seg="alerts">Nearby alerts</button><button class="seg" data-seg="missing">Missing persons</button><button class="seg" data-seg="channels">Area updates</button></div>
+        <div class="segtabs"><button class="seg on" data-seg="alerts" data-i18n="seg_alerts">Nearby alerts</button><button class="seg" data-seg="missing" data-i18n="seg_missing">Missing persons</button><button class="seg" data-seg="channels" data-i18n="seg_area">Area updates</button></div>
         <div id="homeList"></div>
       </div>
     </section>
 
     <section class="view pad" id="v-waka">
       <h2 class="t" data-i18n="h_waka">WakaSafe — road route risk scan</h2>
-      <label class="f">From (type any place)</label><input id="wFrom" list="placelist" autocomplete="off" placeholder="Where you are…" />
-      <label class="f">To (type any place)</label><input id="wTo" list="placelist" autocomplete="off" placeholder="Where you're going…" />
-      <button class="btn" onclick="checkRoute()">Start WakaSafe</button>
+      <label class="f" data-i18n="lbl_from">From (type any place)</label><input id="wFrom" list="placelist" autocomplete="off" data-i18n-ph="ph_from" placeholder="Where you are…" />
+      <label class="f" data-i18n="lbl_to">To (type any place)</label><input id="wTo" list="placelist" autocomplete="off" data-i18n-ph="ph_to" placeholder="Where you're going…" />
+      <button class="btn" onclick="checkRoute()" data-i18n="btn_start_waka">Start WakaSafe</button>
       <div id="routeBox"></div>
       <p class="note">Routes render on the map automatically. Journey Guard starts with the route, sends private foreground check-ins when possible, and marks arrival automatically when your phone reaches the destination.</p>
       <div class="case">
@@ -290,9 +290,9 @@ Check hotel address</textarea>
       <h2 class="t" data-i18n="h_report">Report danger</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 2px 4px">Anonymous. We never ask who you are. <b>Tip:</b> tap the map to set the spot.</p>
       <div class="ai-intake">
-        <label class="f" style="margin-top:0">🗣️ Just say or type what's happening — AI fills the form</label>
+        <label class="f" style="margin-top:0" data-i18n="report_intake">🗣️ Just say or type what's happening — AI fills the form</label>
         <textarea id="rNL" placeholder="e.g. Armed men on motorbikes stopping vehicles near Gusau"></textarea>
-        <div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic('rNL')">🎤 Speak</button><button class="btn" onclick="nlIntake('report')">✨ Fill for me</button></div>
+        <div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic('rNL')" data-i18n="btn_speak">🎤 Speak</button><button class="btn" onclick="nlIntake('report')" data-i18n="btn_fill">✨ Fill for me</button></div>
         <div class="note" id="rNLnote" style="text-align:left;margin:8px 2px 0"></div>
       </div>
       <div class="types" id="typeGrid"></div>
@@ -307,7 +307,7 @@ Check hotel address</textarea>
         <label class="f" style="margin-top:0">Camera / video evidence</label>
         <div class="camera-strip"><label class="camera-btn" for="rMedia">📷 Add video</label><input id="rMedia" type="file" accept="image/*,video/*" capture="environment" onchange="previewMediaMeta()" /><div class="media-summary" id="mediaNote">Optional. Video uploads to Cloudflare R2 when keys are configured; otherwise DeySafe still stores a hash and file facts.</div></div>
       </div>
-      <button class="btn" id="reportBtn" onclick="sendReport()">Submit — anonymously</button>
+      <button class="btn" id="reportBtn" onclick="sendReport()" data-i18n="btn_submit_report">Submit — anonymously</button>
       <div class="ok" id="okBox"></div>
     </section>
 
@@ -330,9 +330,9 @@ Check hotel address</textarea>
     <section class="view pad" id="v-findme">
       <h2 class="t" data-i18n="h_find">Find — report a missing person</h2>
       <div class="ai-intake">
-        <label class="f" style="margin-top:0">🗣️ Just say or type what happened — AI fills the case</label>
+        <label class="f" style="margin-top:0" data-i18n="find_intake">🗣️ Just say or type what happened — AI fills the case</label>
         <textarea id="mNL" placeholder="e.g. My son David, 14, missing near Kankara this morning, white Hilux heading north, blue school uniform"></textarea>
-        <div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic('mNL')">🎤 Speak</button><button class="btn" onclick="nlIntake('missing')">✨ Fill the case</button></div>
+        <div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic('mNL')" data-i18n="btn_speak">🎤 Speak</button><button class="btn" onclick="nlIntake('missing')" data-i18n="btn_fill">✨ Fill the case</button></div>
         <div class="note" id="mNLnote" style="text-align:left;margin:8px 2px 0"></div>
       </div>
       <label class="f">Name / group</label><input id="mName" placeholder="Full name, or e.g. '20 schoolgirls'" />
@@ -345,7 +345,7 @@ Check hotel address</textarea>
       <label class="f">Clothing</label><input id="mClo" placeholder="e.g. Blue school uniform" />
       <label class="f">Direction last headed</label><input id="mDir" placeholder="e.g. North toward Jibia" />
       <label class="f">Bluetooth tag ID (optional — AirTag/Tile)</label><input id="mBeacon" placeholder="tag serial — nearby phones can detect it, even offline" />
-      <button class="btn" id="caseBtn" onclick="sendMissing()">Open search case</button>
+      <button class="btn" id="caseBtn" onclick="sendMissing()" data-i18n="btn_open_case">Open search case</button>
       <div class="ok" id="mOk"></div>
       <div class="assistantbox evidence-ai" id="aiEvidenceBox" style="margin-top:18px">
         <label class="f" style="margin-top:0">📸 Analyze a photo or video — AI evidence review</label>
@@ -384,7 +384,7 @@ Check hotel address</textarea>
         <div style="flex:1"><label class="f">Expected end</label><input id="meetEnd" type="time" /></div>
       </div>
 
-      <button class="btn" onclick="startSafeMeet()">🤝 Start Safe Meet</button>
+      <button class="btn" onclick="startSafeMeet()" data-i18n="btn_start_meet">🤝 Start Safe Meet</button>
 
       <div id="meetActive" style="display:none;margin-top:16px">
         <div class="case">
@@ -412,10 +412,10 @@ Check hotel address</textarea>
           <input id="firstNameInput" placeholder="First name" />
           <select id="langSelect" onchange="onLangChange()"><option value="en">English</option><option value="yo">Yorùbá</option><option value="ig">Igbo</option><option value="ha">Hausa</option><option value="pcm">Pidgin</option></select>
         </div>
-        <button class="btn sec" onclick="signupStart()">📩 Text me a code</button>
+        <button class="btn sec" onclick="signupStart()" data-i18n="btn_text_code">📩 Text me a code</button>
         <input id="otpRef" type="hidden" />
         <input id="otpCode" inputmode="numeric" placeholder="Enter the 6-digit code we texted you" />
-        <button class="btn" onclick="signupVerify()">Verify phone</button>
+        <button class="btn" onclick="signupVerify()" data-i18n="btn_verify_phone">Verify phone</button>
         <div id="acctStatus" class="kv"></div>
       </div>
       <div class="case">
@@ -527,18 +527,16 @@ function tx(k){var l=langCode();return (I18N[l]&&I18N[l][k])||I18N.en[k]||k;}
 // SafeMeet, SOS) are intentionally NOT translated. Safety guidance lives in GUIDE_I18N/tx();
 // this layer covers the always-visible navigation + screen headings.
 const UI_I18N={
-  en:{nav_map:'Map',nav_report:'Report',nav_find:'Find',h_report:'Report danger',h_sos:'Emergency SOS',h_find:'Find — report a missing person',h_waka:'WakaSafe — road route risk scan',h_meet:'Safe Meet — coordinate secure meetings',h_profile:'Profile',h_active_cases:'Active cases — tap to open'},
-  pcm:{nav_map:'Map',nav_report:'Report',nav_find:'Find',h_report:'Report danger',h_sos:'Emergency SOS',h_find:'Find — report person wey miss',h_waka:'WakaSafe — check road wahala',h_meet:'SafeMeet — arrange meeting wey safe',h_profile:'Profile',h_active_cases:'Cases wey dey active — tap to open'},
-  ha:{nav_map:'Taswira',nav_report:'Rahoto',nav_find:'Nemo',h_report:'Bayar da rahoton hadari',h_sos:'SOS na gaggawa',h_find:'Nemo — bayar da rahoton bataccen mutum',h_waka:'WakaSafe — binciken hadarin hanya',h_meet:'SafeMeet — tsara ganawa cikin aminci',h_profile:'Bayani',h_active_cases:'Sharuran da ke aiki — danna ka bude'},
-  yo:{nav_map:'Maapu',nav_report:'Jabo',nav_find:'Wa',h_report:'Jabo ewu',h_sos:'SOS pajawiri',h_find:'Wa — jabo eniyan to sonu',h_waka:'WakaSafe — ayewo ewu ona',h_meet:'SafeMeet — to ipade aabo',h_profile:'Profaili',h_active_cases:'Awon oran to nlo — fi owo kan lati si'},
-  ig:{nav_map:'Maapu',nav_report:'Koo',nav_find:'Choo',h_report:'Koo ihe ize ndu',h_sos:'SOS mberede',h_find:'Choo — koo onye furu efu',h_waka:'WakaSafe — nyocha ihe ize ndu uzo',h_meet:'SafeMeet — hazie nzuko nchekwa',h_profile:'Profaili',h_active_cases:'Ikpe na-aru oru — pia imeghe'}
+  en:{nav_map:'Map',nav_report:'Report',nav_find:'Find',h_report:'Report danger',h_sos:'Emergency SOS',h_find:'Find — report a missing person',h_waka:'WakaSafe — road route risk scan',h_meet:'Safe Meet — coordinate secure meetings',h_profile:'Profile',h_active_cases:'Active cases — tap to open',btn_speak:'🎤 Speak',btn_fill:'✨ Fill for me',btn_start_waka:'Start WakaSafe',btn_submit_report:'Submit — anonymously',btn_open_case:'Open search case',btn_start_meet:'🤝 Start Safe Meet',btn_text_code:'📩 Text me a code',btn_verify_phone:'Verify phone',seg_alerts:'Nearby alerts',seg_missing:'Missing persons',seg_area:'Area updates',lbl_from:'From (type any place)',lbl_to:'To (type any place)',ph_from:'Where you are…',ph_to:"Where you're going…",report_intake:"🗣️ Just say or type what's happening — AI fills the form",find_intake:'🗣️ Just say or type what happened — AI fills the case'},
+  pcm:{nav_map:'Map',nav_report:'Report',nav_find:'Find',h_report:'Report danger',h_sos:'Emergency SOS',h_find:'Find — report person wey miss',h_waka:'WakaSafe — check road wahala',h_meet:'SafeMeet — arrange meeting wey safe',h_profile:'Profile',h_active_cases:'Cases wey dey active — tap to open',btn_speak:'🎤 Talk',btn_fill:'✨ Fill am for me',btn_start_waka:'Start WakaSafe',btn_submit_report:'Send am — nobody go know',btn_open_case:'Open search case',btn_start_meet:'🤝 Start SafeMeet',btn_text_code:'📩 Send me code',btn_verify_phone:'Verify phone',seg_alerts:'Alerts near you',seg_missing:'People wey miss',seg_area:'Area updates',lbl_from:'From (type any place)',lbl_to:'To (type any place)',ph_from:'Where you dey…',ph_to:'Where you dey go…',report_intake:'🗣️ Talk or type wetin dey happen — AI go fill the form',find_intake:'🗣️ Talk or type wetin happen — AI go fill the case'},
+  ha:{nav_map:'Taswira',nav_report:'Rahoto',nav_find:'Nemo',h_report:'Bayar da rahoton hadari',h_sos:'SOS na gaggawa',h_find:'Nemo — bayar da rahoton bataccen mutum',h_waka:'WakaSafe — binciken hadarin hanya',h_meet:'SafeMeet — tsara ganawa cikin aminci',h_profile:'Bayani',h_active_cases:'Sharuran da ke aiki — danna ka bude',btn_speak:'🎤 Yi magana',btn_fill:'✨ Cika min',btn_start_waka:'Fara WakaSafe',btn_submit_report:'Aika — ba tare da suna ba',btn_open_case:'Bude binciken',btn_start_meet:'🤝 Fara SafeMeet',btn_text_code:'📩 Aiko min lamba',btn_verify_phone:'Tabbatar da waya',seg_alerts:'Fadakarwa kusa',seg_missing:'Batattun mutane',seg_area:'Sabuntawar yanki',lbl_from:'Daga (rubuta wuri)',lbl_to:'Zuwa (rubuta wuri)',ph_from:'Inda kake yanzu…',ph_to:'Inda za ka…',report_intake:'🗣️ Fadi ko rubuta abin da ke faruwa — AI zai cika',find_intake:'🗣️ Fadi ko rubuta abin da ya faru — AI zai cika'},
+  yo:{nav_map:'Maapu',nav_report:'Jabo',nav_find:'Wa',h_report:'Jabo ewu',h_sos:'SOS pajawiri',h_find:'Wa — jabo eniyan to sonu',h_waka:'WakaSafe — ayewo ewu ona',h_meet:'SafeMeet — to ipade aabo',h_profile:'Profaili',h_active_cases:'Awon oran to nlo — fi owo kan lati si',btn_speak:'🎤 Soro',btn_fill:'✨ Kun un fun mi',btn_start_waka:'Bere WakaSafe',btn_submit_report:'Fi ranse — laimo',btn_open_case:'Si iwadii',btn_start_meet:'🤝 Bere SafeMeet',btn_text_code:'📩 Fi koodu ranse',btn_verify_phone:'Sayewo foonu',seg_alerts:'Ikilo nitosi',seg_missing:'Awon to sonu',seg_area:'Iroyin agbegbe',lbl_from:'Lati (ko aye eyikeyi)',lbl_to:'Si (ko aye eyikeyi)',ph_from:'Ibi to wa…',ph_to:'Ibi to nlo…',report_intake:'🗣️ So tabi ko ohun ti n sele — AI yoo kun un',find_intake:'🗣️ So tabi ko ohun ti o sele — AI yoo kun un'},
+  ig:{nav_map:'Maapu',nav_report:'Koo',nav_find:'Choo',h_report:'Koo ihe ize ndu',h_sos:'SOS mberede',h_find:'Choo — koo onye furu efu',h_waka:'WakaSafe — nyocha ihe ize ndu uzo',h_meet:'SafeMeet — hazie nzuko nchekwa',h_profile:'Profaili',h_active_cases:'Ikpe na-aru oru — pia imeghe',btn_speak:'🎤 Kwuo',btn_fill:'✨ Dejuputara m',btn_start_waka:'Malite WakaSafe',btn_submit_report:'Zipu — na nzuzo',btn_open_case:'Mepee nyocha',btn_start_meet:'🤝 Malite SafeMeet',btn_text_code:'📩 Zitere m koodu',btn_verify_phone:'Kwado ekwenti',seg_alerts:'Okwa di nso',seg_missing:'Ndi furu efu',seg_area:'Mmelite mpaghara',lbl_from:'Site (depee ebe obula)',lbl_to:'Ruo (depee ebe obula)',ph_from:'Ebe i no…',ph_to:'Ebe i na-aga…',report_intake:'🗣️ Kwuo ma o bu depee ihe na-eme — AI ga-ejuputa',find_intake:'🗣️ Kwuo ma o bu depee ihe mere — AI ga-ejuputa'}
 };
 function applyI18n(){
-  var l=langCode();var d=UI_I18N[l]||UI_I18N.en;
-  document.querySelectorAll('[data-i18n]').forEach(function(el){
-    var k=el.getAttribute('data-i18n');var v=d[k]||UI_I18N.en[k];
-    if(v)el.textContent=v;
-  });
+  var l=langCode();var d=UI_I18N[l]||UI_I18N.en, en=UI_I18N.en;
+  document.querySelectorAll('[data-i18n]').forEach(function(el){var k=el.getAttribute('data-i18n');var v=d[k]||en[k];if(v)el.textContent=v;});
+  document.querySelectorAll('[data-i18n-ph]').forEach(function(el){var k=el.getAttribute('data-i18n-ph');var v=d[k]||en[k];if(v)el.setAttribute('placeholder',v);});
 }
 // General app invite (separate from private guardian invites). Uses the native share
 // sheet when available, else copies a link.
@@ -559,7 +557,7 @@ function onLangChange(){
   try{toast(tx('phone_verified')?'✓':'');}catch(e){}
 }
 
-function chip(l){const c=$('#chip'),x=COL[l]||'#8a97a8';c.textContent=l;c.style.background=x+'22';c.style.color=x;}
+function chip(l){var c=$('#chip');if(!c)return;c.textContent=l;}
 function missIcon(e){return L.divIcon({className:'',html:'<div class="mm"><span>'+e+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});}
 
 function initMap(){
@@ -1018,12 +1016,19 @@ async function loadLevel(recenter){recenter=(recenter!==false);const p=$('#areaS
 function locateMe(){
   if(!navigator.geolocation){toast('Location not supported — type your area');$('#areaSelect').focus();return;}
   toast('📍 Finding you — stays on your device…');
-  navigator.geolocation.getCurrentPosition(function(pos){
+  function ok(pos){
     var lat=pos.coords.latitude,lng=pos.coords.longitude,r=riskAtClient(lat,lng,60);
     updateLivePosition(lat,lng,pos.coords.accuracy,true);
     showArea('Your location',r,lat,lng,true,true);sayArea('your location',r);
-  },function(err){toast('Location off — type your area instead');$('#areaSelect').focus();},
-  {enableHighAccuracy:true,timeout:8000,maximumAge:30000});}
+  }
+  function fail(err){
+    if(err&&err.code===1){toast('Location is blocked — allow location for this site in your browser settings, then tap 📍 again');return;}
+    // Timeout / position-unavailable: retry once with network (low) accuracy — faster and
+    // works better indoors. maximumAge:0 forces a fresh fix so we never reuse a stale one.
+    navigator.geolocation.getCurrentPosition(ok,function(){toast('Could not get your location — try again outdoors, or type your area');$('#areaSelect').focus();},
+      {enableHighAccuracy:false,timeout:15000,maximumAge:0});
+  }
+  navigator.geolocation.getCurrentPosition(ok,fail,{enableHighAccuracy:true,timeout:12000,maximumAge:0});}
 let LIVE_AREA_SIG=null;
 function updateLivePosition(lat,lng,accuracy,recenter){
   LIVE_POS={lat:lat,lng:lng,accuracy:accuracy||0,ts:Date.now()};
