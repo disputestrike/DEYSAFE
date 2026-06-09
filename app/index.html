@@ -246,12 +246,7 @@ Check hotel address</textarea>
         <div class="livestate"><span id="liveDot" class="live-dot"></span><span id="liveState">Waiting for live location permission</span><span class="pill" id="lvpill" style="margin-left:auto">—</span></div>
         <div class="guide" id="guide"></div>
         <div id="areaReport"></div>
-        <div class="assistantbox evidence-ai" id="aiEvidenceBox">
-          <label class="f" style="margin-top:0">AI evidence review</label>
-          <div class="camera-strip"><label class="camera-btn" for="aiMedia">Add image/video</label><input id="aiMedia" type="file" accept="image/*,video/*" capture="environment" onchange="previewAiEvidence()" /><div class="media-summary" id="aiMediaNote">Select an image or video for evidence triage. Reports still attach raw evidence from the Report tab.</div></div>
-          <textarea id="aiMediaContext" placeholder="What should DeySafe look for? Example: plate number, roadblock, weapon, faces, location clues, police badge, vehicle color"></textarea>
-          <div class="evidence-actions"><button class="btn sec" onclick="analyzeEvidence()">Analyze evidence</button><button class="btn" onclick="go('report')">Report</button></div>
-        </div>
+        <!-- AI evidence review (Add image/video + Analyze) moved to Find Me — the Map stays navigation/safety only. -->
         <div class="assistantbox">
           <label class="f" style="margin-top:0">Ask DeySafe</label>
           <textarea id="aiCommand" placeholder="e.g. Abuja to Kaduna, or armed robbery near Oshodi, or my brother is missing in Kankara"></textarea>
@@ -359,6 +354,12 @@ Check hotel address</textarea>
       <label class="f">Bluetooth tag ID (optional — AirTag/Tile)</label><input id="mBeacon" placeholder="tag serial — nearby phones can detect it, even offline" />
       <button class="btn" id="caseBtn" onclick="sendMissing()">Open search case</button>
       <div class="ok" id="mOk"></div>
+      <div class="assistantbox evidence-ai" id="aiEvidenceBox" style="margin-top:18px">
+        <label class="f" style="margin-top:0">📸 Analyze a photo or video — AI evidence review</label>
+        <div class="camera-strip"><label class="camera-btn" for="aiMedia">Add image/video</label><input id="aiMedia" type="file" accept="image/*,video/*" capture="environment" onchange="previewAiEvidence()" /><div class="media-summary" id="aiMediaNote">Add a photo or clip — a suspect vehicle, a face, a landmark, a note — and DeySafe triages it for search clues. Reports still attach raw evidence from the Report tab.</div></div>
+        <textarea id="aiMediaContext" placeholder="What should DeySafe look for? Example: plate number, vehicle color, faces, school uniform, landmark, direction clues"></textarea>
+        <div class="evidence-actions"><button class="btn sec" onclick="nlMic('aiMediaContext')">🎤 Speak</button><button class="btn sec" onclick="analyzeEvidence()">Analyze evidence</button></div>
+      </div>
       <h2 class="t" style="margin-top:20px">Active cases — tap to open</h2>
       <div id="missList"></div>
       <div id="caseDetail"></div>
@@ -1118,7 +1119,13 @@ function toggleWatch(){
 }
 // --- AI intake: speak/type plain language -> /api/intake -> pre-fill the form.
 function nlMic(targetId){
-  if(!voiceSupported()){toast('Voice input needs Chrome or Android');return;}
+  if(!voiceSupported()){
+    // iOS Safari has no Web Speech API. Don't dead-end — focus the field so the user can
+    // use the keyboard's dictation mic (real speech-to-text), then ✨ Fill runs the AI.
+    var el=targetId&&$('#'+targetId);if(el){try{el.focus();}catch(e){}}
+    toast('On iPhone: tap the 🎤 on your keyboard to dictate, then tap ✨ Fill');
+    return;
+  }
   try{var SR=window.SpeechRecognition||window.webkitSpeechRecognition;var rec=new SR();rec.lang='en-NG';rec.interimResults=false;rec.maxAlternatives=1;
     rec.onstart=function(){toast('🎤 Listening… describe what happened');};
     rec.onerror=function(){toast('Didn\'t catch that — try again');};
