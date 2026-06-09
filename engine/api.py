@@ -640,7 +640,7 @@ def production_config_report():
     errors = []
     warnings = []
     if DEMO_MODE:
-        errors.append("DEMO_MODE must be 0 outside local demo")
+        errors.append("DEMO_MODE must be 0 in production (it echoes OTP/verify codes on-screen)")
     if not os.environ.get("DATABASE_URL", "").strip():
         errors.append("DATABASE_URL/Postgres is required for production")
     if os.environ.get("DEYSAFE_REQUIRE_POSTGRES", "").strip().lower() not in ("1", "true", "yes", "on"):
@@ -1058,48 +1058,13 @@ def ingest_text_report(db, text, source):
 
 
 def ensure_seed(db):
-    # FAKE-01: ALL synthetic data is gated behind DEMO_MODE. With DEMO_MODE off
-    # (prod), a fresh DB builds NO sample signals, NO sample case, and NO fabricated
-    # human-"verified" RED — the map starts empty and honest. A real DB still
-    # recomputes its own incidents. Default is ON (keeps validate.py's "verified RED
-    # visible" check green locally).
-    empty = db.count_signals() == 0
-    if DEMO_MODE and empty:
-        for s in ingest.gather(use_live=False, use_sample=True):
-            db.insert_signal(s)
+    # Brief #6: NO synthetic/sample data is EVER seeded — removed entirely, not gated.
+    # A fresh DB starts empty and honest: no sample signals, no "[SAMPLE]" FindMe case,
+    # no fabricated human-"verified" RED. The map shows only what real reports and real
+    # ingest produce. We still recompute so any real signals already stored build their
+    # own incidents/alerts. (DEMO_MODE no longer touches DATA — it only echoes dev
+    # OTP/verify codes on-screen for local testing, and is hard-blocked in production.)
     recompute(db)
-    if not DEMO_MODE:
-        return  # prod: no synthetic case / alert / verified-threat seeding
-    if empty:
-        # one sample FindMe case so the map demonstrates a search radius
-        lat, lng = place_coords("Kankara")
-        db.insert_missing({"name": "[SAMPLE] Abducted students (group)", "age": "13-17", "place": "Kankara",
-                           "exact_place": "Government Science School, Kankara", "count": 20,
-                           "lat": lat, "lng": lng,
-                           "last_seen": (datetime.datetime.now() - datetime.timedelta(hours=3)).isoformat(timespec="seconds"),
-                           "description": "Sample mass-abduction case for demo — students taken from a school in Kankara.",
-                           "vehicle": "Several motorcycles + a white Hilux", "clothing": "School uniforms",
-                           "direction": "North into the forest toward Jibia"})
-    # Demo: ensure ONE human-VERIFIED incident exists so the public actually sees a
-    # RED on the GREEN->YELLOW->ORANGE->RED ladder. Idempotent; never overrides an
-    # operator's later call (only seeds while that incident is still undecided). The
-    # decision + seeded alert are keyed to the incident's immutable uuid (INT-01/02).
-    rk = "kidnapping|Kaduna|Kaduna"
-    demo_candidates = [i for i in with_decisions(db) if i.get("type") == "kidnapping" and not i.get("decided")]
-    demo_candidates.sort(key=lambda i: (-int(i.get("confidence") or 0), -int(i.get("severity") or 0),
-                                        i.get("location_name") or ""))
-    inc = next((i for i in demo_candidates
-                if ikey(i) == rk or _verify_incident_match(i, "kidnapping", "Kaduna", "Kaduna")),
-               (demo_candidates[0] if demo_candidates else None))
-    if inc and not inc.get("decided"):
-        iuid = inc.get("incident_uuid")
-        db.set_decision(iuid, "verified", "[seed] demo verified threat (synthetic)", "seed",
-                        event_version=inc.get("event_version"), key=rk)
-        if not db.has_active_alert(iuid):
-            db.insert_alert({"incident_key": iuid, "level": 3, "level_label": "DANGER",
-                             "title": "KIDNAPPING — Kaduna, Kaduna — armed men on the Kaduna-Abuja road",
-                             "guidance": TYPE_GUIDANCE["kidnapping"], "lat": inc["lat"], "lng": inc["lng"],
-                             "radius_km": 50, "reach": 6000})
 
 
 def with_decisions(db):
@@ -1486,10 +1451,12 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         db = DB(DB_PATH)
         if u.path == "/api/health":
-            # FAKE-01: expose whether this instance is showing synthetic demo data.
+            # No synthetic data is ever seeded now (brief #6). `demo` here means only
+            # "dev echo mode" (OTP/verify codes returned in API responses for local
+            # testing) — never "fake incidents on the map". Kept for diagnostics.
             return self._json({"ok": True, "incidents": len(public_incidents(db)),
                                "queue": len(review_queue(db)), "missing": len(db.all_missing()),
-                               "demo": DEMO_MODE, "auth": self._auth_enabled(),
+                               "demo": DEMO_MODE, "dev_echo": DEMO_MODE, "auth": self._auth_enabled(),
                                "launch_posture": production_config_report(),
                                "database": {"backend": db.backend(),
                                              "postgres_configured": bool(os.environ.get("DATABASE_URL")),
@@ -3856,7 +3823,7 @@ def main():
     # footgun. None of these block startup; see DEPLOY.md for the launch checklist.
     _warn = []
     if DEMO_MODE:
-        _warn.append("DEMO_MODE is ON (synthetic incidents) — set DEMO_MODE=0 for real data before public use")
+        _warn.append("DEMO_MODE is ON (dev OTP/verify codes echoed on-screen) — set DEMO_MODE=0 before public use")
     if not os.environ.get("DEYSAFE_BEACON_SECRET", "").strip():
         _warn.append("DEYSAFE_BEACON_SECRET unset — beacon relays are UNSIGNED/spoofable; set it before FindMe/BLE goes live")
     if not (OPERATOR_TOKEN or auth.auth_enabled()):

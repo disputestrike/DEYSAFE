@@ -15,8 +15,15 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
-data/*.db
-data/*.db-*
+
+# The entire data/ directory is runtime/scratch (SQLite db, WAL, server logs, gate
+# output dumps) and may contain real or test PII. This repo is PUBLIC — never commit
+# anything under data/ except the .gitkeep placeholder that preserves the directory.
+data/*
+!data/.gitkeep
+
+# Operator-console runtime incident data — may contain PII; never commit (public repo).
+console/incidents.json
 
 # Backup files
 *.bak*

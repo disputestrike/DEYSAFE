@@ -1,0 +1,2 @@
+# Keeps the runtime data/ directory in the repo. All real contents (SQLite db, logs,
+# gate dumps) are gitignored — this folder must never hold committed PII (public repo).

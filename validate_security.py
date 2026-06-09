@@ -154,6 +154,13 @@ check("POST /api/sighting case_id=999999 -> 400/404 and not ok (ABU-10)",
 
 # ---------------------------------------------------------------------------
 print("\n-- D. PII: public missing flyer must be a REDACTED flyer (PRIV-01, BLE-02) --")
+# Brief #6: the app no longer ships any sample data, so seed our OWN case WITH sensitive
+# fields. The PUBLIC flyer must then strip them — that redaction is exactly what we assert
+# below. (Previously this rode on the demo [SAMPLE] case, which is gone.)
+call("POST", "/api/missing", {"name": "Priv Probe", "place": "Kankara",
+     "exact_place": "Government Science School, Kankara", "vehicle": "White Hilux, no plate",
+     "clothing": "Blue school uniform", "direction": "North toward Jibia",
+     "beacon_id": "PRIV-PROBE-BEACON", "hours_ago": 2, "count": 1, "lat": 11.52, "lng": 7.61})
 s, cases = _missing_public()
 if s != 200:
     check("GET /api/missing (public) reachable", False, "status=" + str(s))

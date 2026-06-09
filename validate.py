@@ -91,7 +91,8 @@ s, j, _ = call("GET", "/api/health"); check("GET /api/health", s == 200 and "inc
 s, j, _ = call("GET", "/api/incidents"); check("GET /api/incidents", s == 200 and isinstance(j.get("incidents"), list), s)
 _incs = j.get("incidents", []); _ttl = {"verified": 240, "needs_human_review": 96, "corroborated": 72, "candidate_unverified": 48}
 check("incidents carry age & within decay TTL (auto drop-off)", all(("age_hours" in i and i["age_hours"] <= _ttl.get(i.get("status"), 48) + 0.2) for i in _incs), "n=" + str(len(_incs)))
-check("a verified RED incident is visible (full severity ladder)", any(i.get("status") == "verified" for i in _incs), "verified present")
+_, _m6, _ = call("GET", "/api/missing")
+check("fresh DB has no synthetic [SAMPLE]/seed data (brief #6 — removed entirely)", (not any("SAMPLE" in str(i.get("title", "")) for i in _incs)) and (not any(str(x.get("name", "")).startswith("[SAMPLE]") for x in (_m6.get("missing") or []))), "no seed rows")
 s, j, _ = call("GET", "/api/queue"); check("GET /api/queue", s == 200 and isinstance(j.get("queue"), list), s)
 s, j, _ = call("GET", "/api/missing"); check("GET /api/missing (+radius)", s == 200 and isinstance(j.get("missing"), list) and (not j["missing"] or "radius_km" in j["missing"][0]), s)
 s, j, _ = call("GET", "/api/places"); check("GET /api/places (+coords)", s == 200 and j.get("places") and j.get("coords"), s)
@@ -172,6 +173,8 @@ _, a1, _ = call("GET", "/api/alerts"); nb = len(a1.get("alerts", []))
 call("POST", "/api/verify", {"type": "banditry_attack", "location_name": "Gusau", "state": "Zamfara", "decision": "verified"})
 _, a2, _ = call("GET", "/api/alerts"); na = len(a2.get("alerts", []))
 check("operator verify fires a public alert", na >= nb and na > 0, str(nb) + " -> " + str(na))
+_, _iv, _ = call("GET", "/api/incidents")
+check("a verified RED incident is visible via the real report->verify pipeline (no seed)", any(i.get("status") == "verified" for i in _iv.get("incidents", [])), "verified present after real verify")
 time.sleep(1.0)  # Wait for rate limit to reset before off-gazetteer test
 s, j, _ = call("POST", "/api/report", {"type": "banditry_attack", "place": "Buni Yadi", "description": "gunmen sighted on the road, several vehicles"})
 rsk = j.get("risk") or {}
