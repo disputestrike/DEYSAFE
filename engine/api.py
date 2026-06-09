@@ -2329,6 +2329,24 @@ class Handler(BaseHTTPRequestHandler):
             db.audit("field", "journey_arrive", "ref=%s" % row.get("handoff_ref"))
             return self._json({"ok": True, "journey": public_journey_view(db.journey_by_uuid(jid))})
 
+        if u.path == "/api/journey/cancel":
+            # #3: owner cancels a trip mid-way (false alarm / plan changed). Owner-gated
+            # exactly like arrive; closes the session as 'cancelled' — a terminal state the
+            # overdue scheduler ignores. Distinct from arrive (reached safely).
+            if not self._rate_ok("/api/journey/cancel", 40):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            jid = (data.get("journey_uuid") or data.get("id") or "").strip()
+            row0 = db.journey_by_uuid(jid) if jid else None
+            if not row0:
+                return self._json({"ok": False, "error": "unknown journey"}, 404)
+            user = self._field_user(db, data)
+            if not self._owner_allowed(row0, data, user):
+                return self._json({"ok": False, "error": "journey ownership required"}, 403)
+            db.close_journey(jid, "cancelled")
+            db.record_journey_event(jid, {"event_type": "cancelled", "note": "owner cancelled the trip"})
+            db.audit("field", "journey_cancel", "ref=%s" % (row0.get("handoff_ref") or ""))
+            return self._json({"ok": True, "journey": public_journey_view(db.journey_by_uuid(jid))})
+
         if u.path == "/api/safemeet/start":
             # FIELD: create a monitored meeting session. Coordinates are resolved
             # offline-first when the client only sends a place label.

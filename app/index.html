@@ -1204,18 +1204,27 @@ function renderJourney(j){
   renderJourneyBanner(j);
   var box=$('#journeyBox');if(!box)return;
   if(!j){box.style.display='none';box.innerHTML='';return;}
-  box.style.display='block';
   JOURNEY_ID=j.journey_uuid||j.id||JOURNEY_ID;
+  var st=String(j.status||j.state||'active').toLowerCase();
+  // #3: once a trip ends (arrived / cancelled / closed), do NOT keep the live card —
+  // show a compact closed state with a Dismiss action so it can be cleared.
+  if(/arriv|ended|closed|cancel|safe/.test(st)){
+    box.style.display='block';
+    var label=/cancel/.test(st)?'Journey cancelled':'Arrived safely';
+    box.innerHTML='<div class="r1"><b>🛡 Journey Guard — '+label+'</b><span class="badge GREEN">done</span></div>'
+      +'<p class="note" style="margin:6px 2px 8px">This trip is closed. The trail is saved in your history.</p>'
+      +'<button class="btn sec" onclick="journeyDismiss()">Dismiss</button>';
+    return;
+  }
   try{localStorage.setItem('ds_journey_id',JOURNEY_ID||'');}catch(e){}
-  var reason=j.anomaly_reason?(' - '+esc(j.anomaly_reason)):'';
-  var st=esc(j.status||j.state||'active'),risk=esc(j.risk_level||'GREEN');
+  var reason=j.anomaly_reason?(' - '+esc(j.anomaly_reason)):'',risk=esc(j.risk_level||'GREEN');
+  box.style.display='block';
   box.innerHTML='<div class="r1"><b>🛡 Journey Guard · '+esc(j.ref||JOURNEY_ID||'active')+'</b><span class="badge '+risk+'">'+risk+'</span></div>'
-    +'<div class="kv"><b>Status:</b> '+st+'</div>'
     +'<div class="kv"><b>Route:</b> '+esc(j.from_place||'start')+' to '+esc(j.to_place||'destination')+'</div>'
     +'<div class="kv"><b>Watch:</b> '+esc(j.anomaly_level||'normal')+reason+'</div>'
     +'<div class="kv"><b>Exact sharing:</b> '+(j.share_consent?'on for this journey':'off')+'</div>'
-    +'<div class="kv"><b>Mode:</b> automatic guard'+(JOURNEY_WATCH!=null?' — watching this trip now':' — will watch when location is on')+'</div>'
-    +'<p class="note" style="margin-top:8px">Journey Guard watches your trip automatically — no taps needed. Check-ins and arrival happen on their own; your circle and SHIELD are alerted if you go silent or off-route.</p>';
+    +'<p class="note" style="margin:8px 2px">Journey Guard watches your trip automatically. Your circle and SHIELD are alerted if you go silent or off-route.</p>'
+    +'<div class="chips" style="grid-template-columns:1fr 1fr;margin-top:4px"><button class="btn" onclick="journeyArrive(false)">✓ Arrived safely</button><button class="btn sec" onclick="journeyCancel()">✕ Cancel trip</button></div>';
 }
 // First-class, ALWAYS-VISIBLE Journey Guard presence: a slim banner shown on every
 // screen while a trip is active (tap to open WakaSafe). Hidden once arrived/ended.
@@ -1269,6 +1278,15 @@ async function journeyArrive(auto){
   if(r.ok){renderJourney(r.journey);stopJourneyAutoWatch();toast(auto?'Arrival marked automatically':'Glad you arrived');}
   else if(!auto)toast(r.error||'Could not mark arrived');
 }
+async function journeyCancel(){
+  if(!JOURNEY_ID){try{JOURNEY_ID=localStorage.getItem('ds_journey_id')||'';}catch(e){}}
+  if(!JOURNEY_ID){toast('No active trip');return;}
+  if(!confirm('Cancel this Journey Guard trip? Your guardians will NOT be alerted.'))return;
+  var r=await fetch('/api/journey/cancel',{method:'POST',headers:authHeaders(),body:JSON.stringify(authBody({owner_token:SOS_OWNER,journey_uuid:JOURNEY_ID}))}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
+  if(r.ok){stopJourneyAutoWatch();renderJourney(r.journey);toast('Journey cancelled');}
+  else toast(r.error||'Could not cancel');
+}
+function journeyDismiss(){var box=$('#journeyBox');if(box){box.style.display='none';box.innerHTML='';}var b=$('#journeyBanner');if(b){b.style.display='none';b.innerHTML='';}JOURNEY_ID=null;try{localStorage.removeItem('ds_journey_id');}catch(e){}}
 function stopJourneyAutoWatch(){if(JOURNEY_WATCH!=null&&navigator.geolocation){try{navigator.geolocation.clearWatch(JOURNEY_WATCH);}catch(e){}}JOURNEY_WATCH=null;JOURNEY_DEST=null;}
 function startJourneyAutoWatch(scan){
   stopJourneyAutoWatch();
