@@ -382,14 +382,13 @@ Check hotel address</textarea>
         <option value="transaction">Transaction (buy/sell)</option>
       </select>
 
-      <label class="f">Where (type any place)</label>
-      <input id="meetPlace" list="placelist" autocomplete="off" placeholder="Meeting location…" />
+      <label class="f">Meeting address</label>
+      <input id="meetAddress" list="placelist" autocomplete="off" placeholder="e.g. Computer Village Ikeja, or 55 Allen Avenue" />
 
-      <label class="f">Exact address / landmark</label>
-      <input id="meetAddress" placeholder="e.g. Starbucks on Lekki Phase 1" />
-
-      <label class="f">Expected arrival time</label>
-      <input id="meetETA" type="time" />
+      <div style="display:flex;gap:10px">
+        <div style="flex:1"><label class="f">Expected arrival</label><input id="meetETA" type="time" /></div>
+        <div style="flex:1"><label class="f">Expected end</label><input id="meetEnd" type="time" /></div>
+      </div>
 
       <button class="btn" onclick="startSafeMeet()">🤝 Start Safe Meet</button>
 
@@ -1771,20 +1770,18 @@ async function fillSafeMeetAI(){
   if(!r.ok){if(note)note.textContent=r.error||'Could not read meeting details';return;}
   var f=r.fields||{};
   if(f.meeting_type&&$('#meetType'))$('#meetType').value=f.meeting_type;
-  if(f.meeting_place&&$('#meetPlace'))$('#meetPlace').value=f.meeting_place;
-  if(f.meeting_address&&$('#meetAddress'))$('#meetAddress').value=f.meeting_address;
+  if($('#meetAddress')&&(f.meeting_address||f.meeting_place))$('#meetAddress').value=f.meeting_address||f.meeting_place;
   if(f.expected_arrival&&$('#meetETA'))$('#meetETA').value=f.expected_arrival;
   if(note)note.textContent='SafeMeet filled. Check it once, then start the watch.';
 }
 
 async function startSafeMeet() {
   const type = $('#meetType').value;
-  const place = ($('#meetPlace').value || '').trim();
   const addr = ($('#meetAddress').value || '').trim();
-  if (!place) { toast('Enter meeting location'); return; }
-  const coords = PLACE_COORDS[place] || (LIVE_POS?[LIVE_POS.lat,LIVE_POS.lng]:[null,null]);
-  const body = authBody({owner_token:SOS_OWNER,meeting_type:type,meeting_place:place,meeting_address:addr,
-    meeting_lat:coords[0],meeting_lng:coords[1],expected_arrival:$('#meetETA').value||''});
+  if (!addr) { toast('Enter the meeting address'); return; }
+  const coords = PLACE_COORDS[addr] || (LIVE_POS?[LIVE_POS.lat,LIVE_POS.lng]:[null,null]);
+  const body = authBody({owner_token:SOS_OWNER,meeting_type:type,meeting_place:addr,meeting_address:addr,
+    meeting_lat:coords[0],meeting_lng:coords[1],expected_arrival:$('#meetETA').value||'',expected_departure:($('#meetEnd')&&$('#meetEnd').value)||''});
   const r = await fetch('/api/safemeet/start', {
     method:'POST',headers:authHeaders(),body:JSON.stringify(body)
   }).then(x=>x.json()).catch(()=>({ok:false,error:'network'}));
