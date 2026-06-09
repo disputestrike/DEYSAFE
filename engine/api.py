@@ -373,38 +373,6 @@ def _route_cache_put(key, value):
         _ROUTE_CACHE.pop(_ROUTE_CACHE_ORDER.pop(0), None)
 
 
-def _maneuver_text(man, road):
-    """Turn an OSRM maneuver + road name into a short spoken driving instruction."""
-    typ = (man.get("type") or "").lower()
-    mod = (man.get("modifier") or "").lower()
-    road = (road or "").strip()
-    onto = (" onto " + road) if road else ""
-    if typ == "depart":
-        return "Head out" + ((" on " + road) if road else "")
-    if typ == "arrive":
-        return "Arrive at your destination"
-    if typ in ("on ramp", "off ramp", "ramp"):
-        return "Take the ramp" + ((" " + mod) if mod else "") + onto
-    if typ == "merge":
-        return "Merge" + ((" " + mod) if mod else "") + onto
-    if typ == "fork":
-        return "Keep " + (mod or "straight") + " at the fork" + onto
-    if typ in ("roundabout", "rotary", "roundabout turn"):
-        try:
-            exn = int(man.get("exit"))
-        except Exception:
-            exn = 0
-        tail = (", continue" + onto) if road else ""
-        return "At the roundabout" + ((" take exit %d" % exn) if exn else "") + tail
-    if typ == "new name":
-        return "Continue" + onto
-    if typ == "continue":
-        return ("Continue " + mod).strip() + ((" on " + road) if road else "")
-    if typ in ("turn", "end of road"):
-        return "Turn " + (mod or "ahead") + onto
-    return ("Continue " + mod).strip() + ((" on " + road) if road else "")
-
-
 def road_route_waypoints(a, b):
     """Return road-snapped waypoints from an OSRM-compatible route service.
 
@@ -429,7 +397,7 @@ def road_route_waypoints(a, b):
     cached = _ROUTE_CACHE.get(ckey)
     if cached is not None:
         return dict(cached)
-    qs = urllib.parse.urlencode({"overview": "full", "geometries": "geojson", "steps": "true"})
+    qs = urllib.parse.urlencode({"overview": "full", "geometries": "geojson", "steps": "false"})
     url = "%s/route/v1/driving/%s?%s" % (base, coords, qs)
     # Best-effort with ONE short retry: the public OSRM demo often fails the first
     # hit but answers the second. A miss still falls back to the corridor below —
@@ -454,30 +422,9 @@ def road_route_waypoints(a, b):
                 pts = pts[::step]
                 if pts[-1] != (float(b["lat"]), float(b["lng"])):
                     pts.append((float(b["lat"]), float(b["lng"])))
-            # Turn-by-turn: flatten OSRM legs[].steps[] into compact maneuvers the
-            # frontend renders as a directions list and advances through live.
-            steps_out = []
-            for leg in (route.get("legs") or []):
-                for st in (leg.get("steps") or []):
-                    man = st.get("maneuver") or {}
-                    loc = man.get("location") or []
-                    if not (isinstance(loc, (list, tuple)) and len(loc) >= 2):
-                        continue
-                    txt = _maneuver_text(man, st.get("name") or "")
-                    if steps_out and steps_out[-1]["instruction"] == txt and (man.get("type") or "") != "arrive":
-                        continue  # collapse consecutive duplicate guidance
-                    steps_out.append({
-                        "instruction": txt,
-                        "type": man.get("type") or "",
-                        "modifier": man.get("modifier") or "",
-                        "road": (st.get("name") or "").strip(),
-                        "lat": float(loc[1]), "lng": float(loc[0]),
-                        "distance_m": int(round(float(st.get("distance") or 0))),
-                    })
             result = {
                 "waypoints": pts,
                 "provider": "osrm",
-                "steps": steps_out,
                 "distance_km": round(float(route.get("distance", 0) or 0) / 1000.0, 1),
                 "duration_min": round(float(route.get("duration", 0) or 0) / 60.0, 1),
             }
@@ -509,7 +456,6 @@ def route_scan_between(ga, gb, incidents, n=None, radius=None):
         scan["route_provider"] = road.get("provider")
         scan["route_distance_km"] = road.get("distance_km")
         scan["route_duration_min"] = road.get("duration_min")
-        scan["steps"] = road.get("steps") or []
         return scan
     scan = routing.scan((ga["lat"], ga["lng"]), (gb["lat"], gb["lng"]), incidents,
                         n=(n or routing.DEFAULT_WAYPOINTS), radius_km=radius)
