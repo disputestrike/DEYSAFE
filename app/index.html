@@ -1719,7 +1719,7 @@ window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_ON)panicLock();});
 
-(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();renderSigninCTA();maybeOnboard();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetPlace','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
+(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();renderSigninCTA();maybeOnboard();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetAddress','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
   restoreJourney();   // re-show Journey Guard presence if a trip is in progress
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();outboxHydrate().then(flushOutbox); // recover from IndexedDB, then send anything saved on a previous offline visit
