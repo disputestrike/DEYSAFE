@@ -199,6 +199,21 @@ Check hotel address</textarea>
     <section class="view active" id="v-home">
       <div id="map"></div>
       <div class="panel">
+        <div id="signinCTA" class="case" style="display:none;border:1px solid #2f6df6">
+          <div class="r1"><b>👋 Sign in with your phone</b></div>
+          <p class="note" style="text-align:left;margin:6px 2px 8px">Unlock SOS, Safety Vault guardians, saved places and verified alerts. Your number is stored hashed — it is never shown on this phone.</p>
+          <div class="srow">
+            <input id="ctaPhone" inputmode="tel" autocomplete="tel" placeholder="+234 80..." />
+            <button class="btn" style="flex:0 0 118px" onclick="ctaSendOtp()">Send code</button>
+          </div>
+          <div id="ctaOtpRow" style="display:none;margin-top:8px">
+            <div class="srow">
+              <input id="ctaOtp" inputmode="numeric" placeholder="6-digit code" />
+              <button class="btn" style="flex:0 0 118px" onclick="ctaVerify()">Verify</button>
+            </div>
+          </div>
+          <div id="ctaMsg" class="note" style="text-align:left;margin-top:6px"></div>
+        </div>
         <!-- Live location drives your area safety automatically (Google-Maps style), so the
              old "type an area" search box + voice-a-place mic were removed. #areaSelect is kept
              HIDDEN so the area-risk, channel and voice-assistant functions keep working. The
@@ -1267,10 +1282,10 @@ function renderProfile(){
 async function loadMe(){
   try{
     var r=await fetch('/api/me',{headers:authHeaders()}).then(function(x){return x.json();});
-    if(!r.ok){SESSION_READY=false;setSession('',DEVICE_ID);USER_PROFILE=null;GUARDIAN_COUNT=0;GUARDIAN_POLICY_ID='';renderProfile();return null;}
+    if(!r.ok){SESSION_READY=false;setSession('',DEVICE_ID);USER_PROFILE=null;GUARDIAN_COUNT=0;GUARDIAN_POLICY_ID='';renderProfile();renderSigninCTA();return null;}
     SESSION_READY=true;
     USER_PROFILE=r.user||null;GUARDIAN_COUNT=Number(r.guardian_count||0);GUARDIAN_POLICY_ID=(USER_PROFILE&&USER_PROFILE.guardian_policy_id)||'';
-    renderProfile();await loadGuardians();return USER_PROFILE;
+    renderProfile();renderSigninCTA();await loadGuardians();return USER_PROFILE;
   }catch(e){renderProfile();return null;}
 }
 async function signupStart(){
@@ -1287,7 +1302,29 @@ async function signupVerify(){
   var r=await fetch('/api/signup/verify',{method:'POST',headers:authHeaders(),body:JSON.stringify({otp_ref:ref,code:code,first_name:($('#firstNameInput').value||'').trim(),language:($('#langSelect').value||'en'),device_id:ensureDeviceId()})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
   if(!r.ok){toast(r.error||'OTP failed');return;}
   setSession(r.session_token||'',r.device_id||DEVICE_ID);USER_PROFILE=r.user||null;GUARDIAN_COUNT=Number(r.guardian_count||0);GUARDIAN_POLICY_ID=(USER_PROFILE&&USER_PROFILE.guardian_policy_id)||'';
-  toast(tx('phone_verified'));renderProfile();await loadMe();await loadMySafe();await loadReadiness();
+  toast(tx('phone_verified'));renderSigninCTA();renderProfile();await loadMe();await loadMySafe();await loadReadiness();
+}
+// Prominent home-screen sign-in (same phone-OTP backend as Profile). Shown only when
+// there is no session, so people actually sign in and we collect a verified number.
+function renderSigninCTA(){var el=$('#signinCTA');if(el)el.style.display=hasSession()?'none':'block';}
+var _ctaRef='';
+async function ctaSendOtp(){
+  var phone=($('#ctaPhone').value||'').trim();
+  if(!phone){$('#ctaPhone').focus();return;}
+  ensureDeviceId();
+  var r=await fetch('/api/signup/start',{method:'POST',headers:authHeaders(),body:JSON.stringify({phone:phone,device_id:DEVICE_ID})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
+  var m=$('#ctaMsg');
+  if(r.ok){_ctaRef=r.otp_ref||'';if($('#ctaOtpRow'))$('#ctaOtpRow').style.display='block';if($('#ctaOtp'))$('#ctaOtp').focus();
+    if(m)m.innerHTML='Code sent to '+esc(r.phone_redacted||phone)+(r.dev_otp?(' · demo code <b>'+esc(r.dev_otp)+'</b>'):'');}
+  else if(m){m.textContent='Could not send code: '+(r.error||'failed');}
+}
+async function ctaVerify(){
+  var code=($('#ctaOtp').value||'').trim();
+  if(!_ctaRef||!code){toast('Enter the 6-digit code');return;}
+  var r=await fetch('/api/signup/verify',{method:'POST',headers:authHeaders(),body:JSON.stringify({otp_ref:_ctaRef,code:code,language:($('#langSelect').value||'en'),device_id:ensureDeviceId()})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
+  if(!r.ok){var m=$('#ctaMsg');if(m)m.textContent=r.error||'Code failed';return;}
+  setSession(r.session_token||'',r.device_id||DEVICE_ID);USER_PROFILE=r.user||null;GUARDIAN_COUNT=Number(r.guardian_count||0);GUARDIAN_POLICY_ID=(USER_PROFILE&&USER_PROFILE.guardian_policy_id)||'';
+  toast('✓ Signed in');renderSigninCTA();renderProfile();await loadMe();await loadMySafe();await loadReadiness();
 }
 async function savePins(){
   if(sessionRequired())return;
@@ -1600,7 +1637,7 @@ window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_ON)panicLock();});
 
-(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetPlace','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
+(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();renderSigninCTA();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetPlace','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
   restoreJourney();   // re-show Journey Guard presence if a trip is in progress
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();outboxHydrate().then(flushOutbox); // recover from IndexedDB, then send anything saved on a previous offline visit
