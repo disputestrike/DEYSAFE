@@ -169,7 +169,7 @@
       <img src="/assets/brand/deysafe-icon-192.png" alt="DeySafe" style="width:84px;height:84px;border-radius:20px;box-shadow:0 8px 30px rgba(0,0,0,.4)"/>
       <h1 style="margin:14px 0 2px;font-size:30px;letter-spacing:.5px">DeySafe</h1>
       <p style="margin:0 0 14px;color:#bcd3f5;font-size:15px">Know before you waka.</p>
-      <p style="margin:0 0 16px;color:#dbe7fb;font-size:14px;line-height:1.5">Sign in with your phone to unlock SOS, Safety Vault guardians, saved places and verified alerts. Your number is stored hashed — never shown on this phone.</p>
+      <p style="margin:0 0 16px;color:#dbe7fb;font-size:14px;line-height:1.5">Sign in with your phone to unlock SOS, Emergency contacts, saved places and verified alerts. Your number is stored hashed — never shown on this phone.</p>
       <div id="obPhoneStep" style="display:flex;gap:8px">
         <input id="obPhone" inputmode="tel" autocomplete="tel" placeholder="+234 80..." style="flex:1;min-width:0;padding:13px;border-radius:11px;border:none;font:inherit;font-size:16px"/>
         <button onclick="obSendOtp()" style="flex:0 0 108px;padding:13px;border:none;border-radius:11px;background:#2f6df6;color:#fff;font:inherit;font-weight:700;cursor:pointer">Send code</button>
@@ -224,7 +224,7 @@ Check hotel address</textarea>
       <div class="panel">
         <div id="signinCTA" class="case" style="display:none;border:1px solid #2f6df6">
           <div class="r1"><b>👋 Sign in with your phone</b></div>
-          <p class="note" style="text-align:left;margin:6px 2px 8px">Unlock SOS, Safety Vault guardians, saved places and verified alerts. Your number is stored hashed — it is never shown on this phone.</p>
+          <p class="note" style="text-align:left;margin:6px 2px 8px">Unlock SOS, Emergency contacts, saved places and verified alerts. Your number is stored hashed — it is never shown on this phone.</p>
           <div class="srow">
             <input id="ctaPhone" inputmode="tel" autocomplete="tel" placeholder="+234 80..." />
             <button class="btn" style="flex:0 0 118px" onclick="ctaSendOtp()">Send code</button>
@@ -257,7 +257,7 @@ Check hotel address</textarea>
           <button onclick="go('waka')">🛣 Check road</button>
           <button onclick="go('findme')">🔎 Missing</button>
         </div>
-        <div class="segtabs"><button class="seg on" data-seg="alerts">Nearby alerts</button><button class="seg" data-seg="missing">Missing persons</button><button class="seg" data-seg="channels">Channels</button></div>
+        <div class="segtabs"><button class="seg on" data-seg="alerts">Nearby alerts</button><button class="seg" data-seg="missing">Missing persons</button><button class="seg" data-seg="channels">Area updates</button></div>
         <div id="homeList"></div>
       </div>
     </section>
@@ -320,14 +320,14 @@ Check hotel address</textarea>
     <section class="view pad" id="v-sos">
       <h2 class="t">Emergency SOS</h2>
       <div id="sosHome">
-        <label class="silentrow"><input type="checkbox" id="sosSilentToggle" onchange="renderSosButtons()" /><span><b>🤫 Silent mode</b> — no alarm or flashing. Best during an active abduction. Still saves your SOS, queues Safety Vault guardians, and prepares your location to share.</span></label>
+        <label class="silentrow"><input type="checkbox" id="sosSilentToggle" onchange="renderSosButtons()" /><span><b>🤫 Silent mode</b> — no alarm or flashing. Best during an active abduction. Still saves your SOS, queues Emergency contacts, and prepares your location to share.</span></label>
         <button class="sosbig auto" onclick="sosAuto()"><span class="bigemoji">🔴</span><b>AUTOMATIC</b><small id="sosAutoSub">Alarm + prepare your live location to share — no typing</small></button>
         <button class="sosbig voice" onclick="sosVoice()"><span class="bigemoji">🎙️</span><b>HOLD &amp; SPEAK</b><small id="sosVoiceSub">Say what's happening — it's prepared to share when you go quiet</small></button>
-        <p class="note"><b>You must send it.</b> DeySafe saves a durable SOS, asks the operator room to alert the Safety Vault guardians YOU added, and prepares your SOS + location to share. Only YOU choose who to share with by tapping share. It does not auto-deliver to authorities and never auto-dispatches armed responders.</p>
-        <details class="rights" id="trustedWrap" open><summary>Safety Vault guardians</summary>
-          <p style="margin:6px 0 8px;color:var(--muted)">Guardian details live in the server Safety Vault, not localStorage. This phone only shows a redacted count so a stolen device does not expose your people.</p>
+        <p class="note"><b>You must send it.</b> DeySafe saves a durable SOS, asks the operator room to alert the Emergency contacts YOU added, and prepares your SOS + location to share. Only YOU choose who to share with by tapping share. It does not auto-deliver to authorities and never auto-dispatches armed responders.</p>
+        <details class="rights" id="trustedWrap" open><summary>Emergency contacts</summary>
+          <p style="margin:6px 0 8px;color:var(--muted)">Your contacts are kept safe on our server — never on this phone — so a stolen phone can’t expose your people. This phone only shows how many you’ve added.</p>
           <div id="tcList" style="margin-top:10px"></div>
-          <button class="btn sec" style="margin-top:8px" onclick="go('settings')">Open Safety Vault</button>
+          <button class="btn sec" style="margin-top:8px" onclick="go('settings')">Add emergency contacts</button>
         </details>
       </div>
       <div id="sosActive" style="display:none"></div>
@@ -418,17 +418,15 @@ Check hotel address</textarea>
           <input id="firstNameInput" placeholder="First name" />
           <select id="langSelect" onchange="onLangChange()"><option value="en">English</option><option value="yo">Yorùbá</option><option value="ig">Igbo</option><option value="ha">Hausa</option><option value="pcm">Pidgin</option></select>
         </div>
-        <button class="btn sec" onclick="signupStart()">Send OTP</button>
-        <div class="srow">
-          <input id="otpRef" placeholder="OTP ref" />
-          <input id="otpCode" inputmode="numeric" placeholder="6 digit OTP" />
-        </div>
+        <button class="btn sec" onclick="signupStart()">📩 Text me a code</button>
+        <input id="otpRef" type="hidden" />
+        <input id="otpCode" inputmode="numeric" placeholder="Enter the 6-digit code we texted you" />
         <button class="btn" onclick="signupVerify()">Verify phone</button>
         <div id="acctStatus" class="kv"></div>
       </div>
       <div class="case">
         <div class="r1"><b>Invite people to DeySafe</b></div>
-        <p class="note" style="text-align:left;margin:8px 2px">The more people on DeySafe, the faster a verified warning spreads. This shares the app only — it is separate from your private Safety Vault.</p>
+        <p class="note" style="text-align:left;margin:8px 2px">The more people on DeySafe, the faster a verified warning spreads. This shares the app only — it is separate from your private emergency contacts.</p>
         <button class="btn sec" onclick="inviteToApp()">📣 Share DeySafe</button>
       </div>
       <div class="case">
@@ -443,15 +441,15 @@ Check hotel address</textarea>
         <div id="pinStatus" class="kv"></div>
       </div>
       <div class="case">
-        <div class="r1"><b>Safety Vault guardians</b><span class="badge" id="guardianBadge">0</span></div>
-        <p class="note" style="text-align:left;margin:8px 2px">Guardian names and numbers stay out of localStorage. Add them here after phone verification.</p>
-        <input id="vaultName" placeholder="Guardian name" />
+        <div class="r1"><b>Emergency contacts</b><span class="badge" id="guardianBadge">0</span></div>
+        <p class="note" style="text-align:left;margin:8px 2px">These are the people we alert in an emergency. Their details stay on our server, not this phone. Add them after you verify your phone.</p>
+        <input id="vaultName" placeholder="Contact name" />
         <div class="srow">
           <select id="vaultChannel" style="flex:0 0 130px"><option value="sms">SMS</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option></select>
           <input id="vaultAddress" placeholder="+2348012345678" inputmode="tel" />
         </div>
-        <input id="vaultSafetyPin" type="password" inputmode="numeric" placeholder="Safety PIN required after first guardian" />
-        <button class="btn sec" onclick="addVaultGuardian()">Add guardian</button>
+        <input id="vaultSafetyPin" type="password" inputmode="numeric" placeholder="Safety PIN (needed after your first contact)" />
+        <button class="btn sec" onclick="addVaultGuardian()">Add contact</button>
         <div id="guardianList" class="kv"></div>
       </div>
       <div class="case">
@@ -523,11 +521,11 @@ function sessionRequired(){
 }
 function hasSession(){return !!(SESSION_READY||SESSION_TOKEN||USER_PROFILE);}
 const I18N={
-  en:{verify_phone:'Verify your phone in Profile first',profile_locked:'Verify your phone to unlock Safety Vault, PINs, push alerts, and MySafe.',phone_verified:'Phone verified',readiness_saved:'Readiness saved',safety_phrase:'Know before you waka.',sos_alarm:'Alarm + prepare your live location to share - no typing',sos_silent:'No alarm - quietly save SOS + prepare your location to share',sos_voice:'Say what is happening - it is prepared to share when you go quiet',sos_voice_silent:'Say what is happening - saved quietly, no alarm, prepared to share',no_guardians:'No Safety Vault guardians configured yet. Open Profile to verify your phone and add at least one guardian.'},
-  pcm:{verify_phone:'Verify your phone for Profile first',profile_locked:'Verify your phone to open Safety Vault, PINs, push alerts, and MySafe.',phone_verified:'Phone don verify',readiness_saved:'Readiness don save',safety_phrase:'Know before you waka.',sos_alarm:'Alarm plus live location ready - no need type',sos_silent:'No alarm - save SOS quietly and ready your location to share',sos_voice:'Talk wetin dey happen - e go ready to share when you quiet',sos_voice_silent:'Talk wetin dey happen - saved quietly, no alarm',no_guardians:'No Safety Vault guardian yet. Open Profile, verify phone, add at least one guardian.'},
-  ha:{verify_phone:'Tabbatar da lambarka a Profile tukuna',profile_locked:'Tabbatar da waya don bude Safety Vault, PINs, sanarwa, da MySafe.',phone_verified:'An tabbatar da waya',readiness_saved:'An ajiye shirin tsaro',safety_phrase:'Ka sani kafin tafiya.',sos_alarm:'Kara da shirya wurin da kake - babu rubutu',sos_silent:'Babu kara - SOS zai ajiye a hankali kuma wurinka ya shirya rabawa',sos_voice:'Fadi abin da ke faruwa - zai shirya rabawa idan ka yi shiru',sos_voice_silent:'Fadi abin da ke faruwa - an ajiye a hankali, babu kara',no_guardians:'Babu guardian a Safety Vault. Bude Profile, tabbatar da waya, kara guardian akalla daya.'},
-  yo:{verify_phone:'Je ka fi idi foonu re mule ni Profile tele',profile_locked:'Fi idi foonu re mule lati si Safety Vault, PIN, itaniji, ati MySafe.',phone_verified:'Foonu ti je fidi mule',readiness_saved:'A ti fi imurasilẹ pamọ',safety_phrase:'Mo ewu tele ki o to rin.',sos_alarm:'Agogo itaniji ati ipo re setan - ko si typing',sos_silent:'Ko si agogo - SOS wa ni ipalemo laiparuwo, ipo re setan fun pinpin',sos_voice:'So ohun ti n sele - yoo setan fun pinpin ti o ba dakẹ',sos_voice_silent:'So ohun ti n sele - a fi pamọ laiparuwo, ko si agogo',no_guardians:'Ko si guardian ninu Safety Vault. Si Profile, fi foonu mule, fi guardian kun.'},
-  ig:{verify_phone:'Kwenye ekwentị gị na Profile mbụ',profile_locked:'Kwenye ekwentị iji mepee Safety Vault, PIN, alerts, na MySafe.',phone_verified:'Ekwentị akwadoro',readiness_saved:'Echekwara njikere nchekwa',safety_phrase:'Mara tupu i gawa.',sos_alarm:'Mkpu na ebe ị nọ dị njikere - enweghị typing',sos_silent:'Enweghị mkpu - chekwa SOS nwayọọ ma kwadebe ebe ị nọ ịkekọrịta',sos_voice:'Kwuo ihe na-eme - ọ ga-adị njikere ikekọrịta mgbe ị dara jụụ',sos_voice_silent:'Kwuo ihe na-eme - echekwara nwayọọ, enweghị mkpu',no_guardians:'Enweghị guardian na Safety Vault. Mepee Profile, kwenye ekwentị, tinye guardian otu ma ọ bụ karịa.'}
+  en:{verify_phone:'Verify your phone in Profile first',profile_locked:'Verify your phone to unlock Emergency contacts, PINs, push alerts, and MySafe.',phone_verified:'Phone verified',readiness_saved:'Readiness saved',safety_phrase:'Know before you waka.',sos_alarm:'Alarm + prepare your live location to share - no typing',sos_silent:'No alarm - quietly save SOS + prepare your location to share',sos_voice:'Say what is happening - it is prepared to share when you go quiet',sos_voice_silent:'Say what is happening - saved quietly, no alarm, prepared to share',no_guardians:'No Emergency contacts configured yet. Open Profile to verify your phone and add at least one guardian.'},
+  pcm:{verify_phone:'Verify your phone for Profile first',profile_locked:'Verify your phone to open Emergency contacts, PINs, push alerts, and MySafe.',phone_verified:'Phone don verify',readiness_saved:'Readiness don save',safety_phrase:'Know before you waka.',sos_alarm:'Alarm plus live location ready - no need type',sos_silent:'No alarm - save SOS quietly and ready your location to share',sos_voice:'Talk wetin dey happen - e go ready to share when you quiet',sos_voice_silent:'Talk wetin dey happen - saved quietly, no alarm',no_guardians:'No Emergency contacts guardian yet. Open Profile, verify phone, add at least one guardian.'},
+  ha:{verify_phone:'Tabbatar da lambarka a Profile tukuna',profile_locked:'Tabbatar da waya don bude Emergency contacts, PINs, sanarwa, da MySafe.',phone_verified:'An tabbatar da waya',readiness_saved:'An ajiye shirin tsaro',safety_phrase:'Ka sani kafin tafiya.',sos_alarm:'Kara da shirya wurin da kake - babu rubutu',sos_silent:'Babu kara - SOS zai ajiye a hankali kuma wurinka ya shirya rabawa',sos_voice:'Fadi abin da ke faruwa - zai shirya rabawa idan ka yi shiru',sos_voice_silent:'Fadi abin da ke faruwa - an ajiye a hankali, babu kara',no_guardians:'Babu guardian a Emergency contacts. Bude Profile, tabbatar da waya, kara guardian akalla daya.'},
+  yo:{verify_phone:'Je ka fi idi foonu re mule ni Profile tele',profile_locked:'Fi idi foonu re mule lati si Emergency contacts, PIN, itaniji, ati MySafe.',phone_verified:'Foonu ti je fidi mule',readiness_saved:'A ti fi imurasilẹ pamọ',safety_phrase:'Mo ewu tele ki o to rin.',sos_alarm:'Agogo itaniji ati ipo re setan - ko si typing',sos_silent:'Ko si agogo - SOS wa ni ipalemo laiparuwo, ipo re setan fun pinpin',sos_voice:'So ohun ti n sele - yoo setan fun pinpin ti o ba dakẹ',sos_voice_silent:'So ohun ti n sele - a fi pamọ laiparuwo, ko si agogo',no_guardians:'Ko si guardian ninu Emergency contacts. Si Profile, fi foonu mule, fi guardian kun.'},
+  ig:{verify_phone:'Kwenye ekwentị gị na Profile mbụ',profile_locked:'Kwenye ekwentị iji mepee Emergency contacts, PIN, alerts, na MySafe.',phone_verified:'Ekwentị akwadoro',readiness_saved:'Echekwara njikere nchekwa',safety_phrase:'Mara tupu i gawa.',sos_alarm:'Mkpu na ebe ị nọ dị njikere - enweghị typing',sos_silent:'Enweghị mkpu - chekwa SOS nwayọọ ma kwadebe ebe ị nọ ịkekọrịta',sos_voice:'Kwuo ihe na-eme - ọ ga-adị njikere ikekọrịta mgbe ị dara jụụ',sos_voice_silent:'Kwuo ihe na-eme - echekwara nwayọọ, enweghị mkpu',no_guardians:'Enweghị guardian na Emergency contacts. Mepee Profile, kwenye ekwentị, tinye guardian otu ma ọ bụ karịa.'}
 };
 function langCode(){return ((USER_PROFILE&&USER_PROFILE.language)||($('#langSelect')&&$('#langSelect').value)||'en').toLowerCase();}
 function tx(k){var l=langCode();return (I18N[l]&&I18N[l][k])||I18N.en[k]||k;}
@@ -561,9 +559,11 @@ function initMap(){
     var b1=L.DomUtil.create('button','',d);b1.innerHTML='📍';b1.title='Center on my location (private)';
     var b2=L.DomUtil.create('button','',d);b2.innerHTML='⤢';b2.title='Reset map view';
     var b3=L.DomUtil.create('button','',d);b3.innerHTML='🔥';b3.title='Toggle danger heatmap';
+    var b4=L.DomUtil.create('button','',d);b4.innerHTML='🧹';b4.title='Clear the map (route + overlays) and start fresh';
     L.DomEvent.on(b1,'click',function(e){L.DomEvent.stop(e);locateMe();});
     L.DomEvent.on(b2,'click',function(e){L.DomEvent.stop(e);resetView();});
     L.DomEvent.on(b3,'click',function(e){L.DomEvent.stop(e);toggleHeat();});
+    L.DomEvent.on(b4,'click',function(e){L.DomEvent.stop(e);clearMap();});
     L.DomEvent.disableClickPropagation(d);return d;}});
   map.addControl(new Ctrl());
   map.on('click',onMapTap);
@@ -603,6 +603,19 @@ function dirToBearing(t){t=(t||'').toLowerCase();var m=[['north east',45],['nort
 function compass(b){var d=['north','north-east','east','south-east','south','south-west','west','north-west'];return d[Math.round(((b%360)/45))%8];}
 // Strava-style danger heatmap: graduated overlapping circles -> hotter where incidents cluster.
 function toggleHeat(){HEAT_ON=!HEAT_ON;heatLayer.clearLayers();if(HEAT_ON){INCS.forEach(function(i){var lv=LV[i.status]||'YELLOW';for(var k=0;k<3;k++){L.circle([i.lat,i.lng],{radius:(30-k*9)*1000,stroke:false,fillColor:COL[lv],fillOpacity:.06}).addTo(heatLayer);}});toast('🔥 Danger heatmap ON');}else toast('Heatmap off');}
+// Clear the user's temporary map layers (route, area overlay, triangulation, heatmap)
+// and reset the view. Real safety data — nearby incidents + missing-person markers —
+// stays, since that is the whole point of the map.
+function clearMap(){
+  try{routeLayer&&routeLayer.clearLayers();}catch(e){}
+  try{areaLayer&&areaLayer.clearLayers();}catch(e){}
+  try{triLayer&&triLayer.clearLayers();}catch(e){}
+  try{heatLayer&&heatLayer.clearLayers();}catch(e){}HEAT_ON=false;
+  var ar=$('#areaReport');if(ar)ar.innerHTML='';
+  var rb=$('#routeBox');if(rb)rb.innerHTML='';
+  try{resetView();}catch(e){}
+  toast('🧹 Map cleared — nearby alerts and missing cases stay');
+}
 // Venn-diagram triangulation: each source (last-seen point + every sighting) is a
 // reachability RING — how far the person could have moved since. They must be in
 // the INTERSECTION of all rings; the densest overlap = most-likely zone.
@@ -760,7 +773,7 @@ function updateOutboxBadge(){
 function timeAgo(iso){var t=Date.parse(iso);if(isNaN(t))return '';var m=Math.floor((Date.now()-t)/60000);if(m<1)return 'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
 function renderChannels(){
   var area=$('#areaSelect').value.trim();
-  $('#homeList').innerHTML='<div class="ai-intake" style="margin-top:8px"><label class="f" style="margin-top:0">📣 Post to your area channel'+(area?(' ('+esc(area)+')'):'')+'</label>'
+  $('#homeList').innerHTML='<p class="note" style="margin:4px 2px 10px;text-align:left">Share quick safety updates with people near you — “checkpoint clear”, “all calm on the road”, “avoid this junction”. Anyone in your area sees them. No names needed.</p>'+'<div class="ai-intake" style="margin-top:8px"><label class="f" style="margin-top:0">📣 Post an update to your area'+(area?(' ('+esc(area)+')'):'')+'</label>'
     +'<textarea id="chMsg" maxlength="280" placeholder="e.g. Checkpoint clear on the Kaduna road, all calm"></textarea>'
     +'<div class="chips" style="grid-template-columns:1fr 1fr;margin:8px 0 0"><button class="btn sec" onclick="nlMic(\'chMsg\')">🎤 Speak</button><button class="btn" onclick="postChannel()">Post</button></div></div>'
     +'<div id="chFeed"><p class="note">Loading channel…</p></div>';
@@ -1376,12 +1389,13 @@ async function signupStart(){
   if(!phone){$('#phoneInput').focus();return;}
   ensureDeviceId();
   var r=await fetch('/api/signup/start',{method:'POST',headers:authHeaders(),body:JSON.stringify({phone:phone,device_id:DEVICE_ID})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
-  var st=$('#acctStatus');if(st)st.innerHTML=r.ok?('OTP sent to '+esc(r.phone_redacted||phone)+(r.dev_otp?('<div>Demo OTP: <b>'+esc(r.dev_otp)+'</b></div>'):'') ):'Could not send OTP: '+esc(r.error||'failed');
+  var st=$('#acctStatus');if(st)st.innerHTML=r.ok?('📩 We texted a 6-digit code to '+esc(r.phone_redacted||phone)+(r.dev_otp?('<div>Test code: <b>'+esc(r.dev_otp)+'</b></div>'):'') ):'Could not send the code: '+esc(r.error||'failed');
   if(r.ok&&$('#otpRef'))$('#otpRef').value=r.otp_ref||'';
 }
 async function signupVerify(){
   var ref=($('#otpRef').value||'').trim(),code=($('#otpCode').value||'').trim();
-  if(!ref||!code){toast('Enter OTP ref and code');return;}
+  if(!ref){toast('Tap "Text me a code" first');return;}
+  if(!code){toast('Enter the 6-digit code we texted you');return;}
   var r=await fetch('/api/signup/verify',{method:'POST',headers:authHeaders(),body:JSON.stringify({otp_ref:ref,code:code,first_name:($('#firstNameInput').value||'').trim(),language:($('#langSelect').value||'en'),device_id:ensureDeviceId()})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
   if(!r.ok){toast(r.error||'OTP failed');return;}
   setSession(r.session_token||'',r.device_id||DEVICE_ID);USER_PROFILE=r.user||null;GUARDIAN_COUNT=Number(r.guardian_count||0);GUARDIAN_POLICY_ID=(USER_PROFILE&&USER_PROFILE.guardian_policy_id)||'';
@@ -1455,7 +1469,7 @@ function renderGuardians(list){
   if(!hasSession()){el.innerHTML='Verify your phone first.';return;}
   el.innerHTML=(list&&list.length)?list.map(function(g){var gid=String(g.guardian_uuid||'').replace(/[^A-Za-z0-9_:-]/g,'');
     var action=g.verified?'<span class="tcch">verified</span>':'<button class="spk" data-guardian="'+gid+'" onclick="verifyVaultGuardian(this.dataset.guardian)" title="Verify guardian">verify</button>';
-    return '<div class="tcitem"><span class="tcch">'+esc(g.channel||'sms')+'</span><span><b>'+esc(g.name||'Guardian')+'</b> '+esc(g.address_redacted||'')+'</span>'+action+'</div>';}).join(''):'No guardians yet.';
+    return '<div class="tcitem"><span class="tcch">'+esc(g.channel||'sms')+'</span><span><b>'+esc(g.name||'Contact')+'</b> '+esc(g.address_redacted||'')+'</span>'+action+'</div>';}).join(''):'No contacts yet.';
 }
 async function loadGuardians(){
   if(!hasSession()){renderGuardians([]);return;}
@@ -1466,10 +1480,10 @@ async function addVaultGuardian(){
   if(sessionRequired())return;
   var name=($('#vaultName').value||'').trim(),address=($('#vaultAddress').value||'').trim(),pin=($('#vaultSafetyPin').value||'').trim();
   if(!address){$('#vaultAddress').focus();return;}
-  var r=await apiJson('/api/vault/guardians',{name:name||'Guardian',channel:$('#vaultChannel').value||'sms',address:address,safety_pin:pin,pin:pin});
+  var r=await apiJson('/api/vault/guardians',{name:name||'Contact',channel:$('#vaultChannel').value||'sms',address:address,safety_pin:pin,pin:pin});
   if(!r.ok){toast(r.error||'Could not add guardian');return;}
   ['#vaultName','#vaultAddress','#vaultSafetyPin'].forEach(function(s){var el=$(s);if(el)el.value='';});
-  GUARDIAN_COUNT=Number(r.guardian_count||r.count||GUARDIAN_COUNT+1);GUARDIAN_POLICY_ID=r.guardian_policy_id||GUARDIAN_POLICY_ID;toast(r.dev_verification_code?('Guardian saved. Demo verify code: '+r.dev_verification_code):'Guardian saved in Safety Vault');await loadGuardians();await loadReadiness();
+  GUARDIAN_COUNT=Number(r.guardian_count||r.count||GUARDIAN_COUNT+1);GUARDIAN_POLICY_ID=r.guardian_policy_id||GUARDIAN_POLICY_ID;toast(r.dev_verification_code?('Contact saved. Test verify code: '+r.dev_verification_code):'Contact saved');await loadGuardians();await loadReadiness();
 }
 async function verifyVaultGuardian(id){
   if(!id)return;
@@ -1599,7 +1613,7 @@ async function sendReport(){const d=$('#rDesc').value.trim();if(!d){$('#rDesc').
   if(r.ok){$('#rDesc').value='';if($('#rMedia'))$('#rMedia').value='';previewMediaMeta();loadData();loadLevel();}}
 // --- Emergency SOS: AUTOMATIC (alarm + share location) or HOLD & SPEAK (auto-send on dead air).
 // Either can run in SILENT mode (no alarm/flash). On activate we POST /api/sos to create a
-// DURABLE event (SOS-01), show its reference, ask the server to alert Safety Vault
+// DURABLE event (SOS-01), show its reference, ask the server to alert Emergency contacts
 // guardians (the server does the send in SIM/real — we never fake one), and poll the event's state.
 // Bright lines preserved: location is captured ON-DEVICE and only YOU share it; no auto-dispatch.
 let SOS_ON=false, sosWatch=null, sosSilence=null, sosCtx=null, sosBeepIv=null, sosMsg='';
@@ -1609,14 +1623,14 @@ function _beep(){try{if(!sosCtx)return;var o=sosCtx.createOscillator(),g=sosCtx.
 function startAlarm(){try{sosCtx=new (window.AudioContext||window.webkitAudioContext)();_beep();sosBeepIv=setInterval(_beep,650);}catch(e){}document.body.classList.add('sos-flash');}
 function stopAlarm(){if(sosBeepIv){clearInterval(sosBeepIv);sosBeepIv=null;}try{if(sosCtx)sosCtx.close();}catch(e){}sosCtx=null;document.body.classList.remove('sos-flash');}
 function sosLocationMsg(lat,lng,extra){var link='https://maps.google.com/?q='+lat.toFixed(5)+','+lng.toFixed(5);return '🆘 I NEED HELP'+(extra?(' — '+extra):'')+'. My location: '+link;}
-// ----- Safety Vault guardians (SOS-03). Guardian PII never lives in localStorage.
+// ----- Emergency contacts (SOS-03). Guardian PII never lives in localStorage.
 function tcLoad(){return Array.from({length:GUARDIAN_COUNT},function(){return {vault:true};});}
 function tcSave(){return;}
 function renderTrusted(){var el=$('#tcList');if(!el)return;
-  el.innerHTML=GUARDIAN_COUNT>0?'<div class="tcitem"><span class="tcch">vault</span><span><b>'+GUARDIAN_COUNT+' guardian'+(GUARDIAN_COUNT===1?'':'s')+'</b> configured in Safety Vault</span></div>'
+  el.innerHTML=GUARDIAN_COUNT>0?'<div class="tcitem"><span class="tcch">vault</span><span><b>'+GUARDIAN_COUNT+' guardian'+(GUARDIAN_COUNT===1?'':'s')+'</b> configured in Emergency contacts</span></div>'
     :'<p class="note" style="text-align:left;margin:4px 2px 0">'+esc(tx('no_guardians'))+'</p>';}
-async function addTrusted(){go('settings');toast('Add guardians in Safety Vault');}
-function removeTrusted(){go('settings');toast('Manage guardians in Safety Vault');}
+async function addTrusted(){go('settings');toast('Add guardians in Emergency contacts');}
+function removeTrusted(){go('settings');toast('Manage guardians in Emergency contacts');}
 function renderSosButtons(){SOS_SILENT=!!($('#sosSilentToggle')&&$('#sosSilentToggle').checked);
   var a=$('#sosAutoSub'),v=$('#sosVoiceSub');
   if(a)a.textContent=SOS_SILENT?tx('sos_silent'):tx('sos_alarm');
@@ -1650,9 +1664,9 @@ function renderSosStatus(status,contactState,online){
   // the worst failure mode.
   var hasCircle=false;try{hasCircle=(tcLoad()||[]).length>0;}catch(e){}
   var cs;
-  if(contactState){cs='Safety Vault: <b>'+esc(typeof contactState==='string'?contactState:'notified')+'</b>';}
-  else if(hasCircle){cs='Safety Vault: <b>guardian policy queued</b>';}
-  else{cs='<b style="color:var(--red,#d92d20)">No Safety Vault guardians set</b> - add guardians in Profile. Use the share button below now.';}
+  if(contactState){cs='Emergency contacts: <b>'+esc(typeof contactState==='string'?contactState:'notified')+'</b>';}
+  else if(hasCircle){cs='Emergency contacts: <b>queued</b>';}
+  else{cs='<b style="color:var(--red,#d92d20)">No Emergency contacts set</b> - add guardians in Profile. Use the share button below now.';}
   el.innerHTML=refHtml+'<div class="sosstate">Status: <b>'+esc(st)+'</b> · '+cs+'</div>';
 }
 function startSosPoll(){stopSosPoll();if(!SOS_REF&&!SOS_UUID)return;
