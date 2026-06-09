@@ -165,6 +165,26 @@
 <body>
 <div class="app">
   <div id="demoBanner" class="demobanner" style="display:none" role="alert">⚠ DEMO DATA — DO NOT USE FOR REAL SAFETY DECISIONS</div>
+  <div id="onboarding" style="display:none;position:fixed;inset:0;z-index:4000;background:linear-gradient(160deg,#0b1f3a,#143a6b);color:#fff;align-items:center;justify-content:center;padding:22px">
+    <div style="max-width:420px;width:100%;text-align:center">
+      <img src="/assets/brand/deysafe-icon-192.png" alt="DeySafe" style="width:84px;height:84px;border-radius:20px;box-shadow:0 8px 30px rgba(0,0,0,.4)"/>
+      <h1 style="margin:14px 0 2px;font-size:30px;letter-spacing:.5px">DeySafe</h1>
+      <p style="margin:0 0 14px;color:#bcd3f5;font-size:15px">Know before you waka.</p>
+      <p style="margin:0 0 16px;color:#dbe7fb;font-size:14px;line-height:1.5">Sign in with your phone to unlock SOS, Safety Vault guardians, saved places and verified alerts. Your number is stored hashed — never shown on this phone.</p>
+      <div id="obPhoneStep" style="display:flex;gap:8px">
+        <input id="obPhone" inputmode="tel" autocomplete="tel" placeholder="+234 80..." style="flex:1;min-width:0;padding:13px;border-radius:11px;border:none;font:inherit;font-size:16px"/>
+        <button onclick="obSendOtp()" style="flex:0 0 108px;padding:13px;border:none;border-radius:11px;background:#2f6df6;color:#fff;font:inherit;font-weight:700;cursor:pointer">Send code</button>
+      </div>
+      <div id="obOtpStep" style="display:none;margin-top:10px">
+        <div style="display:flex;gap:8px">
+          <input id="obOtp" inputmode="numeric" placeholder="6-digit code" style="flex:1;min-width:0;padding:13px;border-radius:11px;border:none;font:inherit;font-size:16px"/>
+          <button onclick="obVerify()" style="flex:0 0 108px;padding:13px;border:none;border-radius:11px;background:#1aa260;color:#fff;font:inherit;font-weight:700;cursor:pointer">Verify</button>
+        </div>
+      </div>
+      <div id="obMsg" style="margin-top:10px;font-size:13px;color:#ffd9d0;min-height:16px"></div>
+      <button onclick="obSkip()" style="margin-top:14px;background:none;border:none;color:#bcd3f5;font:inherit;font-size:14px;text-decoration:underline;cursor:pointer">Skip for now — report anonymously</button>
+    </div>
+  </div>
   <header class="top">
     <div class="logo"><img src="/assets/brand/deysafe-icon-192.png" alt="" /></div>
     <div class="brand"><b>DeySafe</b><span>Know before you waka</span></div>
@@ -1327,7 +1347,31 @@ async function signupVerify(){
 }
 // Prominent home-screen sign-in (same phone-OTP backend as Profile). Shown only when
 // there is no session, so people actually sign in and we collect a verified number.
-function renderSigninCTA(){var el=$('#signinCTA');if(el)el.style.display=hasSession()?'none':'block';}
+// #1: phone auth lives only in the one-time onboarding now — not as an inline prompt
+// on app pages. Keep the home CTA hidden; onboarding handles first run, Profile handles
+// later sign-in.
+function renderSigninCTA(){var el=$('#signinCTA');if(el)el.style.display='none';}
+var _obRef='';
+function obShow(){var el=$('#onboarding');if(el)el.style.display='flex';}
+function obDone(){try{localStorage.setItem('ds_onboarded','1');}catch(e){}var el=$('#onboarding');if(el)el.style.display='none';}
+function obSkip(){obDone();toast('You can sign in any time from Profile');}
+function maybeOnboard(){try{if(localStorage.getItem('ds_onboarded')==='1')return;}catch(e){}if(hasSession()){obDone();return;}obShow();}
+async function obSendOtp(){
+  var phone=($('#obPhone').value||'').trim();if(!phone){$('#obPhone').focus();return;}
+  ensureDeviceId();
+  var r=await fetch('/api/signup/start',{method:'POST',headers:authHeaders(),body:JSON.stringify({phone:phone,device_id:DEVICE_ID})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
+  var m=$('#obMsg');
+  if(r.ok){_obRef=r.otp_ref||'';$('#obPhoneStep').style.display='none';$('#obOtpStep').style.display='block';if($('#obOtp'))$('#obOtp').focus();
+    if(m)m.innerHTML='Code sent to '+esc(r.phone_redacted||phone)+(r.dev_otp?(' · demo code <b>'+esc(r.dev_otp)+'</b>'):'');}
+  else if(m){m.textContent='Could not send code: '+(r.error||'failed');}
+}
+async function obVerify(){
+  var code=($('#obOtp').value||'').trim();if(!_obRef||!code){toast('Enter the 6-digit code');return;}
+  var r=await fetch('/api/signup/verify',{method:'POST',headers:authHeaders(),body:JSON.stringify({otp_ref:_obRef,code:code,language:($('#langSelect')?$('#langSelect').value:'en'),device_id:ensureDeviceId()})}).then(function(x){return x.json();}).catch(function(){return {ok:false,error:'network'};});
+  if(!r.ok){var m=$('#obMsg');if(m)m.textContent=r.error||'Code failed';return;}
+  setSession(r.session_token||'',r.device_id||DEVICE_ID);USER_PROFILE=r.user||null;GUARDIAN_COUNT=Number(r.guardian_count||0);GUARDIAN_POLICY_ID=(USER_PROFILE&&USER_PROFILE.guardian_policy_id)||'';
+  obDone();toast('✓ Welcome to DeySafe');renderProfile();await loadMe();await loadMySafe();await loadReadiness();
+}
 var _ctaRef='';
 async function ctaSendOtp(){
   var phone=($('#ctaPhone').value||'').trim();
@@ -1658,7 +1702,7 @@ window.addEventListener('online',function(){updateOutboxBadge();toast('🌐 Back
 window.addEventListener('offline',function(){updateOutboxBadge();toast('📴 You are offline — reports will be saved on your device and sent later');});
 document.addEventListener('visibilitychange',function(){if(document.hidden&&SOS_ON)panicLock();});
 
-(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();renderSigninCTA();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetPlace','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
+(async function(){try{var _l=localStorage.getItem('ds_lang');if(_l){var _ls=$('#langSelect');if(_ls)_ls.value=_l;}}catch(e){}try{if(localStorage.getItem('ds_locked')==='1')panicLock();}catch(e){}initMap();startLiveLocation();checkDemo();renderTrusted();renderSosButtons();setupInstall();renderSigninCTA();maybeOnboard();await loadPlaces();['areaSelect','wFrom','wTo','rPlace','mPlace','sPlace','meetPlace','safePlace'].forEach(attachPlaceSuggest);await loadMe();await loadMySafe();await loadLevel();await loadData();await loadReadiness();
   restoreJourney();   // re-show Journey Guard presence if a trip is in progress
   if(!voiceSupported()){var mb=$('#micBtn');if(mb)mb.style.display='none';}
   updateOutboxBadge();outboxHydrate().then(flushOutbox); // recover from IndexedDB, then send anything saved on a previous offline visit
