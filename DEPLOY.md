@@ -42,7 +42,7 @@ Preferred (P0-15): mint a slow, salted PBKDF2 hash (`pbkdf2$<iters>$<salt>$<hash
 | `AT_USERNAME` + `AT_API_KEY` | Real SMS alerts through Africa's Talking. |
 | `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID` | WhatsApp Cloud API alerts. |
 | `ONESIGNAL_API_KEY` + `ONESIGNAL_APP_ID` | Push provider fan-out. |
-| `DEYSAFE_VAPID_PUBLIC_KEY` + `DEYSAFE_VAPID_PRIVATE_KEY` | Browser Web Push subscriptions and test receipts. |
+| `DEYSAFE_VAPID_PUBLIC_KEY` + `DEYSAFE_VAPID_PRIVATE_KEY` | **Real Web Push** to installed PWAs (iOS 16.4+, Android, desktop): the test alert AND verified-threat broadcasts. Needs the `pywebpush` dependency (already in requirements.txt). See the Web Push note below. |
 | `CLOUDFLARE_R2_*` | Real image/video evidence upload. Without it the app stores custody hash and file facts only. |
 | `CEREBRAS_API_KEY` or `GEMINI_API_KEY` or `GROQ_API_KEY` | AI incident extraction and intake. Without a key it uses rules. |
 | `DEYSAFE_ROAD_ROUTING_URL` | Dedicated/self-hosted OSRM for WakaSafe road routing at scale. |
@@ -50,6 +50,18 @@ Preferred (P0-15): mint a slow, salted PBKDF2 hash (`pbkdf2$<iters>$<salt>$<hash
 
 The app is safe by default: when a provider key is missing, it reports
 `unconfigured` and never fakes delivery, upload, or AI vision.
+
+**Web Push setup (iOS 16.4+ PWA).** Generate a VAPID keypair once:
+`pip install py-vapid && vapid --gen && vapid --applicationServerKey`. The printed
+applicationServerKey is `DEYSAFE_VAPID_PUBLIC_KEY`; the base64url private key (from
+`private_key.pem`) is `DEYSAFE_VAPID_PRIVATE_KEY`. Set both in Railway — `pywebpush`
+installs automatically from requirements.txt. Optional `DEYSAFE_VAPID_SUBJECT`
+(e.g. `mailto:safety@deysafe.app`). To verify on an iPhone: open the deployed URL in
+Safari → Share → **Add to Home Screen**, open the installed app, then Profile →
+**Enable alerts** → **Send test alert** → you should see a real notification → tap
+**I received the alert**. Web Push works ONLY in the installed PWA on iOS, never in a
+Safari tab. Without the keys or the dependency, push degrades to a local test
+notification and verified alerts still reach people by SMS + in-app.
 
 ## 3b. Optional Security Hardening
 

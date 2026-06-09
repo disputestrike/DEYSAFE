@@ -86,7 +86,7 @@ check("browser bundle does not store guardian PII in ds_trusted localStorage",
 check("Profile exposes phone session, Safety PINs, Safety Vault, push, and MySafe",
       all(x in app_html for x in (
           "/api/signup/start", "/api/profile/pins", "/api/vault/guardians",
-          "/api/push/config", "/api/mysafe/places", "Safety Vault guardians")))
+          "/api/push/config", "/api/mysafe/places", "Emergency contacts")))
 check("Browser session uses HttpOnly cookie path instead of persistent localStorage bearer",
       "Set-Cookie" in api_py and "ds_session" in api_py and "localStorage.setItem('ds_session'" not in app_html
       and "localStorage.removeItem('ds_session')" in app_html,

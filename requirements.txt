@@ -1,4 +1,11 @@
 # DeySafe / SHIELD — the app core is Python standard library only.
-# The one optional dependency below is used ONLY when DATABASE_URL is set
-# (Postgres production mode). With no DATABASE_URL the app runs on stdlib SQLite.
+# The optional dependencies below are feature-gated and the app runs without them.
+#
+# psycopg2-binary: used ONLY when DATABASE_URL is set (Postgres production mode).
+# With no DATABASE_URL the app runs on stdlib SQLite.
 psycopg2-binary>=2.9
+
+# pywebpush: real VAPID Web Push to installed PWAs (iOS 16.4+, Android, desktop).
+# Optional — without it, push degrades to a local test notification and real alerts
+# still go out over SMS + in-app. Needed only when the DEYSAFE_VAPID_* keys are set.
+pywebpush>=1.14

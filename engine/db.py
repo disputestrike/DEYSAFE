@@ -1689,6 +1689,17 @@ class DB:
                   (now_iso(), status, sub_uuid))
         return self._one("SELECT * FROM push_subscriptions WHERE sub_uuid=?", (sub_uuid,))
 
+    def get_push_subscription(self, sub_uuid):
+        return self._one("SELECT * FROM push_subscriptions WHERE sub_uuid=?", (sub_uuid,))
+
+    def all_push_subscriptions(self, limit=5000):
+        # Live subscriptions for an alert fan-out (expired ones are pruned out).
+        return self._all("SELECT * FROM push_subscriptions WHERE status != 'expired'"
+                         " ORDER BY id DESC LIMIT ?", (limit,))
+
+    def expire_push_subscription(self, sub_uuid):
+        self._run("UPDATE push_subscriptions SET status='expired' WHERE sub_uuid=?", (sub_uuid,))
+
     def add_mysafe_place(self, user_uuid, alias, place, lat=None, lng=None):
         pid = identity.new_id("place") if identity else self._uid()
         self._run("INSERT INTO mysafe_places (place_uuid, user_uuid, alias, place, lat, lng, created_at, active)"

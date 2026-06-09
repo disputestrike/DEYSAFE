@@ -130,7 +130,7 @@ check("Service worker caches the shell while keeping live API calls network-firs
       "SHELL_CACHE" in sw_js and "startsWith('/api/')" in sw_js and "caches.open" in sw_js,
       "service worker markers missing")
 check("WakaSafe auto-renders route on map and no longer asks to view route",
-      "Road route rendered automatically" in app_html and "View route on map" not in app_html
+      "Routes render on the map automatically" in app_html and "View route on map" not in app_html
       and "go('home')" in app_html,
       "auto-route markers missing")
 check("WakaSafe starts Journey Guard automatically instead of exposing manual trip buttons",
@@ -168,7 +168,7 @@ check("Readiness moved into settings instead of cluttering WakaSafe",
       "settings/readiness markers missing")
 check("Profile contains phone OTP, Safety PINs, and server Safety Vault",
       "/api/signup/start" in app_html and "/api/profile/pins" in app_html
-      and "/api/vault/guardians" in app_html and "Safety Vault guardians" in app_html
+      and "/api/vault/guardians" in app_html and "Emergency contacts" in app_html
       and "ds_trusted" not in app_html,
       "profile/vault markers missing or local guardian storage still present")
 check("Nigerian language selector drives critical safety phrases",

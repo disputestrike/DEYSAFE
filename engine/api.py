@@ -53,6 +53,7 @@ import safety      # Product-safety layer: Journey Guard/readiness/cases/evidenc
 import triangulate # TRI-01: server-side reachability-ring / Venn search-zone engine (FindMe)
 import identity    # Citizen phone OTP/session/PIN/Safety Vault helpers
 import safetytick  # Server-side stale-device/overdue journey checks
+import push        # PUSH-01: real VAPID Web Push sender (iOS 16.4+ PWA), optional pywebpush
 
 # --- Phase 0 config ----------------------------------------------------------
 # Operator auth (AUTH-01/06). Two ways to enable a locked posture, both fail-OPEN
@@ -2017,6 +2018,21 @@ class Handler(BaseHTTPRequestHandler):
                     inc["type"], inc["location_name"], inc["state"])})
             db.audit("system", "responder_task", "task={} incident={} state={}".format(
                 task_uuid, iuid, response.TASK_INITIAL))
+            # PUSH-01: also deliver the verified alert to installed PWAs via Web Push
+            # (best-effort; SMS + in-app already went out above and never depend on this).
+            try:
+                if push.available():
+                    pstats = push.broadcast(db.all_push_subscriptions(),
+                                            "DeySafe alert — %s" % (inc.get("location_name") or "your area"),
+                                            (alert or {}).get("guidance") or "Verified danger near you. Open DeySafe.",
+                                            url="/")
+                    for dead in pstats.get("expired_ids", []):
+                        db.expire_push_subscription(dead)
+                    if pstats.get("sent"):
+                        db.audit("system", "push_broadcast", "alert={} sent={} expired={}".format(
+                            iuid, pstats.get("sent"), pstats.get("expired")))
+            except Exception:
+                pass
         return alert, broadcast_summary, task_uuid
 
     def do_POST(self):
@@ -2167,13 +2183,32 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return self._json({"ok": False, "error": "session required"}, 401)
             sub_uuid = (data.get("subscription_id") or data.get("sub_uuid") or "").strip()
-            push_ready = bool(os.environ.get("DEYSAFE_VAPID_PRIVATE_KEY") and os.environ.get("DEYSAFE_VAPID_PUBLIC_KEY"))
             sim = os.environ.get("DEYSAFE_PUSH_SIM", "").strip() == "1"
+            # Attempt a REAL server->device Web Push when VAPID keys + pywebpush are present.
+            # This is what makes "Send test alert -> I received the alert" an actual round
+            # trip (not just the local notification the browser already showed).
+            row = db.get_push_subscription(sub_uuid) if sub_uuid else None
+            if row and push.available():
+                ok, status, err = push.send_one(row.get("subscription_json") or "{}",
+                                                 "DeySafe test alert",
+                                                 "If you can see this, DeySafe push alerts work on this phone.",
+                                                 url="/")
+                if status == push.ST_GONE:
+                    db.expire_push_subscription(sub_uuid)
+                else:
+                    db.mark_push_test(sub_uuid, confirmed=False, status=("sent" if ok else "send_failed"))
+                return self._json({"ok": True, "provider": "web_push", "sent": ok, "status": status,
+                                   "error": err, "note": "Confirm only AFTER you actually see the notification."})
+            # No real delivery path yet: the client already showed a LOCAL test notification.
+            push_ready = push.configured_keys()
             if sub_uuid:
                 db.mark_push_test(sub_uuid, confirmed=False, status=("sim_test_sent" if sim else ("provider_ready" if push_ready else "unconfigured")))
-            return self._json({"ok": True, "provider": "web_push", "configured": push_ready,
+            note = "Browser must confirm receipt after a visible notification."
+            if push_ready and not push.library_present():
+                note = "VAPID keys set but pywebpush is not installed — only a local notification was shown. Install pywebpush for real server push."
+            return self._json({"ok": True, "provider": "web_push", "configured": push_ready, "sent": False,
                                "sim": sim, "status": "sim_test_sent" if sim else ("provider_ready" if push_ready else "unconfigured"),
-                               "note": "Browser must confirm receipt after a visible notification."})
+                               "note": note})
 
         if u.path == "/api/push/confirm":
             user = self._field_user(db, data)
