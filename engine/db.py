@@ -272,6 +272,17 @@ CREATE TABLE IF NOT EXISTS media_quota (
 );
 """
 
+# delivery_acks (outcome measurement / MET): a RECIPIENT acknowledgement that a human
+# actually received an alert/SOS notification ("I got it"). This is the honest other
+# half of the reach loop: a provider accepting a message is NOT proof a person saw it.
+# Keyed by the delivery receipt's provider_ref (carried in the notification).
+DELIVERY_ACKS_SQLITE = """
+CREATE TABLE IF NOT EXISTS delivery_acks ( ref TEXT PRIMARY KEY, acked_at TEXT );
+"""
+DELIVERY_ACKS_PG = """
+CREATE TABLE IF NOT EXISTS delivery_acks ( ref TEXT PRIMARY KEY, acked_at TEXT );
+"""
+
 # Local (db.py-owned) extra tables, mirroring response.RESPONSE_TABLES shape.
 _EXTRA_TABLES = {
     "geo_cache": (GEO_CACHE_SQLITE, GEO_CACHE_PG),
@@ -279,6 +290,7 @@ _EXTRA_TABLES = {
     "subscribers": (SUBSCRIBERS_SQLITE, SUBSCRIBERS_PG),
     "pending_approvals": (PENDING_APPROVALS_SQLITE, PENDING_APPROVALS_PG),
     "media_quota": (MEDIA_QUOTA_SQLITE, MEDIA_QUOTA_PG),
+    "delivery_acks": (DELIVERY_ACKS_SQLITE, DELIVERY_ACKS_PG),
 }
 
 # Phase 4: SafeMeet tables from safety module
@@ -1246,6 +1258,24 @@ class DB:
 
     def recent_deliveries(self, limit=200):
         return self._all("SELECT * FROM deliveries ORDER BY id DESC LIMIT %d" % int(limit))
+
+    def ack_delivery(self, ref):
+        """A recipient confirms they actually received the notification (provider_ref =
+        the receipt id in the message). Idempotent; only acks a ref that maps to a real
+        delivery receipt, so a random ref can't inflate the reach number. True if acked."""
+        ref = (ref or "").strip()
+        if not ref:
+            return False
+        if self._one("SELECT ref FROM delivery_acks WHERE ref=?", (ref,)):
+            return True
+        if not self._one("SELECT id FROM deliveries WHERE provider_ref=?", (ref,)):
+            return False
+        self._insert("INSERT INTO delivery_acks (ref, acked_at) VALUES (?,?)", (ref, now_iso()))
+        return True
+
+    def delivery_ack_count(self):
+        r = self._one("SELECT COUNT(*) AS c FROM delivery_acks")
+        return (r["c"] if r else 0)
 
     def deliveries_for_alert(self, alert_key, limit=200):
         return self._all("SELECT * FROM deliveries WHERE alert_key=? ORDER BY id DESC LIMIT %d"

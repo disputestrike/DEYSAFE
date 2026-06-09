@@ -369,14 +369,18 @@ def _cases(db):
 
 # --- deliveries --------------------------------------------------------------
 def _deliveries(db):
-    """{total, real, sim}. Distinguishes SIM-mode receipts from real sends so a
-    simulated delivery is never counted as a real one (mirrors broadcast.py)."""
+    """{total, real, sim, acknowledged, recipient_ack_rate}. Distinguishes SIM-mode
+    receipts from real sends (mirrors broadcast.py), AND counts how many were
+    acknowledged by a recipient ("a human actually got it") — the honest reach signal,
+    since a provider accepting a message does not prove a person received it."""
     total = _count(db, "deliveries")
     if total is None:
-        return {"total": None, "real": None, "sim": None}
-    sim = _count(db, "deliveries", "sim = 1")
-    sim = sim or 0
-    return {"total": total, "real": total - sim, "sim": sim}
+        return {"total": None, "real": None, "sim": None,
+                "acknowledged": None, "recipient_ack_rate": None}
+    sim = _count(db, "deliveries", "sim = 1") or 0
+    acked = _count(db, "delivery_acks") or 0
+    return {"total": total, "real": total - sim, "sim": sim,
+            "acknowledged": acked, "recipient_ack_rate": _rate(acked, total)}
 
 
 def _north_star(db, fp, resp):
@@ -429,6 +433,7 @@ def compute(db):
         "cases_resolved": cases["resolved"],
         # last mile
         "deliveries": deliv["total"],
+        "recipient_ack_rate": deliv["recipient_ack_rate"],   # did a human actually get it
     }
     headline["detail"] = {
         "false_positive": fp,

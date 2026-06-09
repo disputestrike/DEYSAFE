@@ -2910,6 +2910,21 @@ class Handler(BaseHTTPRequestHandler):
             db.audit("api", "unsubscribe", "channel={} matched={}".format(channel, bool(matched)))
             return self._json({"ok": True, "unsubscribed": bool(matched)})
 
+        if u.path == "/api/ack":
+            # Outcome measurement: a RECIPIENT confirms they actually received the alert/
+            # SOS notification ("I got it"). The notification carries the delivery receipt
+            # ref; this is the honest reach signal (provider-accepted != human-received),
+            # distinct from the operator/responder ack. Public + rate-limited; only a ref
+            # that maps to a real receipt can ack, so reach numbers can't be inflated.
+            if not self._rate_ok("/api/ack", 60):
+                return self._json({"ok": False, "error": "rate limited"}, 429)
+            ref = (data.get("ref") or data.get("provider_ref") or data.get("id") or "").strip()
+            try:
+                ok = db.ack_delivery(ref)
+            except Exception:
+                ok = False
+            return self._json({"ok": True, "acknowledged": bool(ok)})
+
         if u.path == "/api/erasure":
             # NDPA P2-02: subject-access erasure ("right to be forgotten"). Destructive,
             # so it requires an explicit confirm=ERASE. Two paths:
