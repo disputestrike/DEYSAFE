@@ -169,6 +169,7 @@
     <div class="logo"><img src="/assets/brand/deysafe-icon-192.png" alt="" /></div>
     <div class="brand"><b>DeySafe</b><span>Know before you waka</span></div>
     <div class="chip" id="chip">—</div>
+    <button id="watchBtn" class="installbtn" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me" style="background:#fdecef;border-color:#f3c2cd;color:#b42318;font-weight:800">🛡 Warn me</button>
     <button id="settingsBtn" class="installbtn" onclick="go('settings')" title="Profile" aria-label="Profile">Profile</button>
     <button id="lockBtn" class="installbtn lockbtn" onclick="panicLock()" title="Privacy lock" aria-label="Privacy lock">Lock</button>
     <button id="installBtn" class="installbtn" style="display:none" onclick="installApp()">Install</button>
@@ -462,11 +463,10 @@ Check hotel address</textarea>
   <nav>
     <button class="active" data-v="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 20l-5-2V6l5 2 6-2 5 2v12l-5-2-6 2zM9 8v12M15 6v12"/></svg>Map</button>
     <button data-v="waka"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19l8-14 8 14M9 19l3-5 3 5"/></svg>WakaSafe</button>
+    <button data-v="meet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l6 2.2v5.2c0 3.9-2.4 6.8-6 8.6-3.6-1.8-6-4.7-6-8.6V5.2z"/><circle cx="9" cy="10" r="1.7"/><circle cx="15" cy="10" r="1.7"/><path d="M8 15c.8-1.2 1.9-1.8 4-1.8s3.2.6 4 1.8"/></svg>SafeMeet</button>
     <button data-v="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Report</button>
     <button data-v="sos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg>SOS</button>
-    <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>FindMe</button>
-    <button id="watchBtn" class="watchnav" onclick="toggleWatch()" title="Warn me of danger near me" aria-label="Warn me of danger near me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5V11c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V5.5z"/></svg>Warn me</button>
-    <button data-v="meet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l6 2.2v5.2c0 3.9-2.4 6.8-6 8.6-3.6-1.8-6-4.7-6-8.6V5.2z"/><circle cx="9" cy="10" r="1.7"/><circle cx="15" cy="10" r="1.7"/><path d="M8 15c.8-1.2 1.9-1.8 4-1.8s3.2.6 4 1.8"/></svg>Safe Meet</button>
+    <button data-v="findme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Find Me</button>
   </nav>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
